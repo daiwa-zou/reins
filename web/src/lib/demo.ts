@@ -9,15 +9,13 @@ export async function startDemo(force = false) {
   const s = useStore.getState();
   const existing = s.runs.find((r) => r.engine === "replay");
   if (existing && !force) {
-    s.selectRun(existing.id);
-    s.setTab("stage");
+    s.selectRun(existing.id, { view: "activity" });
     if (["completed", "failed", "cancelled"].includes(existing.status)) s.toastMsg("Showing the recorded demo you already have. Delete it from the list to watch it play again.");
     return;
   }
   try {
     const cfg = await api.demo();
-    s.selectRun(cfg.id);
-    s.setTab("stage");
+    s.selectRun(cfg.id, { view: "activity" });
   } catch (e) {
     s.toastMsg((e as Error).message, "error");
   }

@@ -1,23 +1,26 @@
 import React, { useState } from "react";
+import { ArrowDown, Brain, ChevronDown, ChevronRight, Eraser, ExternalLink, GitCommitHorizontal, Hand, Minimize2, RefreshCw, Wrench } from "lucide-react";
 import type { FeedItem, RunModel, ToolCall } from "../state/derive";
 import { PHASE_LABEL, PHASE_ORDER, isLive } from "../state/derive";
+import { groupCalls, summarizeNames } from "../state/feedGroups";
 import { useStore } from "../state/store";
 import { Badge, Collapsible, Pre, RoleChip, useAutoScroll } from "../components/ui";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { api } from "../lib/api";
 import { clock, duration, money, tokens } from "../lib/format";
-import type { Phase } from "@shared/types";
+import type { Phase, RoleId } from "@shared/types";
 
 export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
   const runId = useStore((s) => s.selectedRunId)!;
   const toastMsg = useStore((s) => s.toastMsg);
+  const showThinking = useStore((s) => s.showThinking);
+  const setShowThinking = useStore((s) => s.setShowThinking);
   const [steer, setSteer] = useState("");
-  const [showThinking, setShowThinking] = useState(true);
   const scrubbing = useStore((s) => s.scrubSeq) !== null;
   const feedRef = useAutoScroll<HTMLDivElement>(model.lastSeq, !scrubbing);
   const liveRun = isLive(live.status);
-  const est = model.config?.engine === "claude-code";
   const [taskOpen, setTaskOpen] = useState(false);
+  const pending = (scrubbing ? model : live).pending;
 
   const sendSteer = async () => {
     const text = steer.trim();
@@ -29,44 +32,87 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
       toastMsg((e as Error).message, "error");
     }
   };
+  const jumpToApproval = () => {
+    const el = document.getElementById(`approval-${pending[0]?.approvalId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.querySelector<HTMLElement>("textarea, input, button")?.focus({ preventScroll: true });
+  };
+
+  // Show the role chip only when the speaker changes, so a long builder phase is not a column of identical labels.
+  let lastRole: RoleId | null = null;
 
   return (
     <div className="h-full flex flex-col">
       <PhaseStepper model={model} />
+      {pending.length > 0 && (
+        <button
+          type="button"
+          data-needs-you-banner
+          onClick={jumpToApproval}
+          className="flex items-center gap-2 px-4 py-2 text-left border-b fade-in shrink-0"
+          style={{ background: "var(--warn-soft)", color: "var(--warn)", borderColor: "color-mix(in srgb, var(--warn) 35%, transparent)" }}
+        >
+          <Hand size={15} aria-hidden className="pulse" />
+          <span className="font-semibold">Needs you</span>
+          <span className="truncate min-w-0" style={{ color: "var(--fg)" }}>
+            {pending[0].title}
+            {pending.length > 1 ? ` (+${pending.length - 1} more)` : ""}
+          </span>
+          <span className="flex-1" />
+          <span className="text-small font-medium shrink-0 inline-flex items-center gap-1">
+            Review <ArrowDown size={13} aria-hidden />
+          </span>
+        </button>
+      )}
       <div ref={feedRef} className="flex-1 overflow-auto px-4 py-3 relative">
         {feedRef.behind && liveRun && (
           <button className="btn btn-primary btn-sm sticky top-0 left-1/2 -translate-x-1/2 z-10 fade-in" onClick={feedRef.jump}>
-            New activity ↓
+            New activity <ArrowDown size={13} aria-hidden />
           </button>
         )}
         <div className="max-w-3xl mx-auto flex flex-col gap-2">
           {model.config && (
-            <div className="card p-3.5 mb-1">
-              <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1">Task</div>
-              <div className={`whitespace-pre-wrap leading-relaxed ${taskOpen ? "" : "line-clamp-4"}`}>{model.config.task}</div>
-              {model.config.task.length > 280 && (
-                <button className="btn btn-ghost btn-sm mt-1" onClick={() => setTaskOpen(!taskOpen)}>
+            <div className="mb-1 px-1">
+              <div className="section-label mb-1">Task</div>
+              <div className={`whitespace-pre-wrap leading-relaxed ${taskOpen ? "" : "line-clamp-3"}`}>{model.config.task}</div>
+              {model.config.task.length > 220 && (
+                <button className="btn btn-ghost btn-sm mt-1 -ml-2" onClick={() => setTaskOpen(!taskOpen)}>
                   {taskOpen ? "Show less" : "Show all"}
                 </button>
               )}
             </div>
           )}
           {model.feed.length === 0 && <div className="muted text-center py-10">Waiting for the first event…</div>}
-          {model.feed.map((item) => (
-            <FeedRow key={item.seq} item={item} model={model} showThinking={showThinking} />
+          {model.feed.map((item) => {
+            let showRole = false;
+            if (item.kind === "turn") {
+              showRole = item.role !== lastRole;
+              lastRole = item.role;
+            } else if (item.kind === "phase") lastRole = null;
+            return <FeedRow key={item.seq} item={item} model={model} showThinking={showThinking} showRole={showRole} />;
+          })}
+          {pending.map((p) => (
+            <div key={p.approvalId} id={`approval-${p.approvalId}`} style={{ scrollMarginTop: 12 }}>
+              <ApprovalCard request={p} runId={runId} disabled={scrubbing} />
+            </div>
           ))}
-          {(scrubbing ? model : live).pending.map((p) => (
-            <ApprovalCard key={p.approvalId} request={p} runId={runId} disabled={scrubbing} />
-          ))}
-          {model.status === "paused" && <div className="text-center muted text-[12px] py-2">Paused. The agent will continue when you resume.</div>}
-          {!liveRun && model.config && <EndCard model={model} est={est} />}
+          {model.status === "paused" && <div className="text-center muted text-small py-2">Paused. The agent will continue when you resume.</div>}
+          {!liveRun && model.config && <EndCard model={model} />}
         </div>
       </div>
-      <div className="border-t line px-4 py-2.5" style={{ background: "var(--bg-elev)" }}>
+      <div className="border-t line px-4 py-2" style={{ background: "var(--bg-elev)" }}>
         <div className="max-w-3xl mx-auto flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-[12px] muted shrink-0 cursor-pointer">
-            <input type="checkbox" checked={showThinking} onChange={(e) => setShowThinking(e.target.checked)} /> thinking
-          </label>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-pressed={showThinking}
+            onClick={() => setShowThinking(!showThinking)}
+            aria-label={showThinking ? "Hide the model's thinking" : "Show the model's thinking"}
+            title={showThinking ? "Thinking shown (click to hide)" : "Thinking hidden (click to show)"}
+          >
+            <Brain size={15} aria-hidden />
+          </button>
           <input
             className="input"
             placeholder={liveRun ? "Leave the agent a note… (delivered before its next step)" : "This run is over. Start a new one to steer."}
@@ -86,24 +132,22 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
 }
 
 /** How the run ended, always, with a next step. A failed run that never said why is the worst outcome. */
-function EndCard({ model, est }: { model: RunModel; est: boolean }) {
+function EndCard({ model }: { model: RunModel }) {
   const status = model.status;
   const reason = model.summary?.summary ?? model.statusReason ?? model.errors[model.errors.length - 1] ?? "";
   const tone = status === "completed" ? "var(--ok)" : status === "cancelled" ? "var(--line-strong)" : "var(--bad)";
   const title = status === "completed" ? "Run complete" : status === "cancelled" ? "Run stopped" : status === "failed" ? "Run failed" : `Run ${status}`;
   const interrupted = /interrupted|restart/i.test(reason);
   const budget = /budget/i.test(reason);
-  const next = status === "completed" ? "Review the files and the evaluator's evidence on the Contract tab. Use Run again to see whether it passes consistently." : interrupted ? "Use Run again to retry; progress notes in .reins/ carry over to the next session." : budget ? "Raise the budget in New run (Run again keeps every other setting)." : status === "cancelled" ? "Files the agent already changed are still in the workspace; check the Files tab." : "Read the last turns above and the Guardrails tab; then use Run again, possibly with a component turned off on the Harness tab.";
-  const cost = model.summary?.costUsd ?? model.costUsd;
+  const next = status === "completed" ? "Review the changes and the evaluator's evidence on the Contract tab. Use Run again to see whether it passes consistently." : interrupted ? "Use Run again to retry; progress notes in .reins/ carry over to the next session." : budget ? "Raise the budget in New run (Run again keeps every other setting)." : status === "cancelled" ? "Files the agent already changed are still in the workspace; check Changes." : "Read the last turns above and Details › Guardrails; then use Run again, possibly with a component turned off in Harness.";
   const dur = model.summary?.durationMs ?? (model.startedTs && model.lastTs ? Date.parse(model.lastTs) - Date.parse(model.startedTs) : 0);
   return (
     <div className="card p-4 border-l-4 fade-in" style={{ borderLeftColor: tone }} role="status">
       <div className="font-semibold">{title}</div>
       {reason && <div className="mt-1 leading-relaxed">{reason}</div>}
-      <div className="muted text-[12.5px] mt-2">{next}</div>
-      <div className="muted text-[12px] mt-2 mono">
-        {est ? "est. " : ""}
-        {money(cost)} · {duration(dur)} · {model.calls.length} tool calls
+      <div className="muted text-small mt-2">{next}</div>
+      <div className="faint text-small mt-2 mono">
+        {duration(dur)} · {model.calls.length} tool calls
       </div>
     </div>
   );
@@ -116,44 +160,32 @@ function PhaseStepper({ model }: { model: RunModel }) {
   for (const p of model.phases) latestByPhase.set(p.phase, p);
   const rounds = model.phases.filter((p) => p.phase === "build").length;
   return (
-    <div className="flex items-center gap-1 px-4 py-2 border-b line overflow-x-auto" style={{ background: "var(--bg-elev)" }}>
+    <div className="flex items-center gap-1 px-4 py-1.5 border-b line overflow-x-auto text-small" aria-label="Phases">
       {enabled.map((p, i) => {
         const stat = latestByPhase.get(p);
         const state = !stat ? "todo" : stat.finishedTs ? "done" : "active";
         return (
           <React.Fragment key={p}>
-            {i > 0 && <span className="faint">›</span>}
-            <div
-              className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-[12.5px] ${state === "active" ? "sunk font-semibold" : state === "done" ? "" : "faint"}`}
-              title={stat?.summary}
-            >
+            {i > 0 && <ChevronRight size={12} className="faint shrink-0" aria-hidden />}
+            <div className={`flex items-center gap-2 px-2 py-0.5 rounded-lg ${state === "active" ? "sunk font-semibold" : state === "done" ? "muted" : "faint"}`} title={stat?.summary} aria-current={state === "active" ? "step" : undefined}>
               <span className={`w-2 h-2 rounded-full ${state === "done" ? "bg-[var(--ok)]" : state === "active" ? "bg-[var(--accent)] pulse" : "bg-[var(--line-strong)]"}`} />
               {PHASE_LABEL[p]}
               {p === "build" && rounds > 1 && <span className="badge badge-neutral">×{rounds}</span>}
-              {stat && <span className="muted mono text-[11px]">{money(stat.costUsd)}</span>}
             </div>
           </React.Fragment>
         );
       })}
-      {model.evaluations.length > 0 && (
-        <>
-          <span className="flex-1" />
-          <Badge tone={model.evaluations[model.evaluations.length - 1].verdict === "pass" ? "ok" : "bad"}>
-            last evaluation: {model.evaluations[model.evaluations.length - 1].verdict}
-          </Badge>
-        </>
-      )}
     </div>
   );
 }
 
-function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunModel; showThinking: boolean }) {
+function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; model: RunModel; showThinking: boolean; showRole: boolean }) {
   switch (item.kind) {
     case "phase":
       return (
         <div className="flex items-center gap-3 pt-4 pb-1 fade-in">
           <div className="h-px flex-1 line border-t" />
-          <div className="text-[11px] uppercase tracking-wider font-semibold muted">
+          <div className="section-label" style={{ color: "var(--fg-muted)" }}>
             {PHASE_LABEL[item.phase]}
             {item.round > 1 ? ` · round ${item.round}` : ""}
             {item.finished && <span className="normal-case tracking-normal font-normal"> — {item.finished.summary}</span>}
@@ -162,48 +194,24 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
         </div>
       );
     case "turn":
-      return <TurnRow item={item} showThinking={showThinking} />;
+      return <TurnRow item={item} showThinking={showThinking} showRole={showRole} />;
     case "approval":
       if (!item.resolved) return null; // the live ApprovalCard renders the pending one
       return (
-        <div className="card p-3 border-l-4 fade-in" style={{ borderLeftColor: item.resolved ? (item.resolved.decision === "approve" ? "var(--ok)" : "var(--bad)") : "var(--warn)" }}>
-          <div className="flex items-center gap-2 text-[12px]">
-            <Badge tone={item.resolved ? (item.resolved.decision === "approve" ? "ok" : "bad") : "warn"}>{item.resolved ? item.resolved.decision + "d" : "waiting for you"}</Badge>
+        <div className="card px-3 py-2 border-l-4 fade-in" style={{ borderLeftColor: item.resolved.decision === "approve" ? "var(--ok)" : "var(--bad)" }}>
+          <div className="flex items-center gap-2 text-small">
+            <Badge tone={item.resolved.decision === "approve" ? "ok" : "bad"}>{item.resolved.decision + "d"}</Badge>
             <span className="font-medium">{item.request.title}</span>
-            <span className="flex-1" />
-            <span className="faint mono">{clock(item.ts)}</span>
           </div>
-          {item.resolved?.note && <div className="muted text-[12px] mt-1">Note: {item.resolved.note}</div>}
+          {item.resolved.note && <div className="muted text-small mt-1">Note: {item.resolved.note}</div>}
         </div>
       );
     case "contract":
-      return (
-        <div className="card p-3 fade-in">
-          <div className="flex items-center gap-2 text-[12px] mb-2">
-            {item.by === "agreed" ? <Badge tone="ok">contract agreed</Badge> : <RoleChip role={item.by} />}
-            <span className="muted">{item.by === "agreed" ? `${item.criteria.length} criteria` : item.by === "builder" ? "proposed a definition of done" : "reviewed the contract"}</span>
-            <span className="flex-1" />
-            <span className="faint mono">{clock(item.ts)}</span>
-          </div>
-          {item.rationale && <div className="text-[12.5px] mb-2 leading-relaxed">{item.rationale}</div>}
-          <ul className="flex flex-col gap-1">
-            {item.criteria.map((c) => (
-              <li key={c.id} className="text-[12.5px] flex gap-2">
-                <span className="mono faint w-6 shrink-0">{c.id}</span>
-                <span>
-                  {c.text}
-                  {c.hard && <span className="badge badge-neutral ml-1.5">hard</span>}
-                  <div className="muted text-[11.5px] mono mt-0.5">verify: {c.verify}</div>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      );
+      return <ContractItem item={item} />;
     case "evaluation":
       return (
         <div className="card p-3 border-l-4 fade-in" style={{ borderLeftColor: item.verdict === "pass" ? "var(--ok)" : "var(--bad)" }}>
-          <div className="flex items-center gap-2 text-[12px] mb-1.5">
+          <div className="flex items-center gap-2 text-small mb-1.5">
             <RoleChip role="evaluator" />
             <Badge tone={item.verdict === "pass" ? "ok" : "bad"}>
               round {item.round}: {item.verdict}
@@ -211,16 +219,14 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
             <span className="muted">
               {item.results.filter((r) => r.pass).length}/{item.results.length} criteria pass
             </span>
-            <span className="flex-1" />
-            <span className="faint mono">{clock(item.ts)}</span>
           </div>
-          <div className="text-[12.5px] leading-relaxed">{item.summary}</div>
+          <div className="leading-relaxed">{item.summary}</div>
           {item.results.some((r) => !r.pass) && (
             <ul className="mt-2 flex flex-col gap-1">
               {item.results
                 .filter((r) => !r.pass)
                 .map((r) => (
-                  <li key={r.id} className="text-[12px] flex gap-2">
+                  <li key={r.id} className="text-small flex gap-2">
                     <span className="text-[var(--bad)] font-bold shrink-0">✕ {r.id}</span>
                     <span className="muted">{r.evidence}</span>
                   </li>
@@ -229,21 +235,23 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
           )}
         </div>
       );
-    case "context":
+    case "context": {
+      const Icon = item.what === "compacted" ? Minimize2 : item.what === "cleared" ? Eraser : RefreshCw;
       return (
-        <div className="flex items-start gap-2 text-[12px] muted px-1 py-1 fade-in">
-          <span className="shrink-0">{item.what === "compacted" ? "⤓" : item.what === "cleared" ? "⌫" : "↻"}</span>
+        <div className="flex items-start gap-2 text-small muted px-1 py-1 fade-in">
+          <Icon size={13} className="shrink-0 mt-0.5" aria-hidden />
           <span>
             <span className={`font-medium role-${item.role}`}>{item.role}</span> context {item.what}.{" "}
             {item.what === "cleared" ? item.detail : <Collapsible summary={item.what === "reset" ? "handoff note" : "summary"} className="inline-block">{<Pre>{item.detail}</Pre>}</Collapsible>}
           </span>
         </div>
       );
+    }
     case "steer":
       return (
         <div className="flex justify-end fade-in">
-          <div className="rounded-xl px-3 py-2 max-w-[80%] text-[12.5px]" style={{ background: "var(--accent-soft)" }}>
-            <div className="text-[10.5px] uppercase tracking-wider font-semibold" style={{ color: "var(--accent)" }}>
+          <div className="rounded-xl px-3 py-2 max-w-[80%]" style={{ background: "var(--accent-soft)" }}>
+            <div className="section-label" style={{ color: "var(--accent)" }}>
               you · {item.delivered ? "delivered" : "queued for the next step"}
             </div>
             {item.text}
@@ -252,8 +260,8 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
       );
     case "commit":
       return (
-        <div className="flex items-center gap-2 text-[12px] muted px-1 fade-in">
-          <span>⎇</span>
+        <div className="flex items-center gap-2 text-small muted px-1 fade-in">
+          <GitCommitHorizontal size={14} className="shrink-0" aria-hidden />
           <span className="mono">{item.sha}</span>
           <span className="truncate">{item.message}</span>
           <span className="faint">· {item.files} files</span>
@@ -262,12 +270,12 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
     case "note":
       if (item.level === "info" && item.text.length > 160)
         return (
-          <Collapsible summary={<span className="muted">{item.text.slice(0, 110)}…</span>} className="px-2 py-1 text-[12px]">
+          <Collapsible summary={<span className="muted">{item.text.slice(0, 110)}…</span>} className="px-2 py-1 text-small">
             <div className="muted whitespace-pre-wrap">{item.text}</div>
           </Collapsible>
         );
       return (
-        <div className={`text-[12px] px-2 py-1.5 rounded-md fade-in ${item.level === "error" ? "badge-bad" : item.level === "warn" ? "badge-warn" : "muted"}`} style={item.level === "info" ? undefined : { background: item.level === "error" ? "var(--bad-soft)" : "var(--warn-soft)" }}>
+        <div className={`text-small px-2 py-1.5 rounded-md fade-in ${item.level === "error" ? "badge-bad" : item.level === "warn" ? "badge-warn" : "muted"}`} style={item.level === "info" ? undefined : { background: item.level === "error" ? "var(--bad-soft)" : "var(--warn-soft)" }}>
           {item.text}
         </div>
       );
@@ -276,41 +284,103 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
   }
 }
 
-function TurnRow({ item, showThinking }: { item: Extract<FeedItem, { kind: "turn" }>; showThinking: boolean }) {
+/** A contract proposal or review: the criteria are one click away (the Contract tab has them in full). */
+function ContractItem({ item }: { item: Extract<FeedItem, { kind: "contract" }> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card px-3 py-2 fade-in">
+      <button type="button" className="w-full flex items-center gap-2 text-small text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
+        {item.by === "agreed" ? <Badge tone="ok">contract agreed</Badge> : <RoleChip role={item.by} />}
+        <span className="muted">{item.by === "agreed" ? `${item.criteria.length} criteria` : item.by === "builder" ? `proposed a definition of done · ${item.criteria.length} criteria` : `reviewed the contract · ${item.criteria.length} criteria`}</span>
+        <span className="flex-1" />
+        {open ? <ChevronDown size={14} className="faint" aria-hidden /> : <ChevronRight size={14} className="faint" aria-hidden />}
+      </button>
+      {item.rationale && <div className="text-small mt-1.5 leading-relaxed">{item.rationale}</div>}
+      {open && (
+        <ul className="flex flex-col gap-1 mt-2 fade-in">
+          {item.criteria.map((c) => (
+            <li key={c.id} className="text-small flex gap-2">
+              <span className="mono faint w-6 shrink-0">{c.id}</span>
+              <span>
+                {c.text}
+                {c.hard && <span className="badge badge-neutral ml-1.5">hard</span>}
+                <div className="muted text-caption mono mt-0.5">verify: {c.verify}</div>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TurnRow({ item, showThinking, showRole }: { item: Extract<FeedItem, { kind: "turn" }>; showThinking: boolean; showRole: boolean }) {
   const [open, setOpen] = useState(false);
   const hasBody = !!item.text || item.calls.length > 0 || (showThinking && item.thinking);
-  if (!hasBody && !item.usage) return null;
+  if (!hasBody) return null;
+  const entries = groupCalls(item.calls);
   return (
-    <div className="flex gap-3 fade-in">
-      <div className={`w-1 rounded-full shrink-0 bg-role-${item.role}`} style={{ opacity: 0.7 }} />
+    <div className={`group relative flex gap-3 fade-in ${showRole ? "mt-1" : ""}`}>
+      <div className={`w-1 rounded-full shrink-0 bg-role-${item.role}`} style={{ opacity: 0.6 }} />
+      {/* Per-turn metadata: only on hover, keyboard focus or when expanded. */}
+      <span
+        className={`${open ? "inline-flex" : "hidden group-hover:inline-flex group-focus-within:inline-flex"} absolute right-0 -top-2.5 z-[1] items-center gap-2 faint mono text-caption rounded-md border line px-1.5 py-0.5`}
+        style={{ background: "var(--bg-elev)", boxShadow: "var(--shadow)" }}
+      >
+        {item.turn > 0 && <span>turn {item.turn}</span>}
+        {item.usage && (
+          <button className="hover:text-[var(--fg)] hover:underline underline-offset-2" onClick={() => setOpen(!open)} title="Prompt tokens / output tokens / cost for this turn. Click for the breakdown." aria-expanded={open}>
+            {tokens(item.usage.input + item.usage.cacheRead + item.usage.cacheWrite)} in · {tokens(item.usage.output)} out
+            {item.costUsd ? ` · ${money(item.costUsd)}` : ""}
+          </button>
+        )}
+        <span>{clock(item.ts)}</span>
+      </span>
       <div className="flex-1 min-w-0 py-0.5">
-        <div className="flex items-center gap-2 text-[12px]">
-          <RoleChip role={item.role} />
-          {item.turn > 0 && <span className="faint">turn {item.turn}</span>}
-          <span className="flex-1" />
-          {item.usage && (
-            <button className="faint mono hover:text-[var(--fg)]" onClick={() => setOpen(!open)} title="Prompt tokens / output tokens / cost for this turn">
-              {tokens(item.usage.input + item.usage.cacheRead + item.usage.cacheWrite)} ▸ {tokens(item.usage.output)}
-              {item.costUsd ? ` · ${money(item.costUsd)}` : ""}
-            </button>
-          )}
-          <span className="faint mono">{clock(item.ts)}</span>
-        </div>
-        {showThinking && item.thinking && <div className="muted italic text-[12.5px] mt-1 leading-relaxed whitespace-pre-wrap">{item.thinking}</div>}
+        {showRole && (
+          <div className="flex items-center gap-2 text-small">
+            <RoleChip role={item.role} />
+          </div>
+        )}
+        {showThinking && item.thinking && <div className="muted italic mt-1 leading-relaxed whitespace-pre-wrap">{item.thinking}</div>}
         {item.text && <div className="mt-1 leading-relaxed whitespace-pre-wrap">{item.text}</div>}
-        {item.calls.length > 0 && (
+        {entries.length > 0 && (
           <div className="mt-1.5 flex flex-col gap-1">
-            {item.calls.map((c) => (
-              <CallRow key={c.toolUseId} call={c} />
-            ))}
+            {entries.map((e) => (e.kind === "call" ? <CallRow key={e.call.toolUseId} call={e.call} /> : <CallGroup key={e.calls[0].toolUseId} calls={e.calls} />))}
           </div>
         )}
         {open && item.usage && (
-          <div className="mt-1 text-[11px] muted mono">
+          <div className="mt-1 text-caption muted mono">
             input {tokens(item.usage.input)} · cache read {tokens(item.usage.cacheRead)} · cache write {tokens(item.usage.cacheWrite)} · output {tokens(item.usage.output)} · stop {item.stopReason}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Consecutive successful calls, collapsed. Failed and flagged calls are never in here (see feedGroups.ts). */
+function CallGroup({ calls }: { calls: ToolCall[] }) {
+  const [open, setOpen] = useState(false);
+  const total = calls.reduce((a, c) => a + (c.result?.durationMs ?? 0), 0);
+  return (
+    <div data-call-group>
+      <button type="button" className="w-full text-left flex items-center gap-2 px-2.5 py-1 rounded-lg hover:bg-[var(--bg-sunk)] text-small muted" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Wrench size={13} className="shrink-0" aria-hidden />
+        <span className="font-medium" style={{ color: "var(--fg)" }}>
+          {calls.length} tool calls
+        </span>
+        <span className="truncate flex-1 min-w-0 mono text-caption">{summarizeNames(calls)}</span>
+        <span className="faint mono text-caption shrink-0">{duration(total)}</span>
+        {open ? <ChevronDown size={14} className="faint shrink-0" aria-hidden /> : <ChevronRight size={14} className="faint shrink-0" aria-hidden />}
+      </button>
+      {open && (
+        <div className="mt-1 ml-3 pl-2 border-l line flex flex-col gap-1 fade-in">
+          {calls.map((c) => (
+            <CallRow key={c.toolUseId} call={c} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -321,9 +391,9 @@ export function CallRow({ call, expanded = false }: { call: ToolCall; expanded?:
   const pending = !call.result;
   return (
     <div className="rounded-lg border line overflow-hidden" style={{ background: "var(--bg-elev)" }}>
-      <button className="w-full text-left flex items-center gap-2 px-2.5 py-1.5 hover:bg-[var(--bg-sunk)]" onClick={() => setOpen(!open)}>
-        <span className={`w-2 h-2 rounded-full shrink-0 ${pending ? "bg-[var(--accent)] pulse" : call.result!.ok ? "bg-[var(--ok)]" : "bg-[var(--bad)]"}`} />
-        <span className="text-[12.5px] truncate flex-1" dangerouslySetInnerHTML={{ __html: escape(call.narration).replace(/`([^`]+)`/g, "<code>$1</code>") }} />
+      <button className="w-full text-left flex items-center gap-2 px-2.5 py-1.5 hover:bg-[var(--bg-sunk)]" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className={`w-2 h-2 rounded-full shrink-0 ${pending ? "bg-[var(--accent)] pulse" : call.result!.ok ? "bg-[var(--ok)]" : "bg-[var(--bad)]"}`} aria-label={pending ? "running" : call.result!.ok ? "succeeded" : "failed"} />
+        <span className="text-small truncate flex-1" dangerouslySetInnerHTML={{ __html: escape(call.narration).replace(/`([^`]+)`/g, "<code>$1</code>") }} />
         {g && g.verdict !== "allow" && (
           <Badge tone={g.verdict === "deny" ? "bad" : "warn"} title={g.rationale}>
             {g.verdict}
@@ -339,29 +409,29 @@ export function CallRow({ call, expanded = false }: { call: ToolCall; expanded?:
             you {g.verdict === "allow" ? "approved" : "declined"}
           </Badge>
         )}
-        {call.result && <span className="faint mono text-[11px]">{duration(call.result.durationMs)}</span>}
-        <span className="faint text-[11px]">{open ? "▴" : "▾"}</span>
+        {call.result && <span className="faint mono text-caption">{duration(call.result.durationMs)}</span>}
+        {open ? <ChevronDown size={14} className="faint shrink-0" aria-hidden /> : <ChevronRight size={14} className="faint shrink-0" aria-hidden />}
       </button>
       {open && (
         <div className="px-2.5 pb-2.5 flex flex-col gap-2 fade-in border-t line pt-2">
           <div>
-            <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1">input · {call.name}</div>
+            <div className="section-label mb-1">input · {call.name}</div>
             <Pre>{typeof call.input === "string" ? call.input : JSON.stringify(call.input, null, 2)}</Pre>
           </div>
           {g && (
-            <div className="text-[12px] muted">
+            <div className="text-small muted">
               Guardrail: <span className="font-medium">{g.verdict}</span> by {g.source} ({g.rule}). {g.rationale}
             </div>
           )}
           {call.result && (
             <div>
-              <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1 flex items-center gap-2">
+              <div className="section-label mb-1 flex items-center gap-2">
                 {call.result.ok ? "result" : "error"}
                 {call.result.truncated && (
                   <>
                     <span>· truncated for the model</span>
-                    <a className="underline normal-case tracking-normal" href={`/api/runs/${useStore.getState().selectedRunId}/tool-output/${call.toolUseId}`} target="_blank" rel="noreferrer">
-                      full output ↗
+                    <a className="underline normal-case tracking-normal inline-flex items-center gap-0.5" href={`/api/runs/${useStore.getState().selectedRunId}/tool-output/${call.toolUseId}`} target="_blank" rel="noreferrer">
+                      full output <ExternalLink size={11} aria-hidden />
                     </a>
                   </>
                 )}

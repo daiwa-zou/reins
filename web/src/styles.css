@@ -3,6 +3,15 @@
 @theme {
   --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", Inter, "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", Consolas, monospace;
+  /* Type scale: four steps. Use text-caption / text-small / text-body / text-title instead of ad-hoc pixel sizes. */
+  --text-caption: 11px;
+  --text-caption--line-height: 1.4;
+  --text-small: 12px;
+  --text-small--line-height: 1.45;
+  --text-body: 13.5px;
+  --text-body--line-height: 1.5;
+  --text-title: 15px;
+  --text-title--line-height: 1.35;
 }
 
 :root {
@@ -126,9 +135,38 @@ pre { white-space: pre-wrap; word-break: break-word; }
 
 .kbd { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-elev); color: var(--fg-muted); }
 
+/* The one small uppercase heading used above groups and sections. */
+.section-label { font-size: var(--text-caption); line-height: 1.4; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; color: var(--fg-faint); }
+
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; color: var(--fg-muted); background: transparent; border: 1px solid transparent; cursor: pointer; flex: none; }
+.icon-btn:hover { background: var(--bg-sunk); color: var(--fg); }
+.icon-btn[aria-pressed="true"], .icon-btn[aria-expanded="true"] { background: var(--bg-sunk); color: var(--fg); }
+
+/* Sidebar navigation */
+.nav-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 5px 8px; border-radius: 7px; color: var(--fg-muted); font-weight: 500; cursor: pointer; text-align: left; border: 1px solid transparent; }
+.nav-item:hover { background: var(--bg-sunk); color: var(--fg); }
+.nav-item[aria-current="page"] { background: var(--bg-sunk); color: var(--fg); border-color: var(--line); }
+.run-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 7px; cursor: pointer; }
+.run-row:hover { background: var(--bg-sunk); }
+.run-row[aria-current="true"] { background: var(--bg-sunk); box-shadow: inset 0 0 0 1px var(--line-strong); }
+
+/* Dropdown menu */
+.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 220px; z-index: 40; padding: 4px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.menu-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 9px; border-radius: 6px; text-align: left; cursor: pointer; color: var(--fg); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--bg-sunk); outline: none; }
+.menu-item[aria-checked="true"] { color: var(--accent); }
+.menu-sep { height: 1px; margin: 4px 2px; background: var(--line); }
+
 .tab { padding: 6px 10px; border-radius: 7px; color: var(--fg-muted); font-weight: 500; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; border: 1px solid transparent; }
 .tab:hover { background: var(--bg-sunk); color: var(--fg); }
 .tab[aria-selected="true"] { background: var(--bg-elev); color: var(--fg); border-color: var(--line); box-shadow: var(--shadow); }
+/* Underlined tabs for the run views; .subtab for Details. */
+.view-tab { padding: 8px 2px; margin-right: 18px; color: var(--fg-muted); font-weight: 500; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.view-tab:hover { color: var(--fg); }
+.view-tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.subtab { padding: 3px 10px; border-radius: 999px; color: var(--fg-muted); font-size: var(--text-small); font-weight: 500; cursor: pointer; border: 1px solid transparent; }
+.subtab:hover { color: var(--fg); background: var(--bg-sunk); }
+.subtab[aria-selected="true"] { color: var(--fg); background: var(--bg-elev); border-color: var(--line-strong); }
 
 .pulse { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }

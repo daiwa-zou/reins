@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { RoleId, RunStatus } from "@shared/types";
 import { ROLE_LABEL } from "../state/derive";
+import { Ban, ChevronRight, CircleCheck, CirclePause, CircleX, Clock, Hand, LoaderCircle } from "lucide-react";
 
 export function Badge({ tone = "neutral", children, title }: { tone?: "ok" | "warn" | "bad" | "neutral" | "accent"; children: React.ReactNode; title?: string }) {
   return (
@@ -10,17 +11,30 @@ export function Badge({ tone = "neutral", children, title }: { tone?: "ok" | "wa
   );
 }
 
+export const STATUS: Record<RunStatus, { tone: "ok" | "warn" | "bad" | "neutral" | "accent"; label: string; pulse?: boolean }> = {
+  queued: { tone: "neutral", label: "Queued" },
+  running: { tone: "accent", label: "Running", pulse: true },
+  paused: { tone: "warn", label: "Paused" },
+  waiting_approval: { tone: "warn", label: "Needs you", pulse: true },
+  completed: { tone: "ok", label: "Completed" },
+  failed: { tone: "bad", label: "Failed" },
+  cancelled: { tone: "neutral", label: "Cancelled" },
+};
+
+/** Compact status for list rows: an icon with an accessible label. */
+export function StatusIcon({ status, size = 14 }: { status: RunStatus; size?: number }) {
+  const m = STATUS[status];
+  const color = m.tone === "neutral" ? "var(--fg-faint)" : `var(--${m.tone})`;
+  const Icon = { queued: Clock, running: LoaderCircle, paused: CirclePause, waiting_approval: Hand, completed: CircleCheck, failed: CircleX, cancelled: Ban }[status];
+  return (
+    <span className="inline-flex shrink-0" style={{ color }} role="img" aria-label={m.label} title={m.label}>
+      <Icon size={size} className={status === "running" ? "animate-spin [animation-duration:2.4s]" : status === "waiting_approval" ? "pulse" : undefined} aria-hidden />
+    </span>
+  );
+}
+
 export function StatusBadge({ status }: { status: RunStatus }) {
-  const map: Record<RunStatus, { tone: "ok" | "warn" | "bad" | "neutral" | "accent"; label: string; pulse?: boolean }> = {
-    queued: { tone: "neutral", label: "Queued" },
-    running: { tone: "accent", label: "Running", pulse: true },
-    paused: { tone: "warn", label: "Paused" },
-    waiting_approval: { tone: "warn", label: "Needs you", pulse: true },
-    completed: { tone: "ok", label: "Completed" },
-    failed: { tone: "bad", label: "Failed" },
-    cancelled: { tone: "neutral", label: "Cancelled" },
-  };
-  const m = map[status];
+  const m = STATUS[status];
   return (
     <Badge tone={m.tone}>
       {m.pulse && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current pulse" />}
@@ -35,7 +49,7 @@ export function RoleDot({ role, size = 8 }: { role: RoleId; size?: number }) {
 
 export function RoleChip({ role }: { role: RoleId }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold role-${role}`}>
+    <span className={`inline-flex items-center gap-1.5 text-caption font-semibold role-${role}`}>
       <RoleDot role={role} />
       {ROLE_LABEL[role]}
     </span>
@@ -54,7 +68,7 @@ export function Empty({ icon, title, body, action }: { icon?: React.ReactNode; t
   return (
     <div className="h-full flex flex-col items-center justify-center text-center p-10 gap-2 fade-in">
       {icon && <div className="text-3xl mb-1 faint">{icon}</div>}
-      <div className="font-semibold text-[15px]">{title}</div>
+      <div className="font-semibold text-title">{title}</div>
       {body && <div className="muted max-w-md">{body}</div>}
       {action && <div className="mt-3">{action}</div>}
     </div>
@@ -65,10 +79,8 @@ export function Collapsible({ summary, children, defaultOpen = false, className 
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className={className}>
-      <button type="button" className="w-full text-left flex items-center gap-2 muted hover:text-[var(--fg)] text-[12px]" onClick={() => setOpen(!open)}>
-        <span className="inline-block w-3 text-center transition-transform" style={{ transform: open ? "rotate(90deg)" : "none" }}>
-          ▸
-        </span>
+      <button type="button" className="w-full text-left flex items-center gap-2 muted hover:text-[var(--fg)] text-small" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <ChevronRight size={13} className="shrink-0 transition-transform" style={{ transform: open ? "rotate(90deg)" : "none" }} aria-hidden />
         {summary}
       </button>
       {open && <div className="mt-1.5 fade-in">{children}</div>}
@@ -113,7 +125,7 @@ export function Modal({ title, onClose, children, width = 720, dismissOnBackdrop
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[6vh] px-4" style={{ background: "rgba(10,10,12,0.45)" }} onMouseDown={(e) => dismissOnBackdrop && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="card fade-in flex flex-col max-h-[88vh] w-full" style={{ maxWidth: width, boxShadow: "var(--shadow)" }} role="dialog" aria-modal aria-label={typeof title === "string" ? title : undefined}>
         <div className="flex items-center justify-between px-5 py-3 border-b line">
-          <div className="font-semibold text-[15px]">{title}</div>
+          <div className="font-semibold text-title">{title}</div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close">
             Esc
           </button>

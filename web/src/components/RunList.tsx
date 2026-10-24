@@ -1,116 +1,126 @@
 import React, { useState } from "react";
+import { CirclePlay, Plus, Trash2 } from "lucide-react";
+import type { RunSummary } from "@shared/types";
 import { useStore } from "../state/store";
-import { StatusBadge } from "./ui";
+import { StatusIcon, STATUS } from "./ui";
 import { money, relTime, basename } from "../lib/format";
 import { api } from "../lib/api";
 import { PHASE_LABEL } from "../state/derive";
 import { startDemo } from "../lib/demo";
 
+const LIVE = ["running", "paused", "waiting_approval", "queued"];
+
+/** The run list: a "Needs you" group first, then runs grouped by workspace. Rows stay one line. */
 export function RunList() {
   const runs = useStore((s) => s.runs);
-  const selected = useStore((s) => s.selectedRunId);
-  const selectRun = useStore((s) => s.selectRun);
   const openModal = useStore((s) => s.openModal);
-  const toastMsg = useStore((s) => s.toastMsg);
-  const [collapsed, setCollapsed] = useState(false);
   const [filter, setFilter] = useState("");
 
   const q = filter.toLowerCase();
   const visible = runs.filter((r) => !q || r.title.toLowerCase().includes(q) || r.workspace.toLowerCase().includes(q) || r.status.includes(q));
-  const rank = (s: string) => (s === "waiting_approval" ? 0 : s === "running" || s === "paused" || s === "queued" ? 1 : 2);
-  // Attention first, then recency; demo runs in their own group; group by full path so two "api" folders stay apart.
-  const groups = new Map<string, { label: string; runs: typeof runs }>();
-  for (const r of [...visible].sort((a, b) => rank(a.status) - rank(b.status) || (a.updatedAt < b.updatedAt ? 1 : -1))) {
+  const rank = (s: string) => (s === "running" || s === "paused" || s === "queued" ? 0 : 1);
+  const sorted = [...visible].sort((a, b) => rank(a.status) - rank(b.status) || (a.updatedAt < b.updatedAt ? 1 : -1));
+  const needsYou = sorted.filter((r) => r.status === "waiting_approval");
+  // Demo runs in their own group; group by full path so two "api" folders stay apart.
+  const groups = new Map<string, { label: string; title: string; runs: RunSummary[] }>();
+  for (const r of sorted) {
+    if (r.status === "waiting_approval") continue;
     const key = r.engine === "replay" ? "\u0000demo" : r.workspace;
-    const g = groups.get(key) ?? { label: r.engine === "replay" ? "Demo (recorded)" : basename(r.workspace), runs: [] };
+    const g = groups.get(key) ?? { label: r.engine === "replay" ? "Demo (recorded)" : basename(r.workspace), title: r.engine === "replay" ? "Recorded demo runs" : r.workspace, runs: [] };
     g.runs.push(r);
     groups.set(key, g);
   }
 
-  if (collapsed)
-    return (
-      <aside className="w-10 border-r line flex flex-col items-center py-2 gap-2" style={{ background: "var(--bg-elev)" }}>
-        <button className="btn btn-ghost btn-sm" onClick={() => setCollapsed(false)} title="Show runs">
-          ☰
-        </button>
-        <div className="mono text-[11px] muted" style={{ writingMode: "vertical-rl" }}>
-          {runs.length} runs
-        </div>
-      </aside>
-    );
-
   return (
-    <aside className="w-[240px] xl:w-[260px] shrink-0 border-r line flex flex-col" style={{ background: "var(--bg-elev)" }}>
-      <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-        <input className="input" placeholder="Filter runs…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: "4px 8px", fontSize: 12 }} />
-        <button className="btn btn-ghost btn-sm" onClick={() => setCollapsed(true)} title="Hide runs">
-          ‹
-        </button>
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="px-2 pb-1.5">
+        <input className="input text-small" placeholder="Filter runs…" aria-label="Filter runs" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: "4px 8px" }} />
       </div>
       <div className="flex-1 overflow-auto px-2 pb-2">
         {runs.length === 0 && (
-          <div className="muted text-[12px] p-3 leading-relaxed">
+          <div className="muted text-small p-2 leading-relaxed">
             No runs yet.
             <div className="mt-2 flex flex-col gap-1.5">
               <button className="btn btn-sm" onClick={() => startDemo()}>
-                ▶ Watch the demo
+                <CirclePlay size={13} aria-hidden /> Watch the demo
               </button>
               <button className="btn btn-sm btn-primary" onClick={() => openModal("newRun")}>
-                New run
+                <Plus size={13} aria-hidden /> New run
               </button>
             </div>
           </div>
         )}
-        {[...groups.entries()].map(([ws, { label, runs: list }]) => (
-          <div key={ws} className="mb-2">
-            <div className="px-1.5 pt-2 pb-1 text-[10.5px] uppercase tracking-wider faint font-semibold truncate" title={list[0].workspace}>
-              {label}
-            </div>
-            {list.map((r) => (
-              <div
-                key={r.id}
-                role="button"
-                tabIndex={0}
-                aria-current={selected === r.id ? "true" : undefined}
-                onClick={() => selectRun(r.id)}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), selectRun(r.id))}
-                className={`w-full text-left rounded-lg px-2.5 py-2 mb-0.5 transition-colors cursor-pointer ${selected === r.id ? "sunk" : "hover:bg-[var(--bg-sunk)]"}`}
-                style={selected === r.id ? { boxShadow: "inset 0 0 0 1px var(--line-strong)" } : undefined}
-              >
-                <div className="flex items-start justify-between gap-2 group">
-                  <div className="font-medium text-[13px] leading-snug line-clamp-2">{r.title}</div>
-                  {r.engine === "replay" && <span className="badge badge-neutral">demo</span>}
-                  {!["running", "paused", "waiting_approval", "queued"].includes(r.status) && (
-                    <button
-                      type="button"
-                      aria-label={`Delete the log of ${r.title}`}
-                      title="Delete this run's log (the workspace is untouched)"
-                      className="faint text-[11px] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[var(--bad)] px-1 rounded"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!confirm(`Delete the log of "${r.title}"? The workspace is untouched.`)) return;
-                        api
-                          .deleteRun(r.id)
-                          .then(() => selected === r.id && selectRun(null))
-                          .catch((err) => toastMsg(err.message, "error"));
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-1 text-[11px] muted">
-                  <StatusBadge status={r.status} />
-                  {r.phase && <span>{PHASE_LABEL[r.phase]}{r.round > 1 ? ` ${r.round}` : ""}</span>}
-                  <span className="flex-1" />
-                  <span className="mono">{money(r.costUsd)}</span>
-                  <span>{relTime(r.updatedAt)}</span>
-                </div>
-              </div>
+        {runs.length > 0 && visible.length === 0 && <div className="faint text-small p-2">No runs match “{filter}”.</div>}
+        {needsYou.length > 0 && (
+          <Group label="Needs you" title="Runs waiting for your approval" tone="warn">
+            {needsYou.map((r) => (
+              <Row key={r.id} r={r} />
             ))}
-          </div>
+          </Group>
+        )}
+        {[...groups.entries()].map(([key, g]) => (
+          <Group key={key} label={g.label} title={g.title}>
+            {g.runs.map((r) => (
+              <Row key={r.id} r={r} />
+            ))}
+          </Group>
         ))}
       </div>
-    </aside>
+    </div>
+  );
+}
+
+function Group({ label, title, tone, children }: { label: string; title: string; tone?: "warn"; children: React.ReactNode }) {
+  return (
+    <div className="mb-2" role="group" aria-label={label}>
+      <div className="section-label px-2 pt-2 pb-1 truncate" title={title} style={tone ? { color: "var(--warn)" } : undefined}>
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ r }: { r: RunSummary }) {
+  const selected = useStore((s) => s.selectedRunId === r.id && s.section === "runs");
+  const selectRun = useStore((s) => s.selectRun);
+  const toastMsg = useStore((s) => s.toastMsg);
+  const live = LIVE.includes(r.status);
+  const tip = [r.title, `${STATUS[r.status].label}${r.phase ? ` · ${PHASE_LABEL[r.phase]}${r.round > 1 ? ` ${r.round}` : ""}` : ""}`, `${money(r.costUsd)} · ${r.workspace}`].join("\n");
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-current={selected ? "true" : undefined}
+      onClick={() => selectRun(r.id)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), selectRun(r.id))}
+      className="run-row group"
+      title={tip}
+    >
+      <StatusIcon status={r.status} />
+      <span className="flex-1 min-w-0 truncate text-small font-medium">{r.title}</span>
+      <span className="text-caption faint shrink-0 group-hover:hidden group-focus-within:hidden">{relTime(r.updatedAt)}</span>
+      {!live ? (
+        <button
+          type="button"
+          aria-label={`Delete the log of ${r.title}`}
+          title="Delete this run's log (the workspace is untouched)"
+          className="hidden group-hover:inline-flex group-focus-within:inline-flex focus:inline-flex faint hover:text-[var(--bad)] rounded p-0.5 shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!confirm(`Delete the log of "${r.title}"? The workspace is untouched.`)) return;
+            const wasSelected = useStore.getState().selectedRunId === r.id;
+            api
+              .deleteRun(r.id)
+              .then(() => wasSelected && selectRun(null, { replace: true }))
+              .catch((err) => toastMsg(err.message, "error"));
+          }}
+        >
+          <Trash2 size={13} aria-hidden />
+        </button>
+      ) : (
+        <span className="hidden group-hover:inline text-caption faint shrink-0">{relTime(r.updatedAt)}</span>
+      )}
+    </div>
   );
 }

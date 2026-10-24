@@ -1,15 +1,10 @@
 import React, { useEffect, useMemo } from "react";
-import { TABS, useStore } from "./state/store";
+import { useStore } from "./state/store";
 import { derive, isLive } from "./state/derive";
+import { applyNavAction, shortcutFor } from "./state/nav";
 import { TopBar } from "./components/TopBar";
-import { RunList } from "./components/RunList";
-import { Inspector } from "./components/Inspector";
-import { Stage } from "./panels/Stage";
-import { Transcript } from "./panels/Transcript";
-import { ContractPanel } from "./panels/Contract";
-import { ContextPanel } from "./panels/Context";
-import { GuardrailsPanel } from "./panels/Guardrails";
-import { FilesPanel } from "./panels/Files";
+import { Sidebar } from "./components/Sidebar";
+import { RunWorkspace } from "./components/RunWorkspace";
 import { HarnessPanel } from "./panels/Harness";
 import { LessonsPanel } from "./panels/Lessons";
 import { ReliabilityPanel } from "./panels/Reliability";
@@ -20,10 +15,22 @@ import { Help } from "./components/Help";
 import { api } from "./lib/api";
 import { startDemo } from "./lib/demo";
 
+/** Typing never triggers shortcuts. */
+function isTextEntry(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable;
+}
+/** Space and Enter activate a focused control, so they are left to it. */
+function isControl(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return el.tagName === "BUTTON" || el.tagName === "A" || !!el.closest?.("[role=button],[role=tab],[role=switch],[role=menuitem],[role=menuitemradio]");
+}
+
 export function App() {
   const boot = useStore((s) => s.boot);
-  const tab = useStore((s) => s.tab);
-  const setTab = useStore((s) => s.setTab);
+  const section = useStore((s) => s.section);
   const selectedRunId = useStore((s) => s.selectedRunId);
   const events = useStore((s) => (selectedRunId ? s.events[selectedRunId] : undefined));
   const scrubSeq = useStore((s) => s.scrubSeq);
@@ -31,35 +38,61 @@ export function App() {
   const openModal = useStore((s) => s.openModal);
   const toast = useStore((s) => s.toast);
   const toastMsg = useStore((s) => s.toastMsg);
+  const bootError = useStore((s) => s.bootError);
+  const booting = useStore((s) => s.booting);
 
   useEffect(() => {
     void boot();
   }, [boot]);
 
+  // Back/forward: the URL is the source of truth for where you are.
+  useEffect(() => {
+    const onPop = () => useStore.getState().syncFromUrl();
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const model = useMemo(() => derive(events ?? [], scrubSeq ?? Infinity), [events, scrubSeq]);
   const liveModel = useMemo(() => (scrubSeq === null ? model : derive(events ?? [])), [events, scrubSeq, model]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts: bound from the one map in nav.ts (Help lists the same map).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.tagName === "BUTTON" || t.tagName === "A" || t.isContentEditable)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (modal) return;
-      const tabHit = TABS.find((x) => x.key === e.key);
-      if (tabHit) return setTab(tabHit.id);
-      if (e.key === "n") return openModal("newRun");
-      if (e.key === "d") return void startDemo();
-      if (e.key === "?") return openModal("help");
-      if (e.key === " " && selectedRunId && isLive(liveModel.status)) {
-        e.preventDefault();
-        const action = liveModel.status === "paused" ? api.resume : api.pause;
-        action(selectedRunId).catch((err) => toastMsg(err.message, "error"));
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      if (isTextEntry(e.target)) return;
+      if (modal) return; // dialogs handle their own keys (Esc closes)
+      const hit = shortcutFor(e.key);
+      if (!hit) return;
+      const s = useStore.getState();
+      const a = hit.action;
+      switch (a.type) {
+        case "view":
+        case "section": {
+          const next = applyNavAction(s.nav(), a);
+          if (next) s.navigate(next);
+          return;
+        }
+        case "newRun":
+          return openModal("newRun");
+        case "demo":
+          return void startDemo();
+        case "help":
+          return openModal("help");
+        case "close":
+          return;
+        case "pauseResume": {
+          if (isControl(e.target)) return;
+          if (!s.selectedRunId || !isLive(liveModel.status)) return;
+          e.preventDefault();
+          const action = liveModel.status === "paused" ? api.resume : api.pause;
+          action(s.selectedRunId).catch((err) => toastMsg(err.message, "error"));
+          return;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, selectedRunId, liveModel.status, setTab, openModal, toastMsg]);
+  }, [modal, liveModel.status, openModal, toastMsg]);
 
   // The browser tab says when a run needs you, even from another window.
   const needs = liveModel.pending.length;
@@ -67,49 +100,43 @@ export function App() {
     document.title = needs ? `(${needs}) Reins · needs you` : liveModel.config && isLive(liveModel.status) ? `Reins · running` : "Reins";
   }, [needs, liveModel.status, liveModel.config]);
 
-  const Panel = { stage: Stage, transcript: Transcript, contract: ContractPanel, context: ContextPanel, guardrails: GuardrailsPanel, files: FilesPanel, harness: HarnessPanel, lessons: LessonsPanel, reliability: ReliabilityPanel }[tab];
-  const standalone = tab === "lessons" || tab === "harness" || tab === "reliability";
+  const content =
+    section === "harness" ? (
+      <HarnessPanel model={model} />
+    ) : section === "lessons" ? (
+      <LessonsPanel />
+    ) : section === "reliability" ? (
+      <ReliabilityPanel />
+    ) : selectedRunId && (liveModel.config || events?.length) ? (
+      <RunWorkspace model={model} live={liveModel} />
+    ) : selectedRunId && !booting ? (
+      <div className="h-full flex items-center justify-center muted">Loading the run…</div>
+    ) : (
+      <Welcome />
+    );
 
   return (
     <div className="h-full flex flex-col">
-      <TopBar model={liveModel} />
+      <TopBar />
       <div className="flex-1 min-h-0 flex">
-        <RunList />
+        <Sidebar />
         <main className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center gap-1 px-3 pt-2 pb-1.5 border-b line overflow-x-auto" role="tablist">
-            {TABS.map((t) => (
-              <button key={t.id} role="tab" aria-selected={tab === t.id} className="tab" onClick={() => setTab(t.id)} title={`Press ${t.key}`}>
-                {t.label}
-                {t.id === "stage" && liveModel.pending.length > 0 && <span className="badge badge-warn">{liveModel.pending.length}</span>}
-                {t.id === "contract" && liveModel.evaluations.length > 0 && (
-                  <span className={`badge ${liveModel.evaluations[liveModel.evaluations.length - 1].verdict === "pass" ? "badge-ok" : "badge-bad"}`}>{liveModel.evaluations[liveModel.evaluations.length - 1].verdict}</span>
-                )}
-              </button>
-            ))}
-            <div className="flex-1" />
-            {scrubSeq !== null && (
-              <button className="btn btn-sm" onClick={() => useStore.getState().setScrub(null)}>
-                ⏮ Viewing seq {scrubSeq} · back to live
-              </button>
-            )}
-          </div>
-          <div className="flex-1 min-h-0 overflow-hidden">{!selectedRunId && !standalone ? <Welcome /> : <Panel model={model} live={liveModel} />}</div>
-          {useStore.getState().bootError && (
-            <div className="px-4 py-2 text-[12.5px] flex items-center gap-3" style={{ background: "var(--bad-soft)", color: "var(--bad)" }}>
-              Could not reach the Reins server ({useStore.getState().bootError}). Is `npm run dev` running?
+          <div className="flex-1 min-h-0 overflow-hidden">{content}</div>
+          {bootError && (
+            <div className="px-4 py-2 text-small flex items-center gap-3" style={{ background: "var(--bad-soft)", color: "var(--bad)" }}>
+              Could not reach the Reins server ({bootError}). Is `npm run dev` running?
               <button className="btn btn-sm" onClick={() => useStore.getState().boot()}>
                 Retry
               </button>
             </div>
           )}
         </main>
-        {selectedRunId && !standalone && <Inspector model={model} live={liveModel} />}
       </div>
       {modal === "newRun" && <NewRun />}
       {modal === "settings" && <Settings />}
       {modal === "help" && <Help />}
       {toast && (
-        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 card px-4 py-2 fade-in z-50 ${toast.kind === "error" ? "text-[var(--bad)]" : ""}`} style={{ boxShadow: "var(--shadow)" }}>
+        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 card px-4 py-2 fade-in z-50 ${toast.kind === "error" ? "text-[var(--bad)]" : ""}`} style={{ boxShadow: "var(--shadow)" }} role="status">
           {toast.text}
         </div>
       )}

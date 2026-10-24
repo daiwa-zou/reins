@@ -1,19 +1,11 @@
 import { create } from "zustand";
 import type { HarnessComponent, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
 import { api } from "../lib/api";
+import { decodeNav, encodeNav, normalizeNav, sameNav, type DetailsSub, type NavState, type RunView, type Section } from "./nav";
 
-export type Tab = "stage" | "transcript" | "contract" | "context" | "guardrails" | "files" | "harness" | "lessons" | "reliability";
-export const TABS: { id: Tab; label: string; key: string }[] = [
-  { id: "stage", label: "Stage", key: "1" },
-  { id: "transcript", label: "Transcript", key: "2" },
-  { id: "contract", label: "Contract", key: "3" },
-  { id: "context", label: "Context", key: "4" },
-  { id: "guardrails", label: "Guardrails", key: "5" },
-  { id: "files", label: "Files", key: "6" },
-  { id: "harness", label: "Harness", key: "7" },
-  { id: "lessons", label: "Lessons", key: "8" },
-  { id: "reliability", label: "Reliability", key: "9" },
-];
+export type { Section, RunView, DetailsSub, NavState } from "./nav";
+/** The run views, in tab order. App sections (Runs, Reliability, Harness, Lessons) live in nav.ts SECTIONS. */
+export { RUN_VIEWS, DETAILS_SUBS, SECTIONS } from "./nav";
 
 type Theme = "light" | "dark" | "system";
 
@@ -25,7 +17,16 @@ interface State {
   lessons: Lesson[];
   selectedRunId: string | null;
   events: Record<string, RunEvent[]>;
-  tab: Tab;
+  /** App section (left sidebar). */
+  section: Section;
+  /** View of the selected run (tab bar under the run header). */
+  view: RunView;
+  /** Sub-view of Details. */
+  sub: DetailsSub;
+  /** Overview rail open (persisted). */
+  overviewOpen: boolean;
+  /** Show model thinking in Activity (persisted, off by default). */
+  showThinking: boolean;
   theme: Theme;
   modal: null | "newRun" | "settings" | "help";
   newRunPrefill?: Partial<import("@shared/types").RunConfig>;
@@ -46,8 +47,15 @@ interface State {
   availableEngine: () => "anthropic" | "claude-code";
 
   boot: () => Promise<void>;
-  selectRun: (id: string | null) => void;
-  setTab: (t: Tab) => void;
+  /** Select a run (opens the Runs section). `replace` rewrites history instead of adding an entry. */
+  selectRun: (id: string | null, opts?: { replace?: boolean; view?: RunView }) => void;
+  /** Change any part of the navigation state; synced to the URL with pushState. */
+  navigate: (patch: Partial<NavState>, opts?: { replace?: boolean }) => void;
+  /** Re-read navigation from the URL (back/forward). */
+  syncFromUrl: () => void;
+  nav: () => NavState;
+  setOverviewOpen: (open: boolean) => void;
+  setShowThinking: (on: boolean) => void;
   setTheme: (t: Theme) => void;
   openModal: (m: State["modal"], prefill?: State["newRunPrefill"]) => void;
   setScrub: (seq: number | null) => void;
@@ -113,6 +121,32 @@ function applyTheme(t: Theme) {
 applyTheme(savedTheme);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(useStore.getState().theme));
 
+const PREF_OVERVIEW = "reins.overviewOpen";
+const PREF_THINKING = "reins.showThinking";
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, on: boolean) {
+  try {
+    localStorage.setItem(key, on ? "1" : "0");
+  } catch {
+    /* private mode: the toggle still works for this session */
+  }
+}
+
+/** Write the nav state to the address bar. Back/forward replays it via syncFromUrl. */
+function writeUrl(nav: NavState, replace: boolean) {
+  const next = location.pathname + encodeNav(nav) + location.hash;
+  if (next === location.pathname + location.search + location.hash) return;
+  if (replace) history.replaceState(null, "", next);
+  else history.pushState(null, "", next);
+}
+
 export const useStore = create<State>((set, get) => ({
   connected: false,
   runs: [],
@@ -120,7 +154,12 @@ export const useStore = create<State>((set, get) => ({
   lessons: [],
   selectedRunId: null,
   events: {},
-  tab: "stage",
+  section: "runs",
+  view: "activity",
+  sub: "transcript",
+  // No stored preference: open on wide screens (Tailwind xl, 1280px), closed below.
+  overviewOpen: readPref(PREF_OVERVIEW, matchMedia("(min-width: 1280px)").matches),
+  showThinking: readPref(PREF_THINKING, false),
   theme: savedTheme,
   modal: null,
   scrubSeq: null,
@@ -147,19 +186,44 @@ export const useStore = create<State>((set, get) => ({
       return;
     }
     set({ info, components, lessons, runs, booting: false, bootError: null });
-    const fromUrl = new URLSearchParams(location.search).get("run");
-    const pick = fromUrl && runs.some((r) => r.id === fromUrl) ? fromUrl : runs.find((r) => r.status === "running" || r.status === "waiting_approval")?.id ?? runs[0]?.id ?? null;
-    if (pick) get().selectRun(pick);
+    const known = (id: string) => get().runs.some((r) => r.id === id);
+    const fromUrl = decodeNav(location.search, { runExists: known });
+    const latest = get().runs;
+    const pick = fromUrl.run ?? latest.find((r) => r.status === "running" || r.status === "waiting_approval")?.id ?? latest[0]?.id ?? null;
+    get().navigate({ ...fromUrl, run: pick }, { replace: true });
   },
-  selectRun: (id) => {
-    set({ selectedRunId: id, scrubSeq: null });
-    const url = new URL(location.href);
-    if (id) url.searchParams.set("run", id);
-    else url.searchParams.delete("run");
-    history.replaceState(null, "", url);
-    if (id) subscribe(id, get().events[id]?.length ?? 0);
+  nav: () => {
+    const s = get();
+    return { section: s.section, run: s.selectedRunId, view: s.view, sub: s.sub };
   },
-  setTab: (tab) => set({ tab }),
+  navigate: (patch, opts) => {
+    const prev = get().nav();
+    const next = normalizeNav({ ...prev, ...patch });
+    if (!sameNav(prev, next)) {
+      set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
+      if (next.run && next.run !== prev.run) subscribe(next.run, get().events[next.run]?.length ?? 0);
+    }
+    writeUrl(next, !!opts?.replace);
+  },
+  syncFromUrl: () => {
+    const s = get();
+    // Before boot has loaded the run list we cannot tell a stale id from a real one; keep it.
+    const known = s.booting ? undefined : (id: string) => s.runs.some((r) => r.id === id);
+    const next = decodeNav(location.search, { runExists: known });
+    const prev = s.nav();
+    if (sameNav(prev, next)) return;
+    set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
+    if (next.run && next.run !== prev.run) subscribe(next.run, get().events[next.run]?.length ?? 0);
+  },
+  selectRun: (id, opts) => get().navigate({ run: id, section: "runs", ...(opts?.view ? { view: opts.view } : {}) }, { replace: opts?.replace }),
+  setOverviewOpen: (overviewOpen) => {
+    writePref(PREF_OVERVIEW, overviewOpen);
+    set({ overviewOpen });
+  },
+  setShowThinking: (showThinking) => {
+    writePref(PREF_THINKING, showThinking);
+    set({ showThinking });
+  },
   setTheme: (theme) => {
     localStorage.setItem("reins.theme", theme);
     applyTheme(theme);
@@ -167,7 +231,10 @@ export const useStore = create<State>((set, get) => ({
   },
   openModal: (modal, prefill) => set({ modal, newRunPrefill: prefill }),
   setScrub: (scrubSeq) => set({ scrubSeq }),
-  setLessonFilter: (lessonFilter) => set({ lessonFilter, tab: "lessons" }),
+  setLessonFilter: (lessonFilter) => {
+    set({ lessonFilter });
+    get().navigate({ section: "lessons" });
+  },
   toastMsg: (text, kind = "info") => {
     set({ toast: { text, kind } });
     setTimeout(() => set((s) => (s.toast?.text === text ? { toast: undefined } : {})), 3500);

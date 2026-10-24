@@ -1,36 +1,29 @@
 import React from "react";
 import { Modal, Kbd } from "./ui";
-import { TABS, useStore } from "../state/store";
+import { useStore } from "../state/store";
+import { SHORTCUTS } from "../state/nav";
 
+/** Generated from the nav shortcut map, the same one App binds, so the two cannot drift. */
 export function Help() {
   const openModal = useStore((s) => s.openModal);
-  const rows: [React.ReactNode, string][] = [
-    [<Kbd>n</Kbd>, "New run"],
-    [<Kbd>d</Kbd>, "Open the demo (creates it the first time)"],
-    [<Kbd>space</Kbd>, "Pause / resume the selected live run (ignored while a control has focus)"],
-    [
-      <>
-        <Kbd>1</Kbd>…<Kbd>9</Kbd>
-      </>,
-      TABS.map((t) => t.label).join(" · "),
-    ],
-    [<Kbd>?</Kbd>, "This help"],
-    [<Kbd>esc</Kbd>, "Close dialogs"],
-  ];
   return (
-    <Modal title="Keyboard" onClose={() => openModal(null)} width={520}>
-      <table className="w-full text-[13px]">
+    <Modal title="Keyboard shortcuts" onClose={() => openModal(null)} width={520}>
+      <table className="w-full">
         <tbody>
-          {rows.map(([k, v], i) => (
-            <tr key={i} className="border-b line last:border-0">
-              <td className="py-2 w-28">{k}</td>
-              <td className="py-2 muted">{v}</td>
+          {SHORTCUTS.map((s) => (
+            <tr key={s.key} className="border-b line last:border-0">
+              <td className="py-1.5 w-20">
+                <Kbd>{s.display}</Kbd>
+              </td>
+              <td className="py-1.5 muted">{s.label}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="muted text-[12px] mt-4">
-        While a run is live, type in the box at the bottom of the Stage to leave the agent an operator note. It is delivered before the next model call as an operator-authority message, never mixed into tool output.
+      <p className="muted text-small mt-4 leading-relaxed">
+        Shortcuts are ignored while you type in a text field. The left sidebar switches between Runs, Reliability, Harness and Lessons; a selected run has four views (Activity, Contract,
+        Changes, Details), and Details has Transcript, Context and Guardrails. While a run is live, type in the box at the bottom of Activity to leave the agent an operator note. It is
+        delivered before the next model call as an operator-authority message, never mixed into tool output.
       </p>
     </Modal>
   );

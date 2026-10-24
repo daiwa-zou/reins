@@ -84,8 +84,7 @@ export function NewRun() {
       const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, title: cfg.title || cfg.task.slice(0, 60) });
       if (engine !== "replay") setNewRunDraft(null);
       openModal(null);
-      selectRun(created.id);
-      useStore.getState().setTab("stage");
+      selectRun(created.id, { view: "activity" });
     } catch (e) {
       toastMsg((e as Error).message, "error");
     } finally {

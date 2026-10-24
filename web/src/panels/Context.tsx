@@ -51,6 +51,19 @@ export function ContextPanel({ model }: { model: RunModel }) {
           </div>
         )}
 
+        {model.toolsLoaded.length > 0 && (
+          <div className="card p-4">
+            <div className="font-semibold mb-2">Tools loaded on demand</div>
+            <div className="flex flex-wrap gap-1">
+              {model.toolsLoaded.map((t) => (
+                <span key={t} className="badge badge-neutral mono">
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="muted text-[12px] leading-relaxed">
           Why this view exists: context is a finite attention budget and models lose coherence as it fills. Compaction keeps continuity but not a clean slate; a reset with a written handoff
           fixes "context anxiety" but costs orchestration. Both are switches in the Harness tab.{" "}

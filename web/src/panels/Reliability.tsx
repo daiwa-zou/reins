@@ -15,7 +15,6 @@ export function ReliabilityPanel() {
   const runs = useStore((s) => s.runs);
   const info = useStore((s) => s.info);
   const selectRun = useStore((s) => s.selectRun);
-  const setTab = useStore((s) => s.setTab);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const toastMsg = useStore((s) => s.toastMsg);
 
@@ -112,7 +111,7 @@ export function ReliabilityPanel() {
                 </thead>
                 <tbody>
                   {set.trials.map((t) => (
-                    <tr key={t.runId} className="border-t line hover:bg-[var(--bg-sunk)] cursor-pointer" onClick={() => { selectRun(t.runId); setTab("stage"); }}>
+                    <tr key={t.runId} className="border-t line hover:bg-[var(--bg-sunk)] cursor-pointer" onClick={() => selectRun(t.runId, { view: "activity" })}>
                       <td className="px-4 py-1.5 mono faint">{t.runId}</td>
                       <td className="px-3 py-1.5">
                         <Badge tone={t.status === "completed" && t.verdict === "pass" ? "ok" : t.status === "failed" || t.verdict === "fail" ? "bad" : "neutral"}>{t.status === "completed" ? t.verdict : t.status}</Badge>

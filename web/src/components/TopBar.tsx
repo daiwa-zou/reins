@@ -1,104 +1,92 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { Keyboard, Menu, Monitor, Moon, Plus, Settings, Sun } from "lucide-react";
 import { useStore } from "../state/store";
-import type { RunModel } from "../state/derive";
-import { isLive } from "../state/derive";
-import { StatusBadge, Kbd } from "./ui";
-import { api } from "../lib/api";
-import { money, duration, tilde } from "../lib/format";
+import { Kbd } from "./ui";
 
-export function TopBar({ model }: { model: RunModel }) {
+/** App-level chrome only. Everything about the selected run lives in RunHeader. */
+export function TopBar() {
   const info = useStore((s) => s.info);
   const connected = useStore((s) => s.connected);
   const openModal = useStore((s) => s.openModal);
-  const toastMsg = useStore((s) => s.toastMsg);
-  const selectedRunId = useStore((s) => s.selectedRunId);
-  const theme = useStore((s) => s.theme);
-  const setTheme = useStore((s) => s.setTheme);
-  const cfg = model.config;
-  const live = isLive(model.status);
-
-  const availableEngine = useStore((s) => s.availableEngine);
-  const [pendingAction, setPendingAction] = React.useState<"stopping" | "pausing" | "resuming" | null>(null);
-  React.useEffect(() => setPendingAction(null), [model.status]);
-  const act = (fn: (id: string) => Promise<unknown>, label: "stopping" | "pausing" | "resuming") => () => {
-    if (!selectedRunId) return;
-    setPendingAction(label);
-    fn(selectedRunId).catch((e) => {
-      setPendingAction(null);
-      toastMsg(e.message, "error");
-    });
-  };
-  const elapsed = model.startedTs && model.lastTs ? Date.parse(model.lastTs) - Date.parse(model.startedTs) : 0;
+  const noEngine = !!info && !info.hasApiKey && !info.hasClaudeCode;
 
   return (
-    <header className="flex items-center gap-3 px-3 h-12 border-b line" style={{ background: "var(--bg-elev)" }}>
-      <div className="flex items-center gap-2 font-semibold tracking-tight text-[15px] select-none">
-        <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden>
+    <header className="flex items-center gap-3 px-3 h-11 border-b line shrink-0" style={{ background: "var(--bg-elev)" }}>
+      <div className="flex items-center gap-2 font-semibold tracking-tight text-title select-none">
+        <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden>
           <circle cx="16" cy="16" r="14" fill="var(--accent)" />
           <path d="M9 20c3-7 11-7 14 0" stroke="#fff" strokeWidth="3" fill="none" strokeLinecap="round" />
         </svg>
         Reins
       </div>
-      <span className={`w-2 h-2 rounded-full ${connected ? "bg-[var(--ok)]" : "bg-[var(--bad)] pulse"}`} title={connected ? "Connected" : "Reconnecting…"} />
-
-      {cfg && (
-        <div className="flex items-center gap-2 min-w-0 ml-2">
-          <div className="truncate font-medium max-w-[38vw]" title={cfg.task}>
-            {cfg.title}
-          </div>
-          <span title={model.statusReason ?? undefined}>
-            <StatusBadge status={model.status} />
-          </span>
-          <span className="muted text-[12px] truncate hidden md:inline" title={cfg.workspace}>
-            {tilde(cfg.workspace, info?.home)}
-          </span>
-          {cfg.engine === "replay" && <span className="badge badge-neutral">recorded demo</span>}
-        </div>
-      )}
+      <span className="flex items-center gap-1.5 text-small muted" role="status" aria-live="polite">
+        <span className={`w-2 h-2 rounded-full ${connected ? "bg-[var(--ok)]" : "bg-[var(--bad)] pulse"}`} aria-hidden />
+        <span className={connected ? "sr-only" : ""}>{connected ? "Connected" : "Reconnecting…"}</span>
+      </span>
       <div className="flex-1" />
-      {cfg && (
-        <div className="hidden md:flex items-center gap-4 text-[12px] muted mono">
-          <span title={cfg.engine === "claude-code" ? "Estimated at list price; a Claude subscription is not billed per token" : "Cost so far, from reported token usage"}>
-            {cfg.engine === "claude-code" ? "est. " : ""}
-            {money(model.costUsd)}
-          </span>
-          <span title="Elapsed">{duration(elapsed)}</span>
-        </div>
-      )}
-      {cfg && live && (
-        <div className="flex items-center gap-1">
-          {model.status === "paused" ? (
-            <button className="btn btn-sm" onClick={act(api.resume, "resuming")} disabled={!!pendingAction} title="Resume (space)">
-              {pendingAction === "resuming" ? "Resuming…" : "▶ Resume"}
+      <button className="btn btn-primary btn-sm" onClick={() => openModal("newRun")} title="Start a new run (n)">
+        <Plus size={14} aria-hidden /> New run <Kbd>n</Kbd>
+      </button>
+      <AppMenu attention={noEngine} />
+    </header>
+  );
+}
+
+function AppMenu({ attention }: { attention: boolean }) {
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
+  const openModal = useStore((s) => s.openModal);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    ref.current?.querySelector<HTMLElement>("[role=menuitemradio],[role=menuitem]")?.focus();
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const pick = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+  const themes = [
+    { id: "light", label: "Light", Icon: Sun },
+    { id: "dark", label: "Dark", Icon: Moon },
+    { id: "system", label: "System", Icon: Monitor },
+  ] as const;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button className="icon-btn relative" aria-label="Menu: theme, settings and help" title="Theme, settings and help" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Menu size={16} aria-hidden />
+        {attention && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[var(--warn)]" aria-hidden />}
+      </button>
+      {open && (
+        <div className="menu fade-in" role="menu" aria-label="App menu">
+          <div className="section-label px-2 pt-1.5 pb-1">Theme</div>
+          {themes.map(({ id, label, Icon }) => (
+            <button key={id} role="menuitemradio" aria-checked={theme === id} className="menu-item" onClick={pick(() => setTheme(id))}>
+              <Icon size={15} aria-hidden /> {label}
             </button>
-          ) : (
-            <button className="btn btn-sm" onClick={act(api.pause, "pausing")} disabled={!!pendingAction} title="Pause: the agent finishes its current step, then waits (space)">
-              {pendingAction === "pausing" ? "Pausing…" : "❚❚ Pause"}
-            </button>
-          )}
-          <button className="btn btn-sm btn-danger" disabled={!!pendingAction} onClick={() => confirm("Stop this run? The agent is interrupted after its current tool call; files it already changed stay in the workspace.") && act(api.cancel, "stopping")()}>
-            {pendingAction === "stopping" ? "Stopping…" : "Stop"}
+          ))}
+          <div className="menu-sep" />
+          <button role="menuitem" className="menu-item" onClick={pick(() => openModal("settings"))}>
+            <Settings size={15} aria-hidden /> Settings
+            {attention && <span className="ml-auto badge badge-warn">set up</span>}
+          </button>
+          <button role="menuitem" className="menu-item" onClick={pick(() => openModal("help"))}>
+            <Keyboard size={15} aria-hidden /> Keyboard shortcuts <span className="ml-auto"><Kbd>?</Kbd></span>
           </button>
         </div>
       )}
-      {cfg && !live && (
-        <button className="btn btn-sm" onClick={() => openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, title: nextTitle(cfg.title), engine: cfg.engine === "replay" ? availableEngine() : cfg.engine } as any)} title="Start a new run with the same task and settings. Repeated runs show up together on the Reliability tab.">
-          ↻ Run again
-        </button>
-      )}
-      <button className="btn btn-primary btn-sm" onClick={() => openModal("newRun")}>
-        New run <Kbd>n</Kbd>
-      </button>
-      <button className="btn btn-ghost btn-sm" onClick={() => setTheme(theme === "dark" ? "light" : theme === "light" ? "system" : "dark")} title={`Theme: ${theme}`} aria-label="Toggle theme">
-        {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
-      </button>
-      <button className="btn btn-ghost btn-sm" onClick={() => openModal("settings")} title="Settings" aria-label="Settings">
-        ⚙{info && !info.hasApiKey && !info.hasClaudeCode && <span className="w-1.5 h-1.5 rounded-full bg-[var(--warn)]" title="No live engine available: add an API key or install Claude Code" />}
-      </button>
-      <button className="btn btn-ghost btn-sm" onClick={() => openModal("help")} title="Keyboard shortcuts" aria-label="Help">
-        ?
-      </button>
-    </header>
+    </div>
   );
 }
 
