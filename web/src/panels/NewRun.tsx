@@ -20,7 +20,10 @@ export function NewRun() {
   const toastMsg = useStore((s) => s.toastMsg);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
 
-  const base = useMemo(() => defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", ...(prefill as any) }), [prefill, info]);
+  const base = useMemo(
+    () => defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic", ...(prefill as any) }),
+    [prefill, info],
+  );
   const [cfg, setCfg] = useState<RunConfig>(base);
   const [recent, setRecent] = useState<string[]>([]);
   const [check, setCheck] = useState<{ exists: boolean; git: boolean; files: string[]; path: string } | null>(null);
@@ -49,11 +52,11 @@ export function NewRun() {
     });
   const toggle = (id: ComponentId) => set({ components: { ...cfg.components, [id]: !cfg.components[id] } });
 
-  const canStart = cfg.task.trim().length > 3 && !!check?.exists;
-  const start = async (engine: "anthropic" | "replay") => {
+  const canStart = cfg.task.trim().length > 3 && !!check?.exists && (cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode);
+  const start = async (engine: "live" | "replay") => {
     setBusy(true);
     try {
-      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, engine, title: cfg.title || cfg.task.slice(0, 60) });
+      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, title: cfg.title || cfg.task.slice(0, 60) });
       openModal(null);
       selectRun(created.id);
       useStore.getState().setTab("stage");
@@ -102,6 +105,26 @@ export function NewRun() {
                 <span className="muted truncate">{check.files.join(", ")}</span>
               </>
             )}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[12px] font-semibold">Engine</label>
+          <div className="flex gap-2 mt-1">
+            {(
+              [
+                ["anthropic", "Direct API", info?.hasApiKey ? "Reins owns the loop: compaction, tool search, task budgets, every switch below. Needs an API key." : "Needs an API key (Settings). Reins owns the whole loop."],
+                ["claude-code", "Claude Code", info?.hasClaudeCode ? "Runs each role through the local Claude Code login. Reins keeps the contract, evaluator, guardrails and log; Claude Code keeps context management." : "The claude CLI was not found on this machine."],
+              ] as const
+            ).map(([id, label, desc]) => (
+              <button key={id} type="button" className={`flex-1 rounded-lg border p-2.5 text-left ${cfg.engine === id ? "border-[var(--accent)] sunk" : "line"}`} onClick={() => set({ engine: id })}>
+                <div className="font-medium text-[12.5px] flex items-center gap-2">
+                  {label}
+                  {(id === "anthropic" ? info?.hasApiKey : info?.hasClaudeCode) ? <Badge tone="ok">ready</Badge> : <Badge tone="warn">unavailable</Badge>}
+                </div>
+                <div className="muted text-[11.5px] leading-snug">{desc}</div>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -158,7 +181,7 @@ export function NewRun() {
               <input type="checkbox" checked={sameModel} onChange={(e) => setSameModel(e.target.checked)} /> Use the same model for planner, builder and evaluator
             </label>
             <div className="grid md:grid-cols-2 gap-2">
-              {(["planner", "builder", "evaluator", "classifier"] as const).map((r) => (
+              {(["planner", "builder", "evaluator", "classifier", "scout"] as const).map((r) => (
                 <div key={r} className="rounded-lg border line p-2.5">
                   <div className={`font-medium text-[12.5px] role-${r} capitalize`}>{r}</div>
                   <div className="flex gap-2 mt-1.5">
@@ -253,13 +276,13 @@ export function NewRun() {
         <div className="flex items-center gap-3 pt-2 border-t line">
           <div className="muted text-[12px] leading-snug">
             Rough estimate: <span className="mono">{est}</span>. Live runs stop at the budget.
-            {!info?.hasApiKey && (
+            {cfg.engine === "anthropic" && !info?.hasApiKey && (
               <div className="text-[var(--warn)]">
-                No API key yet: a live run will fail at the first model call.{" "}
+                No API key yet.{" "}
                 <button className="underline" onClick={() => openModal("settings")}>
                   Add one
-                </button>{" "}
-                or watch the demo.
+                </button>
+                {info?.hasClaudeCode ? ", or pick the Claude Code engine above." : ", or watch the demo."}
               </div>
             )}
           </div>
@@ -267,7 +290,7 @@ export function NewRun() {
           <button className="btn" disabled={busy} onClick={() => start("replay")}>
             ▶ Watch demo instead
           </button>
-          <button className="btn btn-primary" disabled={busy || !canStart} onClick={() => start("anthropic")} title={!canStart ? "Enter a task and an existing folder" : undefined}>
+          <button className="btn btn-primary" disabled={busy || !canStart} onClick={() => start("live")} title={!canStart ? "Enter a task, an existing folder, and pick an available engine" : undefined}>
             Start run
           </button>
         </div>

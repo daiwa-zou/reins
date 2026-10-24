@@ -2,7 +2,7 @@
 // from the append-only event log of a run (event sourcing), so replaying a
 // recorded log reproduces the whole experience.
 
-export type RoleId = "planner" | "builder" | "evaluator" | "classifier";
+export type RoleId = "planner" | "builder" | "evaluator" | "classifier" | "scout";
 
 export type Phase = "plan" | "contract" | "build" | "evaluate" | "wrapup";
 
@@ -29,7 +29,13 @@ export type ComponentId =
   | "actionClassifier"
   | "gitCommits"
   | "selfVerification"
-  | "narration";
+  | "narration"
+  | "scouts"
+  | "skills"
+  | "projectMemory"
+  | "taskBudget"
+  | "toolExamples"
+  | "osSandbox";
 
 export interface HarnessComponent {
   id: ComponentId;
@@ -82,8 +88,8 @@ export interface RunConfig {
   title: string;
   task: string;
   workspace: string;
-  engine: "anthropic" | "replay";
-  roles: Record<Exclude<RoleId, "classifier">, RoleSettings> & { classifier: RoleSettings };
+  engine: "anthropic" | "claude-code" | "replay";
+  roles: Record<RoleId, RoleSettings>;
   components: Record<ComponentId, boolean>;
   pauses: RunPauses;
   context: ContextPolicy;
@@ -280,12 +286,58 @@ export interface Lesson {
   implications: string[];
   /** Components this lesson informs. */
   components: ComponentId[];
+  /** Architectural foundations (not switchable) this lesson informs. */
+  foundations: string[];
   tags: string[];
+}
+
+/** A fixed architectural decision of the harness, with the lessons behind it. */
+export interface Foundation {
+  id: string;
+  label: string;
+  short: string;
+  lessons: string[];
+}
+
+// ---- Reliability lab ----------------------------------------------------
+
+export interface Trial {
+  runId: string;
+  title: string;
+  status: RunStatus;
+  verdict: "pass" | "fail" | "none";
+  costUsd: number;
+  durationMs: number;
+  fixRounds: number;
+  createdAt: string;
+  engine: RunConfig["engine"];
+  model: string;
+  harnessVersion?: string;
+}
+
+export interface TrialSet {
+  key: string;
+  task: string;
+  workspace: string;
+  trials: Trial[];
+  /** Finished trials only. */
+  n: number;
+  passes: number;
+  /** Observed pass rate over finished trials. */
+  passRate: number;
+  /** Probability that ALL of k trials pass (consistency), from the observed rate. */
+  passPowK: number;
+  /** Probability that at least one of k trials passes. */
+  passAtK: number;
+  k: number;
 }
 
 export interface ServerInfo {
   version: string;
   hasApiKey: boolean;
+  /** Whether the local Claude Code login can drive the claude-code engine. */
+  hasClaudeCode: boolean;
+  sandboxAvailable: boolean;
   home: string;
   defaultWorkspace: string;
   models: { id: string; label: string; inputPerM: number; outputPerM: number }[];

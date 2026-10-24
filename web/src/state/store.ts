@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { HarnessComponent, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
 import { api } from "../lib/api";
 
-export type Tab = "stage" | "transcript" | "contract" | "context" | "guardrails" | "files" | "harness" | "lessons";
+export type Tab = "stage" | "transcript" | "contract" | "context" | "guardrails" | "files" | "harness" | "lessons" | "reliability";
 export const TABS: { id: Tab; label: string; key: string }[] = [
   { id: "stage", label: "Stage", key: "1" },
   { id: "transcript", label: "Transcript", key: "2" },
@@ -12,6 +12,7 @@ export const TABS: { id: Tab; label: string; key: string }[] = [
   { id: "files", label: "Files", key: "6" },
   { id: "harness", label: "Harness", key: "7" },
   { id: "lessons", label: "Lessons", key: "8" },
+  { id: "reliability", label: "Reliability", key: "9" },
 ];
 
 type Theme = "light" | "dark" | "system";

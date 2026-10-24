@@ -27,7 +27,7 @@ export function Transcript({ model }: { model: RunModel }) {
   const scrubSeq = useStore((s) => s.scrubSeq);
   const setScrub = useStore((s) => s.setScrub);
   const [on, setOn] = useState<Record<string, boolean>>({ tools: true, text: true, guard: true, context: false, flow: true, artifacts: true, notes: true });
-  const [roles, setRoles] = useState<Record<RoleId, boolean>>({ planner: true, builder: true, evaluator: true, classifier: true });
+  const [roles, setRoles] = useState<Record<RoleId, boolean>>({ planner: true, builder: true, evaluator: true, classifier: true, scout: true });
   const [q, setQ] = useState("");
 
   const allowed = useMemo(() => new Set(GROUPS.filter((g) => on[g.id]).flatMap((g) => g.types)), [on]);
@@ -56,7 +56,7 @@ export function Transcript({ model }: { model: RunModel }) {
             </button>
           ))}
           <span className="w-px h-5 line border-l mx-1" />
-          {(["planner", "builder", "evaluator"] as RoleId[]).map((r) => (
+          {(["planner", "builder", "evaluator", "scout"] as RoleId[]).map((r) => (
             <button key={r} className={`btn btn-sm ${roles[r] ? "" : "btn-ghost faint"}`} onClick={() => setRoles({ ...roles, [r]: !roles[r] })}>
               <RoleChip role={r} />
             </button>

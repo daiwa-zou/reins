@@ -3,6 +3,7 @@ import type { RunModel } from "../state/derive";
 import { useStore } from "../state/store";
 import { Badge, Switch } from "../components/ui";
 import type { ComponentId, HarnessComponent } from "@shared/types";
+import { FOUNDATIONS } from "@shared/components";
 
 const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
 
@@ -89,11 +90,33 @@ export function HarnessPanel({ model }: { model: RunModel }) {
           </div>
         ))}
 
+        <div>
+          <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-2">Foundations (not switches, still from the lessons)</div>
+          <div className="grid md:grid-cols-2 gap-2">
+            {FOUNDATIONS.map((f) => (
+              <div key={f.id} className="card p-3 flex flex-col gap-1">
+                <div className="font-semibold">{f.label}</div>
+                <div className="text-[12.5px] leading-relaxed muted">{f.short}</div>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {f.lessons.map((slug) => {
+                    const l = lessons.find((x) => x.slug === slug);
+                    return (
+                      <button key={slug} className="badge badge-neutral hover:brightness-95" onClick={() => setLessonFilter(slug)} title={l?.takeaway}>
+                        {l?.title.split(":")[0].slice(0, 40) ?? slug}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {cfg && (
           <div className="card p-4">
             <div className="font-semibold mb-2">Effective configuration</div>
             <div className="grid md:grid-cols-2 gap-x-6 gap-y-1 text-[12.5px]">
-              {(["planner", "builder", "evaluator", "classifier"] as const).map((r) => (
+              {(["planner", "builder", "evaluator", "classifier", "scout"] as const).map((r) => (
                 <Row key={r} k={r} v={`${cfg.roles[r].model} · effort ${cfg.roles[r].effort}`} />
               ))}
               <Row k="budget" v={`$${cfg.budgetUsd} · ${cfg.maxTurnsPerPhase} turns/phase · ${cfg.maxFixRounds} fix rounds`} />

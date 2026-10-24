@@ -254,7 +254,8 @@ function TurnRow({ item, showThinking }: { item: Extract<FeedItem, { kind: "turn
           <span className="flex-1" />
           {item.usage && (
             <button className="faint mono hover:text-[var(--fg)]" onClick={() => setOpen(!open)} title="Prompt tokens / output tokens / cost for this turn">
-              {tokens(item.usage.input + item.usage.cacheRead + item.usage.cacheWrite)} ▸ {tokens(item.usage.output)} · {money(item.costUsd ?? 0)}
+              {tokens(item.usage.input + item.usage.cacheRead + item.usage.cacheWrite)} ▸ {tokens(item.usage.output)}
+              {item.costUsd ? ` · ${money(item.costUsd)}` : ""}
             </button>
           )}
           <span className="faint mono">{clock(item.ts)}</span>

@@ -5,6 +5,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { RoleId } from "../../../shared/types.js";
 import { confinePath } from "../guardrails/policy.js";
 import { listLessons, getLesson } from "../lessons.js";
+import { loadSkills } from "../skills.js";
+import { sandboxArgs, sandboxAvailable } from "./sandbox.js";
 
 /** Tool results are capped so one noisy command cannot flood the context. */
 export const MAX_RESULT_CHARS = 24_000;
@@ -13,8 +15,10 @@ export interface ToolContext {
   workspace: string;
   role: RoleId;
   allowNetwork: boolean;
+  /** Run shell commands under the OS sandbox when available. */
+  sandbox: boolean;
   signal: AbortSignal;
-  /** Phase-specific tools register handlers here (propose_contract, finish, ...). */
+  /** Phase-specific tools register handlers here (propose_contract, finish, delegate_scout, ...). */
   handlers: Record<string, (input: any) => Promise<string> | string>;
 }
 
@@ -33,7 +37,7 @@ function tool(
   properties: Record<string, unknown>,
   required: string[],
   run: ToolDef["run"],
-  opts: { deferred?: boolean; readOnly?: boolean } = {},
+  opts: { deferred?: boolean; readOnly?: boolean; examples?: Record<string, unknown>[] } = {},
 ): ToolDef {
   return {
     schema: {
@@ -41,6 +45,7 @@ function tool(
       description,
       input_schema: { type: "object", properties, required, additionalProperties: false },
       strict: true,
+      ...(opts.examples ? { input_examples: opts.examples } : {}),
     } as Anthropic.Beta.BetaTool,
     deferred: opts.deferred ?? false,
     readOnly: opts.readOnly ?? false,
@@ -58,9 +63,32 @@ export function truncate(s: string, max = MAX_RESULT_CHARS): { text: string; tru
   };
 }
 
-export function runShell(command: string, cwd: string, signal: AbortSignal, timeoutMs = 120_000, env?: NodeJS.ProcessEnv): Promise<{ code: number | null; out: string; timedOut: boolean }> {
+/**
+ * Credentials never enter the sandbox: the agent's shell gets a copy of the
+ * environment with API keys and tokens removed, so a prompt-injected
+ * `env | curl` cannot exfiltrate them (contain-claude, sandboxing posts).
+ */
+export function scrubbedEnv(): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (/^(ANTHROPIC|CLAUDE|OPENAI|AWS_SECRET|AWS_SESSION|GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|REINS_)/.test(k)) continue;
+    if (/(_TOKEN|_SECRET|_API_KEY|PASSWORD|CREDENTIALS)$/i.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+export function runShell(
+  command: string,
+  cwd: string,
+  signal: AbortSignal,
+  timeoutMs = 120_000,
+  env?: NodeJS.ProcessEnv,
+  sandbox?: { workspace: string; allowNetwork: boolean },
+): Promise<{ code: number | null; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
-    const child = spawn("/bin/zsh", ["-lc", command], { cwd, env: { ...process.env, ...env, REINS: "1", CI: "1", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+    const spawnSpec = sandbox && sandboxAvailable() ? sandboxArgs(command, sandbox.workspace, sandbox.allowNetwork) : { file: "/bin/zsh", args: ["-lc", command] };
+    const child = spawn(spawnSpec.file, spawnSpec.args, { cwd, env: { ...scrubbedEnv(), ...env, REINS: "1", CI: "1", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let timedOut = false;
     const cap = (chunk: Buffer) => {
@@ -143,6 +171,7 @@ const editFile = tool(
     fs.writeFileSync(c.abs, src.replace(input.old_text, input.new_text));
     return `Edited ${input.path}`;
   },
+  { examples: [{ path: "src/app.js", old_text: "app.use('/users', users);", new_text: "app.use('/users', users);\napp.get('/health', (req, res) => res.json({ status: 'ok' }));" }] },
 );
 
 const listFiles = tool(
@@ -213,11 +242,13 @@ const bash = tool(
   ["command"],
   async (input, ctx) => {
     const timeout = Math.min(600, input.timeout_seconds ?? 120) * 1000;
-    const r = await runShell(input.command, ctx.workspace, ctx.signal, timeout);
+    const r = await runShell(input.command, ctx.workspace, ctx.signal, timeout, undefined, ctx.sandbox ? { workspace: ctx.workspace, allowNetwork: ctx.allowNetwork } : undefined);
     const status = r.timedOut ? `[timed out after ${timeout / 1000}s]` : r.code === 0 ? "" : `[exit code ${r.code}]`;
-    const body = r.out.trim();
+    let body = r.out.trim();
+    if (ctx.sandbox && /operation not permitted|sandbox/i.test(body) && r.code !== 0) body += "\n[sandbox: writes are limited to the workspace and temp dirs" + (ctx.allowNetwork ? "" : "; network is off for this run") + "]";
     return [body, status].filter(Boolean).join("\n") || "(no output, exit 0)";
   },
+  { examples: [{ command: "npm test 2>&1 | tail -20" }] },
 );
 
 const think = tool(
@@ -287,6 +318,22 @@ const readLesson = tool("read_lesson", "Read one lesson from the harness library
   return `# ${l.title}\n\n${l.learnings.map((x) => "- " + x).join("\n")}\n\n## Harness implications\n${l.implications.map((x) => "- " + x).join("\n")}`;
 }, { deferred: true, readOnly: true });
 
+const readSkill = tool("read_skill", "Read the full body of a skill from the skills index in your instructions. Skills hold procedures and checklists; read one when its description matches what you are doing.", { name: { type: "string" } }, ["name"], async (input, ctx) => {
+  const s = loadSkills(ctx.workspace).find((x) => x.name === input.name);
+  if (!s) throw new Error(`No skill named ${input.name}.`);
+  const extra = fs.readdirSync(s.dir).filter((f) => f !== "SKILL.md");
+  return `# ${s.name}\n${s.body}${extra.length ? `\n\nFiles next to this skill (read with read_file if the path is inside the workspace): ${extra.join(", ")}` : ""}`;
+}, { readOnly: true });
+
+const delegateScout = tool(
+  "delegate_scout",
+  "Send a read-only scout subagent to answer a research question about the codebase (where is X handled, how are tests organised, what does module Y expose). It explores with list_files, search and read_file and returns a short written answer; none of its tool output enters your context. Use it instead of reading many files yourself.",
+  { question: { type: "string", description: "A specific question with the context the scout needs" } },
+  ["question"],
+  async (input, ctx) => (ctx.handlers.delegate_scout ? ctx.handlers.delegate_scout(input) : "Scouts are disabled for this run."),
+  { readOnly: true },
+);
+
 // ---- Phase-specific structured tools --------------------------------------
 
 const criterionSchema = {
@@ -307,6 +354,18 @@ const proposeContract = tool(
   { criteria: { type: "array", items: criterionSchema }, rationale: { type: "string" } },
   ["criteria", "rationale"],
   async (input, ctx) => ctx.handlers.propose_contract?.(input) ?? "Contract proposed.",
+  {
+    examples: [
+      {
+        criteria: [
+          { id: "C1", text: "GET /health responds 200 with JSON containing status and uptime", verify: "curl -s localhost:3000/health | jq 'has(\"status\") and has(\"uptime\")'", hard: true },
+          { id: "C2", text: "npm test passes including the new test file", verify: "npm test", hard: true },
+          { id: "C3", text: "A request with an unknown path still returns JSON 404", verify: "curl -s -o /dev/null -w '%{http_code}' localhost:3000/nope", hard: false },
+        ],
+        rationale: "Each maps to a feature; C3 covers a failure path.",
+      },
+    ],
+  },
 );
 
 const reviewContract = tool(
@@ -345,7 +404,7 @@ const finish = tool(
 );
 
 export const ALL_TOOLS: Record<string, ToolDef> = Object.fromEntries(
-  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, proposeContract, reviewContract, reportEvaluation, finish].map((t) => [
+  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeContract, reviewContract, reportEvaluation, finish].map((t) => [
     (t.schema as Anthropic.Beta.BetaTool).name,
     t,
   ]),

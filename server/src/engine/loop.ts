@@ -61,6 +61,8 @@ export class AgentLoop {
   private compactionFailed = false;
   private contextEditingFailed = false;
   private systemRoleFailed = false;
+  private examplesFailed = false;
+  private taskBudgetFailed = false;
 
   constructor(
     private client: Anthropic,
@@ -89,7 +91,10 @@ export class AgentLoop {
       if (name === "think" && !this.config.components.thinkTool) continue;
       if (name === "http_fetch" && !this.config.guardrail.allowNetwork) continue;
       if (name === "git_commit" && !this.config.components.gitCommits) continue;
-      const schema = { ...(def.schema as Anthropic.Beta.BetaTool) } as Anthropic.Beta.BetaTool & { defer_loading?: boolean };
+      if (name === "delegate_scout" && (!this.config.components.scouts || this.opts.role === "scout")) continue;
+      if (name === "read_skill" && !this.config.components.skills) continue;
+      const schema = { ...(def.schema as Anthropic.Beta.BetaTool) } as Anthropic.Beta.BetaTool & { defer_loading?: boolean; input_examples?: unknown };
+      if (!this.config.components.toolExamples || this.examplesFailed) delete schema.input_examples;
       if (useSearch && def.deferred && !this.loadedDeferred.has(name)) schema.defer_loading = true;
       out.push(schema);
     }
@@ -119,6 +124,8 @@ export class AgentLoop {
     if (this.config.components.compaction && !this.compactionFailed) b.push("compact-2026-01-12");
     if (this.config.components.contextEditing && !this.contextEditingFailed) b.push("context-management-2025-06-27");
     if (!this.betasOverride) b.push("server-side-fallback-2026-07-01");
+    if (this.config.components.toolExamples && !this.examplesFailed) b.push("advanced-tool-use-2025-11-20");
+    if (this.config.components.taskBudget && !this.taskBudgetFailed) b.push("task-budgets-2026-03-13");
     return b;
   }
 
@@ -304,7 +311,10 @@ export class AgentLoop {
       messages: this.messages,
       tools: this.toolSchemas(),
       thinking: { type: "adaptive", display: "summarized" } as any,
-      output_config: { effort: s.effort } as any,
+      output_config: {
+        effort: s.effort,
+        ...(this.config.components.taskBudget && !this.taskBudgetFailed ? { task_budget: { type: "tokens", total: this.taskBudgetTokens() } } : {}),
+      } as any,
       betas: this.betas(),
       ...(this.betas().includes("server-side-fallback-2026-07-01") ? ({ fallbacks: "default" } as any) : {}),
     };
@@ -312,6 +322,12 @@ export class AgentLoop {
     if (cm) params.context_management = cm;
     const stream = this.client.beta.messages.stream(params, { signal: this.control.signal });
     return stream.finalMessage();
+  }
+
+  /** A per-phase token budget the model can see, so it paces itself (time awareness). */
+  private taskBudgetTokens(): number {
+    const perTurn = 6_000;
+    return Math.max(20_000, (this.opts.maxTurns - this.turn + 1) * perTurn);
   }
 
   /** Degrade gracefully when an optional feature is rejected, instead of failing the run. */
@@ -340,6 +356,16 @@ export class AgentLoop {
       // rewrite system messages into user notes
       this.messages = this.messages.map((m) => ((m as any).role === "system" ? { role: "user", content: `<operator_note>${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}</operator_note>` } : m));
       this.bus.emitEvent({ type: "note", level: "warn", text: "Operator notes delivered as user text on this model." });
+      return true;
+    }
+    if (msg.includes("input_examples") || msg.includes("advanced-tool-use")) {
+      this.examplesFailed = true;
+      this.bus.emitEvent({ type: "note", level: "warn", text: "Tool use examples were rejected here; continuing without them." });
+      return true;
+    }
+    if (msg.includes("task_budget") || msg.includes("task-budgets")) {
+      this.taskBudgetFailed = true;
+      this.bus.emitEvent({ type: "note", level: "warn", text: "Task budgets are not available for this model; continuing without them." });
       return true;
     }
     if (msg.includes("fallback")) {
@@ -374,7 +400,8 @@ export class AgentLoop {
       if (!approved) return done(false, `The operator declined this action${note ? `: ${note}` : "."} Find another way or explain why it is needed.`);
     }
 
-    const ctx: ToolContext = { workspace: this.config.workspace, role, allowNetwork: this.config.guardrail.allowNetwork, signal: this.control.signal, handlers: this.opts.handlers };
+    const handlers = { ...this.opts.handlers, delegate_scout: (input: any) => this.scout(String(input?.question ?? "")) };
+    const ctx: ToolContext = { workspace: this.config.workspace, role, allowNetwork: this.config.guardrail.allowNetwork, sandbox: this.config.components.osSandbox, signal: this.control.signal, handlers };
     try {
       const out = await def.run(t.input, ctx);
       const sniff = sniffInjection(out);
@@ -386,6 +413,23 @@ export class AgentLoop {
     } catch (err) {
       return done(false, (err as Error).message);
     }
+  }
+
+  /** A scout: a fresh, short, read-only conversation whose transcript never enters the parent's context. */
+  private async scout(question: string): Promise<string> {
+    if (!this.config.components.scouts) return "Scouts are disabled for this run.";
+    const sub = new AgentLoop(this.client, this.config, this.bus, this.control, {
+      role: "scout",
+      system: `You are a scout inside Reins, an agent harness. Another agent asked you a question about the codebase in ${this.config.workspace}. Explore with list_files, search and read_file (never write), then answer in under 300 words: the files involved (paths), how the relevant pieces fit, and anything surprising. Quote short snippets only when they matter. End your turn with the answer as plain text.`,
+      tools: ["list_files", "search", "read_file", "think"],
+      terminal: [],
+      handlers: {},
+      maxTurns: 12,
+    });
+    const r = await sub.run(question);
+    this.cost += r.costUsd;
+    this.usage = addUsage(this.usage, r.usage);
+    return r.finalText.trim() || `The scout ran out of turns (${r.reason}) without a written answer.`;
   }
 
   private async gate(t: Anthropic.Beta.BetaToolUseBlock): Promise<{ verdict: "allow" | "ask" | "deny"; rationale: string }> {

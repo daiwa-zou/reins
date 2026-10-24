@@ -27,6 +27,7 @@
   --builder: #1e7fb8;
   --evaluator: #c23f6e;
   --classifier: #b7791f;
+  --scout: #2a8f8a;
   --shadow: 0 1px 2px rgba(20, 18, 14, 0.06), 0 8px 24px -16px rgba(20, 18, 14, 0.25);
 }
 
@@ -52,6 +53,7 @@
   --builder: #5cb3e6;
   --evaluator: #f07aa2;
   --classifier: #e0ad4a;
+  --scout: #4fc3bd;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -16px rgba(0, 0, 0, 0.8);
 }
 
@@ -110,10 +112,12 @@ pre { white-space: pre-wrap; word-break: break-word; }
 .role-builder { color: var(--builder); }
 .role-evaluator { color: var(--evaluator); }
 .role-classifier { color: var(--classifier); }
+.role-scout { color: var(--scout); }
 .bg-role-planner { background: var(--planner); }
 .bg-role-builder { background: var(--builder); }
 .bg-role-evaluator { background: var(--evaluator); }
 .bg-role-classifier { background: var(--classifier); }
+.bg-role-scout { background: var(--scout); }
 
 .kbd { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-elev); color: var(--fg-muted); }
 

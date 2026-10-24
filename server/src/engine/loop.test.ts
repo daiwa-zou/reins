@@ -1,0 +1,242 @@
+import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execSync } from "node:child_process";
+import type Anthropic from "@anthropic-ai/sdk";
+import { AgentLoop, type LoopControl } from "./loop.js";
+import { Orchestrator } from "./orchestrator.js";
+import { RunBus } from "./bus.js";
+import { defaultRunConfig } from "../../../shared/components.js";
+import type { RunEvent } from "../../../shared/types.js";
+
+/**
+ * A scripted stand-in for the Messages API. Each call pops the next scripted
+ * response; `fn` responses can look at the request (to assert on tools,
+ * betas, context management) and raise typed-looking errors.
+ */
+type Scripted = Partial<Anthropic.Beta.BetaMessage> | ((params: any) => Partial<Anthropic.Beta.BetaMessage>);
+function fakeClient(script: Scripted[]) {
+  const calls: any[] = [];
+  const client = {
+    beta: {
+      messages: {
+        stream: (params: any) => {
+          calls.push(params);
+          const next = script.shift();
+          if (!next) throw new Error("script exhausted");
+          const body = typeof next === "function" ? next(params) : next;
+          const msg: Anthropic.Beta.BetaMessage = {
+            id: "msg",
+            type: "message",
+            role: "assistant",
+            model: params.model,
+            content: [],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 1000, output_tokens: 50, cache_read_input_tokens: 4000, cache_creation_input_tokens: 0 } as any,
+            ...body,
+          } as any;
+          return { finalMessage: async () => msg };
+        },
+      },
+    },
+  } as unknown as Anthropic;
+  return { client, calls };
+}
+
+const toolUse = (id: string, name: string, input: any) => ({ type: "tool_use", id, name, input }) as any;
+const text = (t: string) => ({ type: "text", text: t }) as any;
+
+function control(overrides: Partial<LoopControl> = {}): LoopControl {
+  return {
+    signal: new AbortController().signal,
+    waitIfPaused: async () => {},
+    requestApproval: async () => ({ approved: true }),
+    drainSteer: () => [],
+    remainingBudget: () => 100,
+    ...overrides,
+  };
+}
+
+function tmpWorkspace(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reins-loop-"));
+  fs.writeFileSync(path.join(dir, "README.md"), "# Sample\n");
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "sample", scripts: { test: "echo ok" } }));
+  execSync("git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init", { cwd: dir });
+  return dir;
+}
+
+function collect(bus: RunBus) {
+  const events: RunEvent[] = [];
+  bus.on("event", (e: RunEvent) => events.push(e));
+  return events;
+}
+
+describe("AgentLoop", () => {
+  it("executes tools, feeds results back and ends on a terminal tool", async () => {
+    const ws = tmpWorkspace();
+    const cfg = defaultRunConfig({ task: "t", workspace: ws, components: { osSandbox: false } as any });
+    const { client, calls } = fakeClient([
+      { content: [text("Let me look."), toolUse("t1", "read_file", { path: "README.md" }), toolUse("t2", "list_files", { pattern: "*.json" })], stop_reason: "tool_use" },
+      (params) => {
+        const last = params.messages[params.messages.length - 1];
+        expect(last.role).toBe("user");
+        expect(last.content.map((b: any) => b.tool_use_id)).toEqual(["t1", "t2"]);
+        expect(last.content[0].content).toContain("# Sample");
+        return { content: [toolUse("t3", "finish", { summary: "done", open_items: [] })], stop_reason: "tool_use" };
+      },
+    ]);
+    const bus = new RunBus("test", false);
+    const events = collect(bus);
+    const loop = new AgentLoop(client, cfg, bus, control(), { role: "planner", system: "sys", tools: ["read_file", "list_files", "finish"], terminal: ["finish"], handlers: {}, maxTurns: 5 });
+    const r = await loop.run("go");
+    expect(r.reason).toBe("terminal");
+    expect(r.terminalInput.summary).toBe("done");
+    expect(r.turns).toBe(2);
+    expect(r.costUsd).toBeGreaterThan(0);
+    expect(events.filter((e) => e.type === "tool.called")).toHaveLength(3);
+    expect(events.filter((e) => e.type === "context.snapshot")).toHaveLength(2);
+    // request shape: cached system prefix, adaptive thinking, betas for compaction + context editing
+    expect(calls[0].system[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(calls[0].betas).toContain("compact-2026-01-12");
+    expect(calls[0].context_management.edits.map((e: any) => e.type)).toEqual(["clear_tool_uses_20250919", "compact_20260112"]);
+    expect(calls[0].output_config.task_budget.type).toBe("tokens");
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+
+  it("gates risky shell commands through approval and records the decision", async () => {
+    const ws = tmpWorkspace();
+    const cfg = defaultRunConfig({ task: "t", workspace: ws, components: { osSandbox: false, actionClassifier: false } as any });
+    const asked: string[] = [];
+    const { client } = fakeClient([
+      { content: [toolUse("t1", "bash", { command: "git push origin main" })], stop_reason: "tool_use" },
+      (params) => {
+        const res = params.messages[params.messages.length - 1].content[0];
+        expect(res.is_error).toBe(true);
+        expect(res.content).toContain("declined");
+        return { content: [toolUse("t2", "bash", { command: "sudo rm -rf /" })], stop_reason: "tool_use" };
+      },
+      (params) => {
+        const res = params.messages[params.messages.length - 1].content[0];
+        expect(res.content).toContain("Denied by guardrails");
+        return { content: [toolUse("t3", "finish", { summary: "ok", open_items: [] })], stop_reason: "tool_use" };
+      },
+    ]);
+    const bus = new RunBus("test", false);
+    const events = collect(bus);
+    const loop = new AgentLoop(client, cfg, bus, control({ requestApproval: async (_k, title) => (asked.push(title), { approved: false, note: "not today" }) }), {
+      role: "builder",
+      system: "sys",
+      tools: ["bash", "finish"],
+      terminal: ["finish"],
+      handlers: {},
+      maxTurns: 5,
+    });
+    const r = await loop.run("go");
+    expect(r.reason).toBe("terminal");
+    expect(asked).toHaveLength(1);
+    const decisions = events.filter((e): e is Extract<RunEvent, { type: "guardrail.decision" }> => e.type === "guardrail.decision");
+    expect(decisions.map((d) => d.verdict)).toEqual(["ask", "deny", "deny"]);
+    expect(decisions[1].source).toBe("user");
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+
+  it("drops a rejected beta and retries instead of failing the run", async () => {
+    const ws = tmpWorkspace();
+    const cfg = defaultRunConfig({ task: "t", workspace: ws, components: { osSandbox: false } as any });
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const { client, calls } = fakeClient([
+      () => {
+        throw new Anthropic.BadRequestError(400, { error: { message: "compact_20260112 is not supported" } }, "compact_20260112 is not supported", new Headers());
+      },
+      (params) => {
+        expect(params.betas).not.toContain("compact-2026-01-12");
+        return { content: [text("fine")], stop_reason: "end_turn" };
+      },
+    ]);
+    const bus = new RunBus("test", false);
+    const events = collect(bus);
+    const loop = new AgentLoop(client, cfg, bus, control(), { role: "planner", system: "sys", tools: ["read_file"], terminal: [], handlers: {}, maxTurns: 3 });
+    const r = await loop.run("go");
+    expect(r.reason).toBe("end_turn");
+    expect(calls).toHaveLength(2);
+    expect(events.some((e) => e.type === "note" && e.text.includes("compaction"))).toBe(true);
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+
+  it("delivers operator notes as mid-conversation system messages", async () => {
+    const ws = tmpWorkspace();
+    const cfg = defaultRunConfig({ task: "t", workspace: ws, components: { osSandbox: false } as any });
+    const notes = ["keep it short"];
+    const { client, calls } = fakeClient([{ content: [text("ok")], stop_reason: "end_turn" }]);
+    const bus = new RunBus("test", false);
+    const loop = new AgentLoop(client, cfg, bus, control({ drainSteer: () => notes.splice(0) }), { role: "builder", system: "sys", tools: [], terminal: [], handlers: {}, maxTurns: 2 });
+    await loop.run("go");
+    const sys = calls[0].messages.find((m: any) => m.role === "system");
+    expect(sys.content).toContain("keep it short");
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+});
+
+describe("Orchestrator", () => {
+  it("runs plan -> contract -> build -> evaluate -> wrapup with file handoff and commits", async () => {
+    const ws = tmpWorkspace();
+    const cfg = defaultRunConfig({ task: "Add a greeting file", workspace: ws, components: { osSandbox: false, actionClassifier: false } as any, pauses: { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false } });
+    const features = [{ id: "F1", title: "hello.txt exists", status: "todo" }];
+    const criteria = [{ id: "C1", text: "hello.txt contains hello", verify: "cat hello.txt", hard: true }];
+    const { client } = fakeClient([
+      // planner
+      (params) => {
+        const names = params.tools.map((t: any) => t.name);
+        expect(names).toContain("finish");
+        expect(names).toContain("update_progress");
+        expect(names).not.toContain("bash");
+        return { content: [toolUse("p1", "write_file", { path: ".reins/spec.md", content: "# spec" }), toolUse("p2", "update_progress", { features, note: "planned" })], stop_reason: "tool_use" };
+      },
+      { content: [toolUse("p3", "finish", { summary: "planned", open_items: [] })], stop_reason: "tool_use" },
+      // contract: builder proposes, evaluator reviews
+      (params) => {
+        expect(params.tools.map((t: any) => t.name)).toContain("propose_contract");
+        return { content: [toolUse("c1", "propose_contract", { criteria, rationale: "r" })], stop_reason: "tool_use" };
+      },
+      (params) => {
+        expect(params.tools.map((t: any) => t.name)).toContain("review_contract");
+        return { content: [toolUse("c2", "review_contract", { accept: true, criteria, feedback: "fine" })], stop_reason: "tool_use" };
+      },
+      // build
+      { content: [toolUse("b1", "write_file", { path: "hello.txt", content: "hello\n" }), toolUse("b2", "update_progress", { features: [{ ...features[0], status: "done" }], note: "built" })], stop_reason: "tool_use" },
+      { content: [toolUse("b3", "finish", { summary: "built", open_items: [] })], stop_reason: "tool_use" },
+      // evaluate
+      (params) => {
+        expect(params.messages[0].content).toContain("hello.txt contains hello");
+        return { content: [toolUse("e1", "bash", { command: "cat hello.txt" })], stop_reason: "tool_use" };
+      },
+      (params) => {
+        expect(params.messages[params.messages.length - 1].content[0].content).toContain("hello");
+        return { content: [toolUse("e2", "report_evaluation", { results: [{ id: "C1", pass: true, evidence: "cat shows hello" }], summary: "all good" })], stop_reason: "tool_use" };
+      },
+    ]);
+    const bus = new RunBus("test", false);
+    const events = collect(bus);
+    const approvals: string[] = [];
+    const orch = new Orchestrator(client, cfg, bus, {
+      ...control(),
+      requestPhaseApproval: async () => ({ approved: true }),
+      requestContractApproval: async (c) => (approvals.push("contract"), { approved: true, criteria: c }),
+    });
+    const r = await orch.run();
+    expect(r.ok).toBe(true);
+    expect(approvals).toEqual(["contract"]);
+    expect(events.filter((e) => e.type === "phase.started").map((e: any) => e.phase)).toEqual(["plan", "contract", "build", "evaluate", "wrapup"]);
+    expect(fs.readFileSync(path.join(ws, ".reins/contract.json"), "utf8")).toContain("C1");
+    expect(fs.readFileSync(path.join(ws, ".reins/progress.md"), "utf8")).toContain("built");
+    expect(JSON.parse(fs.readFileSync(path.join(ws, ".reins/features.json"), "utf8"))[0].status).toBe("done");
+    expect(events.some((e) => e.type === "git.commit")).toBe(true);
+    expect(execSync("git log --oneline", { cwd: ws, encoding: "utf8" })).toContain("reins: build");
+    expect(execSync("git status --short", { cwd: ws, encoding: "utf8" }).trim()).toBe("");
+    const evalEv = events.find((e): e is Extract<RunEvent, { type: "evaluation.result" }> => e.type === "evaluation.result")!;
+    expect(evalEv.verdict).toBe("pass");
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+});

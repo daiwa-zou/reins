@@ -1,4 +1,4 @@
-import type { ContractCriterion, HarnessComponent, Lesson, RunConfig, RunEvent, RunSummary, ServerInfo, ChangedFile } from "@shared/types";
+import type { ContractCriterion, HarnessComponent, Lesson, RunConfig, RunEvent, RunSummary, ServerInfo, ChangedFile, TrialSet } from "@shared/types";
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -35,5 +35,7 @@ export const api = {
   diff: (id: string, file: string) => fetch(`/api/runs/${id}/diff?file=${encodeURIComponent(file)}`).then((r) => r.text()),
   workspaces: () => fetch("/api/workspaces").then((r) => j<{ recent: string[]; home: string }>(r)),
   checkWorkspace: (p: string) => fetch(`/api/workspaces/check?path=${encodeURIComponent(p)}`).then((r) => j<{ path: string; exists: boolean; git: boolean; files: string[] }>(r)),
+  trials: (k = 3) => fetch(`/api/trials?k=${k}`).then((r) => j<TrialSet[]>(r)),
+  repeat: (id: string, k: number) => post(`/api/runs/${id}/repeat?k=${k}`).then((r) => j<{ ok: true; k: number }>(r)),
   setApiKey: (apiKey: string) => post("/api/settings/api-key", { apiKey }).then((r) => j<{ ok: true; hasApiKey: boolean }>(r)),
 };

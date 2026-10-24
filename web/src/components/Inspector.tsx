@@ -15,7 +15,7 @@ export function Inspector({ model, live }: { model: RunModel; live: RunModel }) 
   const budget = cfg.budgetUsd;
   const spentFrac = budget ? model.costUsd / budget : 0;
   const done = model.features.filter((f) => f.status === "done").length;
-  const roles: RoleId[] = ["planner", "builder", "evaluator"];
+  const roles: RoleId[] = ["planner", "builder", "evaluator", ...(model.turnsByRole.scout ? (["scout"] as RoleId[]) : [])];
   const latestEval = model.evaluations[model.evaluations.length - 1];
 
   return (

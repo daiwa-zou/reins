@@ -156,9 +156,10 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         break;
       case "turn.finished":
         if (currentTurn && currentTurn.role === ev.role) {
-          currentTurn.usage = ev.usage;
-          currentTurn.costUsd = ev.costUsd;
-          currentTurn.stopReason = ev.stopReason;
+          // Engines may report usage and cost in separate events for one turn.
+          if (ev.usage.input + ev.usage.output + ev.usage.cacheRead + ev.usage.cacheWrite > 0) currentTurn.usage = ev.usage;
+          currentTurn.costUsd = (currentTurn.costUsd ?? 0) + ev.costUsd;
+          if (ev.stopReason) currentTurn.stopReason = ev.stopReason;
         }
         m.costUsd += ev.costUsd;
         m.costByRole[ev.role] = (m.costByRole[ev.role] ?? 0) + ev.costUsd;
@@ -287,5 +288,5 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
 
 export const PHASE_ORDER: Phase[] = ["plan", "contract", "build", "evaluate", "wrapup"];
 export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", contract: "Contract", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
-export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier" };
+export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier", scout: "Scout" };
 export const isLive = (s: RunStatus) => s === "running" || s === "paused" || s === "waiting_approval" || s === "queued";

@@ -30,7 +30,7 @@ const ASK: [RegExp, string][] = [
   [/\bdocker\s+(rm|rmi|system\s+prune)\b/, "removes containers or images"],
   [/\bkubectl\s+(delete|apply|scale)\b/, "mutates a cluster"],
   [/\b(psql|mysql)\b.*\b(drop|truncate|delete)\b/i, "destructive SQL"],
-  [/\b(open|xdg-open)\b/, "opens an application"],
+  [/(^|[;&|]\s*|\$\(\s*)(open|xdg-open)\s/, "opens an application"],
   [/\bosascript\b|\bautomator\b/, "scripts the desktop"],
 ];
 

@@ -8,12 +8,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClientMessage, RunEvent, ServerInfo, ServerMessage } from "../../shared/types.js";
-import { COMPONENTS, MODELS } from "../../shared/components.js";
+import { COMPONENTS, HARNESS_VERSION, MODELS } from "../../shared/components.js";
 import { RunManager } from "./engine/runManager.js";
 import { ensureHome, REINS_HOME } from "./store/runStore.js";
 import { listLessons } from "./lessons.js";
 import { changedFiles, fileDiff, headSha } from "./workspace.js";
 import { loadDemoEvents } from "./engine/replay.js";
+import { allTrialSets } from "./engine/trials.js";
+import { sandboxAvailable } from "./tools/sandbox.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.REINS_PORT ?? 5191);
@@ -41,8 +43,10 @@ app.use("/api/*", cors());
 
 function info(): ServerInfo {
   return {
-    version: "0.1.0",
+    version: HARNESS_VERSION,
     hasApiKey: manager.hasApiKey,
+    hasClaudeCode: manager.hasClaudeCode,
+    sandboxAvailable: sandboxAvailable(),
     home: REINS_HOME,
     defaultWorkspace: process.env.REINS_WORKSPACE ?? process.cwd(),
     models: MODELS,
@@ -53,6 +57,12 @@ app.get("/api/info", (c) => c.json(info()));
 app.get("/api/components", (c) => c.json(COMPONENTS));
 app.get("/api/lessons", (c) => c.json(listLessons()));
 app.get("/api/runs", (c) => c.json(manager.listRuns()));
+app.get("/api/trials", (c) => c.json(allTrialSets(Number(c.req.query("k") ?? 3))));
+app.post("/api/runs/:id/repeat", (c) => {
+  const k = Math.max(1, Math.min(10, Number(c.req.query("k") ?? 3)));
+  manager.repeat(c.req.param("id"), k).catch((e) => console.error("repeat failed", e));
+  return c.json({ ok: true, k });
+});
 app.get("/api/runs/:id", (c) => {
   const cfg = manager.config(c.req.param("id"));
   if (!cfg) return c.json({ error: "not found" }, 404);

@@ -26,11 +26,12 @@ export function Welcome() {
           <button className="btn" onClick={() => openModal("newRun")}>
             Start a run on your code <Kbd>n</Kbd>
           </button>
-          {!info?.hasApiKey && (
+          {!info?.hasApiKey && !info?.hasClaudeCode && (
             <button className="btn btn-ghost" onClick={() => openModal("settings")}>
               Add an API key for live runs →
             </button>
           )}
+          {!info?.hasApiKey && info?.hasClaudeCode && <span className="muted text-[12.5px] self-center">Live runs use your Claude Code login; no API key needed.</span>}
         </div>
 
         <div className="grid md:grid-cols-3 gap-3 mt-12">

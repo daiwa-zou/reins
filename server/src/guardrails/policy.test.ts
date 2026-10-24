@@ -29,6 +29,10 @@ describe("classifyBash", () => {
   it("ask mode asks for anything not read-only", () => {
     expect(classifyBash("npm test", { ...auto, mode: "ask" }).verdict).toBe("ask");
   });
+  it("treats open as a command word, not a function name", () => {
+    expect(classifyBash("open index.html", auto).verdict).toBe("ask");
+    expect(classifyBash("python3 - <<'EOF'\ns=open('x').read()\nEOF", auto).verdict).toBe("allow");
+  });
   it("honours custom patterns", () => {
     expect(classifyBash("make deploy", { ...auto, askPatterns: ["make deploy"] }).verdict).toBe("ask");
     expect(classifyBash("terraform apply", { ...auto, denyPatterns: ["terraform apply"] }).verdict).toBe("deny");

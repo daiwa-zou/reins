@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ComponentId, Lesson } from "../../shared/types.js";
-import { COMPONENTS } from "../../shared/components.js";
+import { COMPONENTS, FOUNDATIONS } from "../../shared/components.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LESSONS_DIR = path.resolve(here, "../../lessons");
@@ -47,6 +47,7 @@ export function listLessons(): Lesson[] {
         .map((l) => l.trim().slice(2).trim());
     };
     const components = COMPONENTS.filter((c) => c.lessons.includes(slug)).map((c) => c.id as ComponentId);
+    const foundations = FOUNDATIONS.filter((f) => f.lessons.includes(slug)).map((f) => f.id);
     out.push({
       slug,
       title: meta.title ?? slug,
@@ -56,6 +57,7 @@ export function listLessons(): Lesson[] {
       learnings: section("Learnings"),
       implications: section("Harness implications"),
       components,
+      foundations,
       tags: (meta.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
     });
   }

@@ -7,6 +7,7 @@ import { RunBus } from "./bus.js";
 import { Orchestrator, type OrchestratorControl } from "./orchestrator.js";
 import { listRunIds, loadConfig, readEvents, saveConfig, summarize, deleteRun as deleteRunDir } from "../store/runStore.js";
 import { startReplay } from "./replay.js";
+import { execFileSync } from "node:child_process";
 
 interface PendingApproval {
   request: ApprovalRequest;
@@ -32,10 +33,37 @@ export class RunManager extends EventEmitter {
   constructor() {
     super();
     if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) this.client = new Anthropic();
+    this.markInterrupted();
+  }
+
+  /** A run that was live when the server last stopped cannot be resumed mid-phase; say so instead of showing it as running forever. */
+  private markInterrupted() {
+    for (const id of listRunIds()) {
+      const cfg = loadConfig(id);
+      if (!cfg) continue;
+      const s = summarize(cfg, readEvents(id));
+      if (s.status === "running" || s.status === "paused" || s.status === "waiting_approval" || s.status === "queued") {
+        const bus = new RunBus(id);
+        bus.emitEvent({ type: "run.status", status: "failed", reason: "Interrupted: the Reins server restarted while this run was live. Start it again to retry (progress notes in .reins/ carry over)." });
+      }
+    }
   }
 
   get hasApiKey() {
     return !!this.client;
+  }
+
+  private _hasClaudeCode: boolean | null = null;
+  /** The claude-code engine needs the Claude Code CLI with a login on this machine. */
+  get hasClaudeCode(): boolean {
+    if (this._hasClaudeCode !== null) return this._hasClaudeCode;
+    try {
+      execFileSync("claude", ["--version"], { stdio: "pipe", timeout: 10_000 });
+      this._hasClaudeCode = true;
+    } catch {
+      this._hasClaudeCode = false;
+    }
+    return this._hasClaudeCode;
   }
 
   setApiKey(key: string) {
@@ -94,6 +122,7 @@ export class RunManager extends EventEmitter {
   private control(run: ActiveRun): OrchestratorControl {
     const ask = (request: Omit<ApprovalRequest, "approvalId">) =>
       new Promise<{ approved: boolean; note?: string; criteria?: ContractCriterion[] }>((resolve) => {
+        if (run.abort.signal.aborted) return resolve({ approved: false, note: "cancelled" });
         const approvalId = nanoid(8);
         const full = { ...request, approvalId };
         run.pending.set(approvalId, { request: full, resolve });
@@ -130,9 +159,15 @@ export class RunManager extends EventEmitter {
   }
 
   private async startLiveRun(run: ActiveRun) {
-    if (!this.client) {
-      this.status(run, "failed", "No API key configured. Add one in Settings, or watch the recorded demo.");
-      run.bus.emitEvent({ type: "error", message: "No ANTHROPIC_API_KEY. Open Settings to add one, or start the demo run.", recoverable: false });
+    if (run.config.engine === "anthropic" && !this.client) {
+      this.status(run, "failed", "No API key configured. Add one in Settings, switch the engine to Claude Code, or watch the recorded demo.");
+      run.bus.emitEvent({ type: "error", message: "No ANTHROPIC_API_KEY. Open Settings to add one, pick the Claude Code engine, or start the demo run.", recoverable: false });
+      this.active.delete(run.config.id);
+      return;
+    }
+    if (run.config.engine === "claude-code" && !this.hasClaudeCode) {
+      this.status(run, "failed", "The claude CLI was not found on this machine.");
+      run.bus.emitEvent({ type: "error", message: "The Claude Code engine needs the `claude` CLI installed and logged in.", recoverable: false });
       this.active.delete(run.config.id);
       return;
     }
@@ -164,6 +199,7 @@ export class RunManager extends EventEmitter {
         drainSteer: () => run.steer.splice(0),
         ask: (request) =>
           new Promise((resolve) => {
+            if (run.abort.signal.aborted) return resolve({ approved: false });
             const approvalId = nanoid(8);
             run.pending.set(approvalId, { request: { ...request, approvalId }, resolve });
             run.bus.emitEvent({ type: "approval.requested", request: { ...request, approvalId } });
@@ -215,6 +251,22 @@ export class RunManager extends EventEmitter {
     run.abort.abort();
     run.paused = false;
     run.pauseWaiters.splice(0).forEach((w) => w());
+  }
+
+  /** Launch k more runs with the same config, one after another (never in parallel on one workspace). */
+  async repeat(runId: string, k: number): Promise<string[]> {
+    const base = loadConfig(runId);
+    if (!base) throw new Error("No such run.");
+    const ids: string[] = [];
+    for (let i = 0; i < k; i++) {
+      const cfg = this.createRun({ ...base, id: undefined as any, createdAt: undefined as any, title: base.title });
+      ids.push(cfg.id);
+      await new Promise<void>((resolve) => {
+        const check = () => (this.active.has(cfg.id) ? setTimeout(check, 1000) : resolve());
+        setTimeout(check, 1000);
+      });
+    }
+    return ids;
   }
 
   pendingApprovals(runId: string): ApprovalRequest[] {

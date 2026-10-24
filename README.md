@@ -7,7 +7,13 @@ npm install
 npm run dev            # http://localhost:5190
 ```
 
-Press **d** to watch a recorded run with no API key. Add an `ANTHROPIC_API_KEY` (environment or Settings) for live runs.
+Press **d** to watch a recorded run. For live runs pick an engine in the New run dialog:
+
+| Engine | Needs | What Reins owns |
+|---|---|---|
+| **Direct API** | `ANTHROPIC_API_KEY` (environment or Settings) | The whole loop: prompt caching, compaction, context editing, tool search, task budgets, tool examples, every switch below. |
+| **Claude Code** | A logged-in `claude` CLI (no API key) | Planner/contract/builder/evaluator pipeline, guardrails (`canUseTool`), structured end-of-phase tools (in-process MCP), the event log. Claude Code keeps its own tools and context management. |
+| **Recorded demo** | nothing | A synthetic recording replayed through the same UI, approvals included. |
 
 ## What it does
 
@@ -25,11 +31,13 @@ A run moves through five phases. Roles never share a context window; they hand w
 
 Each component states the assumption about the model it encodes. When a new model ships, the Harness tab lets you launch the same task with one component flipped, so you can find out what is still load-bearing.
 
-- **Roles**: planner, sprint contracts, skeptical evaluator.
-- **Memory**: `features.json`, `progress.md`, commit per phase.
-- **Context**: server-side compaction, clearing of stale tool results, reset with a written handoff. The Context tab shows the prompt as a fuel gauge, its estimated composition, and the thresholds at which each intervention fires.
-- **Tools**: a think tool, tool search (rarely used tools stay out of the prompt until found), self-verification, plain-language narration. Tool results are capped and tell the model how to narrow them.
-- **Safety**: hard denies, workspace confinement, a read-only allowlist that runs in parallel, an action classifier that sees only your task and the proposed command, and a sniff for instruction-shaped text in tool output.
+- **Roles**: planner, sprint contracts, skeptical evaluator, scout subagents (a read-only subagent answers a codebase question and returns a summary, never its transcript).
+- **Memory**: `features.json`, `progress.md`, the workspace's own `CLAUDE.md`/`AGENTS.md`, commit per phase.
+- **Context**: server-side compaction, clearing of stale tool results, reset with a written handoff, a per-phase task budget the model can see. The Context tab shows the prompt as a fuel gauge, its estimated composition, and the thresholds at which each intervention fires.
+- **Tools**: a think tool, tool search (rarely used tools stay out of the prompt until found), tool use examples, skills (`SKILL.md` folders with only the index in the prompt), self-verification, plain-language narration. Tool results are capped and tell the model how to narrow them.
+- **Safety**: hard denies, workspace confinement, a read-only allowlist that runs in parallel, an action classifier that sees only your task and the proposed command, a macOS Seatbelt sandbox for shell commands (writes only in the workspace and temp, no network unless allowed), credentials stripped from the agent's environment, and a sniff for instruction-shaped text in tool output.
+
+Decisions that are not switches (the append-only log, file handoff, owning the loop, capped tool output, secrets outside the sandbox, recorded effective config, cache hit rate as a signal, reliability over single runs, one declarative config, review intent not lines) are listed as **foundations** on the Harness tab, each with the lessons behind it. Every one of the 30 lessons informs at least one component or foundation.
 
 ## The UI
 
@@ -40,9 +48,10 @@ Each component states the assumption about the model it encodes. When a new mode
 - **Guardrails**: every gating decision, who made it and why.
 - **Files**: changed files and diffs against the commit the run started from.
 - **Harness**: the effective configuration and the switches.
-- **Lessons**: 30 distilled posts, each linked to the components it informs. The agents can read them too.
+- **Lessons**: 30 distilled posts, each linked to the components and foundations it informs. The agents can read them too.
+- **Reliability**: runs of the same task group into trial sets with pass^k and pass@k; "Run 3 more" queues identical trials one after another.
 
-Keyboard: `n` new run, `d` demo, `space` pause/resume, `1`-`8` tabs, `?` help.
+Keyboard: `n` new run, `d` demo, `space` pause/resume, `1`-`9` tabs, `?` help.
 
 ## Layout
 
@@ -51,6 +60,7 @@ shared/     types, component catalogue, narration (imported by both sides)
 server/     Hono + WebSocket API, the agent loop, orchestrator, tools, guardrails, JSONL run store
 web/        React + Vite + Tailwind UI
 lessons/    the distilled blog posts (markdown with frontmatter)
+skills/     bundled SKILL.md folders (verify-like-a-user, writing-a-contract)
 demo/       a scripted recording used by the replay engine
 ```
 
@@ -61,11 +71,14 @@ Runs are stored under `~/.reins/runs/<id>/events.jsonl` as an append-only event 
 ```bash
 npm run dev          # server (5191) + web (5190) with reload
 npm run typecheck    # both sides
-npm test             # guardrail rules
+npm test             # guardrails, tool hygiene, sandbox probe, event fold, trial math, loop + orchestrator against a scripted API
 npm run record-demo  # regenerate demo/sample-run.jsonl
 npm run build && npm start   # single-process production serve
 ```
 
 ## Status
 
-The live engine targets the current Claude Messages API (adaptive thinking, effort, prompt caching, server-side compaction, context editing, tool search, refusal fallbacks) and degrades gracefully when a beta is rejected. It has not yet been exercised against a real API key from this checkout; the recorded demo is synthetic and labelled as such in the UI.
+- **Claude Code engine**: exercised end to end from this checkout with the local login and no `ANTHROPIC_API_KEY` (the SDK init message reports `apiKeySource: "none"`). Usage counts against the Claude subscription; the per-turn costs are the SDK's list-price estimates. Known quirk: the SDK's Bash tool runs in your login shell, so shell aliases apply (a `cat` alias that colourises output confused the agent once; it recovered with Read).
+- **Direct API engine**: the loop is tested against a scripted stand-in for the Messages API (tool execution, parallel read-only calls, guardrail approvals and denials, operator notes as mid-conversation system messages, graceful fallback when a beta is rejected) and the orchestrator end to end over a temp git repo. It has not been run against the real API from this checkout because no key was available; every optional beta (compaction, context editing, task budgets, tool examples, refusal fallbacks) degrades to a warning instead of failing the run.
+- **Sandbox**: the Seatbelt profile is probed in the test suite (writes outside the workspace and network are denied).
+- The recorded demo is synthetic and labelled as such in the UI.

@@ -12,6 +12,7 @@ import { GuardrailsPanel } from "./panels/Guardrails";
 import { FilesPanel } from "./panels/Files";
 import { HarnessPanel } from "./panels/Harness";
 import { LessonsPanel } from "./panels/Lessons";
+import { ReliabilityPanel } from "./panels/Reliability";
 import { NewRun } from "./panels/NewRun";
 import { Settings } from "./panels/Settings";
 import { Welcome } from "./components/Welcome";
@@ -62,8 +63,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [modal, selectedRunId, liveModel.status, setTab, openModal, toastMsg]);
 
-  const Panel = { stage: Stage, transcript: Transcript, contract: ContractPanel, context: ContextPanel, guardrails: GuardrailsPanel, files: FilesPanel, harness: HarnessPanel, lessons: LessonsPanel }[tab];
-  const standalone = tab === "lessons" || tab === "harness";
+  const Panel = { stage: Stage, transcript: Transcript, contract: ContractPanel, context: ContextPanel, guardrails: GuardrailsPanel, files: FilesPanel, harness: HarnessPanel, lessons: LessonsPanel, reliability: ReliabilityPanel }[tab];
+  const standalone = tab === "lessons" || tab === "harness" || tab === "reliability";
 
   return (
     <div className="h-full flex flex-col">

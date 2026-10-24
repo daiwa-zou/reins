@@ -15,8 +15,9 @@ export default defineConfig({
   server: {
     port: 5190,
     proxy: {
-      "/api": { target: "http://localhost:5191", changeOrigin: true },
-      "/ws": { target: "ws://localhost:5191", ws: true },
+      // REINS_PORT lets a second dev stack run beside the default one.
+      "/api": { target: `http://localhost:${process.env.REINS_PORT ?? 5191}`, changeOrigin: true },
+      "/ws": { target: `ws://localhost:${process.env.REINS_PORT ?? 5191}`, ws: true },
     },
   },
   build: { outDir: path.resolve(here, "../dist/web"), emptyOutDir: true },

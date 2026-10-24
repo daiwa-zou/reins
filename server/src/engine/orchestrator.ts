@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ContractCriterion, CriterionResult, FeatureItem, Phase, RunConfig, Usage } from "../../../shared/types.js";
 import { RunBus } from "./bus.js";
-import { AgentLoop, type LoopControl, type LoopResult } from "./loop.js";
+import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
+import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
+import { loadSkills, skillsPromptSection } from "../skills.js";
+import { HARNESS_VERSION } from "../../../shared/components.js";
 import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor } from "../roles/prompts.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
@@ -28,14 +31,31 @@ export class Orchestrator {
   private contract: ContractCriterion[] = [];
   private baseSha: string | null = null;
   private builderHistory: Anthropic.Beta.BetaMessageParam[] | undefined;
+  private builderSession: string | undefined;
   private startedAt = Date.now();
 
   constructor(
-    private client: Anthropic,
+    private client: Anthropic | null,
     private config: RunConfig,
     private bus: RunBus,
     private control: OrchestratorControl,
   ) {}
+
+  /** Lines every role gets in its first message: project memory and the skills index. */
+  private projectContext(): Record<string, string> {
+    const extra: Record<string, string> = {};
+    if (this.config.components.projectMemory) {
+      for (const f of ["CLAUDE.md", "AGENTS.md"]) {
+        const body = readWorkspaceFile(this.config.workspace, f);
+        if (body) extra[`Project notes (${f})`] = body.length > 6000 ? body.slice(0, 6000) + "\n[... truncated]" : body;
+      }
+    }
+    if (this.config.components.skills) {
+      const section = skillsPromptSection(loadSkills(this.config.workspace));
+      if (section) extra.Skills = section.replace(/^# Skills\n/, "");
+    }
+    return extra;
+  }
 
   get costUsd() {
     return this.totalCost;
@@ -76,16 +96,29 @@ export class Orchestrator {
     }
   }
 
-  private loop(role: "planner" | "builder" | "evaluator", promptRole: Parameters<typeof systemPromptFor>[0], tools: string[], terminal: string[], handlers: Record<string, any>, messages?: Anthropic.Beta.BetaMessageParam[]) {
-    return new AgentLoop(this.client, this.config, this.bus, this.control, {
+  private loop(role: "planner" | "builder" | "evaluator", promptRole: Parameters<typeof systemPromptFor>[0], tools: string[], terminal: string[], handlers: Record<string, any>, messages?: Anthropic.Beta.BetaMessageParam[]): { run: (first?: string) => Promise<LoopResult> } {
+    const opts: LoopOptions = {
       role,
       system: systemPromptFor(promptRole, this.config),
-      tools,
+      // The phase's structured end-of-turn tools must be callable, not only recognised.
+      tools: [...new Set([...tools, ...terminal])],
       terminal,
       handlers: { ...this.handlers(), ...handlers },
       maxTurns: this.config.maxTurnsPerPhase,
       messages,
-    });
+    };
+    if (this.config.engine === "claude-code") {
+      const cc = new ClaudeCodeLoop(this.config, this.bus, this.control, { ...opts, resumeSessionId: role === "builder" && messages ? this.builderSession : undefined });
+      return {
+        run: async (first) => {
+          const r = await cc.run(first);
+          if (role === "builder") this.builderSession = cc.session;
+          return r;
+        },
+      };
+    }
+    if (!this.client) throw new Error("No API client for the anthropic engine.");
+    return new AgentLoop(this.client, this.config, this.bus, this.control, opts);
   }
 
   private checkStop(r: LoopResult): boolean {
@@ -102,7 +135,7 @@ export class Orchestrator {
     this.bus.emitEvent({
       type: "note",
       level: "info",
-      text: `Environment: node ${process.version}, ${process.platform} ${process.arch}, git ${gitRepo ? `repo at ${this.baseSha?.slice(0, 7) ?? "no commits"}` : "not a repository"}.`,
+      text: `Environment: reins ${HARNESS_VERSION}, engine ${this.config.engine}, node ${process.version}, ${process.platform} ${process.arch}, git ${gitRepo ? `repo at ${this.baseSha?.slice(0, 7) ?? "no commits"}` : "not a repository"}.`,
     });
     const existing = readWorkspaceFile(ws, ".reins/features.json");
     if (existing) {
@@ -118,7 +151,7 @@ export class Orchestrator {
     if (this.config.components.planner) {
       const stop = await this.phase("plan", 0, async () => {
         const r = await this.loop("planner", "planner", [...READ_TOOLS, "write_file", "update_progress"], ["finish"], {}).run(
-          firstMessage("plan", this.config, { Instructions: "Explore the workspace, write .reins/spec.md, record the feature list with update_progress, then call finish." }),
+          firstMessage("plan", this.config, { ...this.projectContext(), Instructions: "Explore the workspace, write .reins/spec.md, record the feature list with update_progress, then call finish." }),
         );
         return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
       });
@@ -145,7 +178,7 @@ export class Orchestrator {
             this.bus.emitEvent({ type: "contract.proposed", by: "builder", criteria: proposed, rationale });
             return "Proposed.";
           },
-        }).run(firstMessage("contract", this.config, { Instructions: "Read the spec and feature list, inspect the codebase, then call propose_contract." }));
+        }).run(firstMessage("contract", this.config, { ...this.projectContext(), Instructions: "Read the spec and feature list, inspect the codebase, then call propose_contract." }));
         if (this.checkStop(r1)) return { result: r1, summary: "Stopped.", value: true };
         let usage = r1.usage;
         let cost = r1.costUsd;
@@ -157,7 +190,7 @@ export class Orchestrator {
               this.bus.emitEvent({ type: "contract.proposed", by: "evaluator", criteria: final, rationale: input.feedback });
               return "Reviewed.";
             },
-          }).run(firstMessage("contract review", this.config, { "Proposed contract": renderContract(proposed), Instructions: "Review and call review_contract with the final criteria." }));
+          }).run(firstMessage("contract review", this.config, { ...this.projectContext(), "Proposed contract": renderContract(proposed), Instructions: "Review and call review_contract with the final criteria." }));
           usage = addUsage(usage, r2.usage);
           cost += r2.costUsd;
           if (this.checkStop(r2)) return { result: { ...r2, usage, costUsd: cost }, summary: "Stopped.", value: true };
@@ -183,13 +216,13 @@ export class Orchestrator {
     let lastEval: { results: CriterionResult[]; verdict: "pass" | "fail"; summary: string } | null = null;
     for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
       const stop = await this.phase("build", round, async () => {
-        const extra: Record<string, string> = { Contract: renderContract(this.contract) };
+        const extra: Record<string, string> = { ...(this.builderHistory ? {} : this.projectContext()), Contract: renderContract(this.contract) };
         if (lastEval) extra["Evaluation of the previous round"] = `${lastEval.summary}\n\n${lastEval.results.filter((r) => !r.pass).map((r) => `- ${r.id} FAILED: ${r.evidence}`).join("\n")}\n\nFix the failures, re-run the verification steps, update progress, then call finish.`;
         else extra.Instructions = "Follow the session preamble, then implement the features. Call finish only when every hard criterion's verification step has been run and passed.";
         if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";
         const loop = this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}, this.shouldResetBuilder() ? undefined : this.builderHistory);
         const r = await loop.run(firstMessage(lastEval ? `build (fix round ${round - 1})` : "build", this.config, extra));
-        this.builderHistory = r.messages;
+        this.builderHistory = this.config.engine === "claude-code" ? (r.messages.length ? r.messages : [{ role: "user", content: "(claude-code session)" }]) : r.messages;
         return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
       });
       if (stop) return this.finish(false, "Stopped while building.");
@@ -209,7 +242,7 @@ export class Orchestrator {
             this.bus.emitEvent({ type: "evaluation.result", round, results, verdict: ev.verdict, summary: input.summary });
             return `Recorded: ${ev.verdict}.`;
           },
-        }).run(firstMessage("evaluate", this.config, { Contract: renderContract(this.contract), Instructions: "Verify every criterion yourself, then call report_evaluation." }));
+        }).run(firstMessage("evaluate", this.config, { ...this.projectContext(), Contract: renderContract(this.contract), Instructions: "Verify every criterion yourself, then call report_evaluation." }));
         const verdict = ev ? (ev as any).verdict : "fail";
         return { result: r, summary: ev ? `${verdict.toUpperCase()}: ${(ev as any).summary}` : "Evaluator did not report.", value: { stop: this.checkStop(r), ev } };
       });
@@ -226,6 +259,8 @@ export class Orchestrator {
     // ---- Wrap up ----
     await this.phase("wrapup", 0, async () => {
       const done = this.features.filter((f) => f.status === "done").length;
+      if (lastEval?.verdict === "pass" && done < this.features.length)
+        this.bus.emitEvent({ type: "note", level: "warn", text: `The evaluation passed but features.json still lists ${this.features.length - done} of ${this.features.length} features as not done: the builder did not keep the list current. The next session will re-read it, so check it before resuming.` });
       if (this.config.components.progressFile) {
         fs.appendFileSync(path.join(reinsDir(ws), "progress.md"), `\n## ${new Date().toISOString()} — run ${this.config.id} finished\nVerdict: ${lastEval?.verdict ?? "n/a"}. ${done}/${this.features.length} features done.\n`);
       }

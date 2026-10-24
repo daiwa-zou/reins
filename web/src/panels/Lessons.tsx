@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
+import { FOUNDATIONS } from "@shared/components";
 
 /** The library the harness is built from. Each lesson links back to the components it informs. */
 export function LessonsPanel() {
@@ -53,6 +54,7 @@ export function LessonsPanel() {
             .filter((l) => !open || l.slug === open)
             .map((l) => {
               const informs = components.filter((c) => c.lessons.includes(l.slug));
+              const founds = FOUNDATIONS.filter((f) => f.lessons.includes(l.slug));
               return (
                 <article key={l.slug} id={`lesson-${l.slug}`} className="card p-5 fade-in">
                   <div className="flex items-start justify-between gap-3">
@@ -68,13 +70,16 @@ export function LessonsPanel() {
                     ))}
                   </div>
                   <p className="mt-3 leading-relaxed text-[14px]">{l.takeaway}</p>
-                  {informs.length > 0 && (
+                  {(informs.length > 0 || founds.length > 0) && (
                     <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
                       <span className="faint">informs:</span>
                       {informs.map((c) => (
                         <Badge key={c.id} tone="accent">
                           {c.label}
                         </Badge>
+                      ))}
+                      {founds.map((f) => (
+                        <Badge key={f.id}>{f.label}</Badge>
                       ))}
                     </div>
                   )}
