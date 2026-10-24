@@ -63,7 +63,10 @@ export function systemPromptFor(role: "planner" | "builder" | "evaluator" | "con
   if (!config.components.gitCommits) extras.push("Do not create git commits in this run.");
   if (config.guardrail.allowNetwork) extras.push("Network access is allowed for this run.");
   else extras.push("Network access is off for this run; commands that download will need approval.");
-  return extras.length ? `${base}\n\nRun settings\n${extras.map((e) => "- " + e).join("\n")}` : base;
+  const withSettings = extras.length ? `${base}\n\nRun settings\n${extras.map((e) => "- " + e).join("\n")}` : base;
+  // Lines from the preset (e.g. Web app's "verify like a user" steps) or typed in New run; both engines use this prompt.
+  const guidance = (config.guidance ?? []).filter((g) => typeof g === "string" && g.trim());
+  return guidance.length ? `${withSettings}\n\nGuidance for this run\n${guidance.map((g) => "- " + g.trim()).join("\n")}` : withSettings;
 }
 
 export function firstMessage(phase: string, config: RunConfig, extra: Record<string, string> = {}): string {

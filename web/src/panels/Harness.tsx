@@ -3,7 +3,8 @@ import type { RunModel } from "../state/derive";
 import { useStore } from "../state/store";
 import { Badge } from "../components/ui";
 import { api } from "../lib/api";
-import type { ComponentId, HarnessComponent, Preset, RunConfig, SkillInfo } from "@shared/types";
+import type { ComponentId, EngineId, HarnessComponent, Preset, RunConfig, SkillInfo } from "@shared/types";
+import { adaptPreset, generatedPresets, presetCompatibility } from "@shared/presets";
 import { defaultRunConfig, FOUNDATIONS } from "@shared/components";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL } from "@shared/config";
 
@@ -39,9 +40,22 @@ export function HarnessPanel({ model }: { model: RunModel }) {
   const launchWithout = (run: RunConfig, id: ComponentId) => {
     openModal("newRun", { ...run, id: undefined, createdAt: undefined, engine: run.engine === "replay" ? availableEngine() : run.engine, components: { ...run.components, [id]: !run.components[id] }, __openHarness: true, title: `${run.title} (${run.components[id] ? "without" : "with"} ${components.find((c) => c.id === id)?.label ?? id})` } as any);
   };
+  // Which engine a preset can start on: the usual engine if it fits, else the other one if it is available.
+  const engineFor = (p: Preset): { engine: EngineId | null; reason?: string } => {
+    const first = availableEngine();
+    const order: EngineId[] = [first, first === "anthropic" ? "claude-code" : "anthropic"];
+    const ready = (e: EngineId) => (e === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode);
+    const fits = order.filter((e) => presetCompatibility(p, e).ok);
+    const usable = fits.find(ready) ?? (!order.some(ready) ? fits[0] : undefined);
+    if (usable) return { engine: usable };
+    const why = presetCompatibility(p, first).reasons[0] ?? "";
+    return { engine: null, reason: fits.length ? `${why} ${ENGINE_LABEL[fits[0]]} is not available on this machine (${fits[0] === "anthropic" ? "add an API key in Settings" : "install the claude CLI"}).` : why };
+  };
   const startWithPreset = (p: Preset) => {
-    const base = defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: availableEngine() });
-    openModal("newRun", { ...applyPreset(base, p), id: undefined, createdAt: undefined, title: "", __openHarness: true } as any);
+    const { engine } = engineFor(p);
+    if (!engine) return;
+    const base = defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine });
+    openModal("newRun", { ...applyPreset(base, adaptPreset(p, engine)), id: undefined, createdAt: undefined, title: "", __openHarness: true } as any);
   };
 
   useEffect(() => {
@@ -52,7 +66,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
 
   const groups = [...new Set(components.map((c) => c.group))];
   const runEngine = cfg && cfg.engine !== "replay" ? cfg.engine : null;
-  const presetList = presets.length ? presets : BUILT_IN_PRESETS.map((p) => ({ ...p, isDefault: false }));
+  const presetList = presets.length ? presets : [...BUILT_IN_PRESETS, ...generatedPresets([])].map((p) => ({ ...p, isDefault: false }));
 
   return (
     <div className="h-full overflow-auto p-4">
@@ -92,15 +106,45 @@ export function HarnessPanel({ model }: { model: RunModel }) {
                 <div key={p.name} className="rounded-lg border line p-3 flex flex-col gap-1">
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium">{p.name}</span>
-                    {p.builtIn ? <Badge>built-in</Badge> : <Badge tone="accent">yours</Badge>}
+                    {p.generated ? <Badge tone="accent">from lessons</Badge> : p.builtIn ? <Badge>built-in</Badge> : <Badge tone="accent">yours</Badge>}
                     {p.isDefault && <Badge tone="ok">your default</Badge>}
                     <span className="flex-1" />
                     <span className="faint text-[11px]">{n ? `${n} change${n === 1 ? "" : "s"} from defaults` : "the defaults"}</span>
                   </div>
                   {p.description && <div className="muted text-small leading-snug">{p.description}</div>}
-                  <button className="btn btn-sm self-start mt-1" onClick={() => startWithPreset(p)}>
-                    Start a run with {p.name} →
-                  </button>
+                  <div className="faint text-[11px]">
+                    {(["anthropic", "claude-code"] as const)
+                      .map((e) => {
+                        const c = presetCompatibility(p, e);
+                        return `${ENGINE_LABEL[e]}: ${c.adaptive ? `adapted (${c.dropped.length} off)` : c.ok ? "yes" : "no"}`;
+                      })
+                      .join(" · ")}
+                  </div>
+                  {p.basis && p.basis.length > 0 && (
+                    <div className="text-[11.5px] leading-snug" data-preset-basis>
+                      <span className="font-semibold">Built from {p.basis.length} lesson{p.basis.length === 1 ? "" : "s"}:</span>{" "}
+                      {p.basis.map((b, i) => (
+                        <span key={b.slug}>
+                          {i > 0 && ", "}
+                          <button type="button" className="underline" onClick={() => setLessonFilter(b.slug)} title={b.effect}>
+                            {b.title}
+                          </button>
+                          <span className="muted"> ({b.effect})</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(() => {
+                    const fit = engineFor(p);
+                    return (
+                      <>
+                        <button className="btn btn-sm self-start mt-1" onClick={() => startWithPreset(p)} disabled={!fit.engine} title={fit.reason ?? (fit.engine ? `Opens New run on ${ENGINE_LABEL[fit.engine]}` : undefined)}>
+                          Start a run with {p.name} →{fit.engine && fit.engine !== availableEngine() ? ` (on ${ENGINE_LABEL[fit.engine]})` : ""}
+                        </button>
+                        {!fit.engine && fit.reason && <div className="faint text-[11px]">{fit.reason}</div>}
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })}

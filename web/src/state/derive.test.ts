@@ -44,4 +44,15 @@ describe("derive (fold of the event log)", () => {
     expect(m.pending).toHaveLength(1);
     expect(m.pending[0].kind).toBe("contract");
   });
+  it("sets a turn's end time after turn.finished", () => {
+    const base = { runId: "r" } as const;
+    const evs = [
+      { ...base, seq: 0, ts: "2026-01-01T00:00:00.000Z", type: "turn.started", role: "builder", turn: 1 },
+      { ...base, seq: 1, ts: "2026-01-01T00:00:04.000Z", type: "turn.finished", role: "builder", turn: 1, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.01 },
+    ] as unknown as RunEvent[];
+    const before = derive(evs, 0).feed.find((f) => f.kind === "turn") as any;
+    expect(before.finishedTs).toBeUndefined();
+    const after = derive(evs).feed.find((f) => f.kind === "turn") as any;
+    expect(after.finishedTs).toBe("2026-01-01T00:00:04.000Z");
+  });
 });

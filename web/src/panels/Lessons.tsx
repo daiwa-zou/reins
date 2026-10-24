@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { adaptPreset, composePreset, recipeFor } from "@shared/presets";
+import { applyPreset } from "@shared/config";
+import { defaultRunConfig } from "@shared/components";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
 import { api, type LessonAudit } from "../lib/api";
@@ -23,6 +26,19 @@ export function LessonsPanel() {
   const [audits, setAudits] = useState<LessonAudit[]>([]);
   const [problems, setProblems] = useState<{ problems: LessonProblem[]; userDir: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const openModal = useStore((s) => s.openModal);
+  const availableEngine = useStore((s) => s.availableEngine);
+  const info = useStore((s) => s.info);
+  const presets = useStore((s) => s.presets);
+  // Compose a preset from the selected lessons (or the current filter) and open New run prefilled with it.
+  const buildPreset = (from: typeof lessons) => {
+    const domain = [...new Set(from.flatMap((l) => l.domains ?? []))];
+    const p = composePreset({ ...recipeFor(domain.length === 1 ? domain[0] : "custom"), name: "From lessons" }, from, { matchAll: true, name: "From lessons" });
+    const engine = availableEngine();
+    const cfg = applyPreset(defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine }), adaptPreset(p, engine));
+    openModal("newRun", { ...cfg, preset: undefined, id: undefined, createdAt: undefined, title: "", __basis: p.basis, __notice: `Prefilled from ${from.length} lesson${from.length === 1 ? "" : "s"}. Use "Save as preset…" to keep it.` } as any);
+  };
 
   const reload = async () => {
     await refreshLessons();
@@ -100,15 +116,34 @@ export function LessonsPanel() {
         <div className="faint text-[11px]">
           {shown.length} of {lessons.length} lessons{userCount ? ` · ${userCount} yours` : ""}
         </div>
+        <div className="flex flex-col gap-1 text-[11.5px]">
+          <button
+            className="btn btn-sm"
+            disabled={!picked.length && !shown.length}
+            onClick={() => buildPreset(picked.length ? lessons.filter((l) => picked.includes(l.slug)) : shown)}
+            title="Fold these lessons' enables/disables/guidance over the Full preset and open New run with the result"
+          >
+            Build a preset from these ({picked.length ? `${picked.length} selected` : `${shown.length} shown`})
+          </button>
+          {picked.length > 0 && (
+            <button className="underline faint self-start" onClick={() => setPicked([])}>
+              clear selection
+            </button>
+          )}
+        </div>
         <div className="flex flex-col gap-0.5">
           {shown.map((l) => (
-            <button key={l.slug} className={`text-left rounded-md px-2 py-1.5 text-[12.5px] leading-snug ${open === l.slug ? "sunk font-medium" : "hover:bg-[var(--bg-sunk)]"}`} onClick={() => select(l.slug)} aria-current={open === l.slug ? "page" : undefined}>
+            <div key={l.slug} className="flex items-start gap-1">
+            <input type="checkbox" className="mt-2 shrink-0" checked={picked.includes(l.slug)} onChange={(e) => setPicked(e.target.checked ? [...picked, l.slug] : picked.filter((s) => s !== l.slug))} aria-label={`Select ${l.title} for a preset`} />
+            <button className={`flex-1 text-left rounded-md px-2 py-1.5 text-[12.5px] leading-snug ${open === l.slug ? "sunk font-medium" : "hover:bg-[var(--bg-sunk)]"}`} onClick={() => select(l.slug)} aria-current={open === l.slug ? "page" : undefined}>
               {l.title}
               <div className="faint text-[10.5px] mt-0.5 flex items-center gap-1.5">
                 {l.date}
                 {l.source === "user" && <Badge tone="accent">user</Badge>}
+                {l.domains?.length ? <Badge title="Shapes these preset domains">{l.domains.join(", ")}</Badge> : null}
               </div>
             </button>
+            </div>
           ))}
           {!shown.length && <div className="muted text-small px-2">No lessons match these filters.</div>}
         </div>
@@ -199,6 +234,22 @@ export function LessonsPanel() {
                       ))}
                     </div>
                     <p className="mt-3 leading-relaxed text-[14px]">{l.takeaway}</p>
+                    {l.domains?.length ? (
+                      <div className="mt-2 text-[12px]" data-shapes-presets>
+                        <span className="faint">Shapes presets: </span>
+                        {l.domains.map((d, i) => {
+                          const name = presets.find((p) => p.generated && p.domain === d)?.name ?? recipeFor(d).name;
+                          const fx = [l.enables?.length ? `on: ${l.enables.join(", ")}` : "", l.disables?.length ? `off: ${l.disables.join(", ")}` : "", l.guidance ? "guidance" : ""].filter(Boolean).join("; ");
+                          return (
+                            <span key={d}>
+                              {i > 0 && ", "}
+                              <span className="font-medium">{name}</span> <span className="muted">({fx || "context"})</span>
+                            </span>
+                          );
+                        })}
+                        {l.guidance && <div className="muted mt-0.5">Guidance: {l.guidance}</div>}
+                      </div>
+                    ) : null}
                     {(informs.length > 0 || founds.length > 0) && (
                       <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
                         <span className="faint">informs:</span>

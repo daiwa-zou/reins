@@ -7,6 +7,8 @@ import { StatusBadge } from "./ui";
 import { api } from "../lib/api";
 import { money, duration, tilde } from "../lib/format";
 import { nextTitle } from "./TopBar";
+import { useNow } from "../lib/useNow";
+import { runElapsed } from "../lib/time";
 
 /** Identity and controls of the selected run: the only place its cost and status sit in the chrome. */
 export function RunHeader({ model }: { model: RunModel }) {
@@ -17,6 +19,10 @@ export function RunHeader({ model }: { model: RunModel }) {
   const availableEngine = useStore((s) => s.availableEngine);
   const cfg = model.config;
   const live = isLive(model.status);
+  const scrubbing = useStore((s) => s.scrubSeq) !== null;
+  // Ticks only while the run is live and we are looking at "now"; a scrub point is static.
+  const ticking = live && !scrubbing;
+  const now = useNow(ticking);
   const [pendingAction, setPendingAction] = React.useState<"stopping" | "pausing" | "resuming" | null>(null);
   React.useEffect(() => setPendingAction(null), [model.status]);
   if (!cfg) return null;
@@ -29,7 +35,7 @@ export function RunHeader({ model }: { model: RunModel }) {
       toastMsg(e.message, "error");
     });
   };
-  const elapsed = model.startedTs && model.lastTs ? Date.parse(model.lastTs) - Date.parse(model.startedTs) : 0;
+  const elapsed = runElapsed(model, now, ticking);
   const est = cfg.engine === "claude-code";
 
   return (

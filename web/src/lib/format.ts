@@ -22,12 +22,12 @@ export function duration(ms: number): string {
   return `${h}h ${m % 60}m`;
 }
 
+import { relTimeAt } from "./time";
+export { relTimeAt };
+
+/** Relative time against the current wall clock (static views). Live views pass useNow() to relTimeAt. */
 export function relTime(iso: string): string {
-  const d = Date.now() - Date.parse(iso);
-  if (d < 60_000) return "just now";
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m ago`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`;
-  return new Date(iso).toLocaleDateString();
+  return relTimeAt(iso, Date.now());
 }
 
 export function clock(iso: string): string {

@@ -3,7 +3,8 @@ import { CirclePlay, Plus, Trash2 } from "lucide-react";
 import type { RunSummary } from "@shared/types";
 import { useStore } from "../state/store";
 import { StatusIcon, STATUS } from "./ui";
-import { money, relTime, basename } from "../lib/format";
+import { money, relTimeAt, basename } from "../lib/format";
+import { useNow } from "../lib/useNow";
 import { api } from "../lib/api";
 import { PHASE_LABEL } from "../state/derive";
 import { startDemo } from "../lib/demo";
@@ -86,6 +87,9 @@ function Row({ r }: { r: RunSummary }) {
   const selectRun = useStore((s) => s.selectRun);
   const toastMsg = useStore((s) => s.toastMsg);
   const live = LIVE.includes(r.status);
+  // Relative times and a live row's age refresh on the shared clock (no interval of our own).
+  const now = useNow(true);
+  const relTime = (iso: string) => relTimeAt(iso, now);
   const tip = [r.title, `${STATUS[r.status].label}${r.phase ? ` · ${PHASE_LABEL[r.phase]}${r.round > 1 ? ` ${r.round}` : ""}` : ""}`, `${money(r.costUsd)} · ${r.workspace}`].join("\n");
   return (
     <div

@@ -2,7 +2,7 @@
 // preset, the diff from defaults and validation of user presets. No I/O, so the
 // server, the web UI and vitest all use exactly the same rules.
 import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, Preset, PresetConfig, RoleId, RunConfig } from "./types.js";
-import { COMPONENTS, COMPONENT_IDS, defaultRunConfig } from "./components.js";
+import { cleanGuidance, COMPONENTS, COMPONENT_IDS, defaultRunConfig } from "./components.js";
 
 export const ENGINE_LABEL: Record<EngineId | "replay", string> = { anthropic: "Direct API", "claude-code": "Claude Code", replay: "Replay" };
 
@@ -144,6 +144,7 @@ export function applyPreset(base: RunConfig, preset: Pick<Preset, "name" | "conf
     pauses: { ...base.pauses, ...(p.pauses ?? {}) },
     context: { ...base.context, ...(p.context ?? {}) },
     guardrail: { ...base.guardrail, ...(p.guardrail ?? {}) },
+    ...(Array.isArray(p.guidance) ? { guidance: [...p.guidance] } : base.guidance ? { guidance: [...base.guidance] } : {}),
     task: base.task,
     workspace: base.workspace,
     id: base.id,
@@ -155,7 +156,7 @@ export function applyPreset(base: RunConfig, preset: Pick<Preset, "name" | "conf
 
 /** The preset-able part of a full config, e.g. for "Save as preset…". */
 export function presetFromConfig(cfg: RunConfig): PresetConfig {
-  return { engine: cfg.engine === "replay" ? undefined : cfg.engine, components: { ...cfg.components }, roles: structuredCloneSafe(cfg.roles), pauses: { ...cfg.pauses }, context: { ...cfg.context }, guardrail: { ...cfg.guardrail }, budgetUsd: cfg.budgetUsd, maxTurnsPerPhase: cfg.maxTurnsPerPhase, maxFixRounds: cfg.maxFixRounds };
+  return { engine: cfg.engine === "replay" ? undefined : cfg.engine, components: { ...cfg.components }, roles: structuredCloneSafe(cfg.roles), pauses: { ...cfg.pauses }, context: { ...cfg.context }, guardrail: { ...cfg.guardrail }, budgetUsd: cfg.budgetUsd, maxTurnsPerPhase: cfg.maxTurnsPerPhase, maxFixRounds: cfg.maxFixRounds, ...(cfg.guidance?.length ? { guidance: [...cfg.guidance] } : {}) };
 }
 function structuredCloneSafe<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));
@@ -197,6 +198,10 @@ export function diffFromDefaults(config: Partial<RunConfig>): ConfigChange[] {
     if (g.mode) push("guardrail.mode", "Guardrail mode", d.guardrail.mode, g.mode);
     if (typeof g.allowNetwork === "boolean") push("guardrail.allowNetwork", "Allow network", d.guardrail.allowNetwork ? "on" : "off", g.allowNetwork ? "on" : "off");
     for (const k of ["allowPatterns", "askPatterns", "denyPatterns"] as const) if (Array.isArray(g[k])) push(`guardrail.${k}`, `Guardrail ${k}`, (d.guardrail[k] ?? []).join(", ") || "none", g[k]!.join(", ") || "none");
+  }
+  if (Array.isArray(config.guidance) && config.guidance.length) {
+    const n = config.guidance.length;
+    out.push({ path: "guidance", label: "Run guidance", from: "none", to: `${n} line${n === 1 ? "" : "s"}`, text: `Run guidance: ${n} line${n === 1 ? "" : "s"} (default none)` });
   }
   for (const k of NUMBER_KEYS) if (typeof config[k] === "number") push(k, k === "budgetUsd" ? "Budget (USD)" : k === "maxTurnsPerPhase" ? "Max turns per phase" : "Fix rounds", d[k], config[k]);
   return out;
@@ -316,6 +321,13 @@ export function validatePresetConfig(raw: unknown): { config: PresetConfig; drop
           } else dropped.push(`guardrail.${gk}`);
         }
         config.guardrail = g;
+        break;
+      }
+      case "guidance": {
+        if (!Array.isArray(v)) bad("guidance", "an array of one-line strings");
+        const g = cleanGuidance(v as unknown[]);
+        dropped.push(...g.dropped);
+        config.guidance = g.lines;
         break;
       }
       default:

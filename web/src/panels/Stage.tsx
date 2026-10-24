@@ -9,6 +9,8 @@ import { ApprovalCard } from "../components/ApprovalCard";
 import { api } from "../lib/api";
 import { clock, duration, money, tokens } from "../lib/format";
 import type { Phase, RoleId } from "@shared/types";
+import { Elapsed, RunClockProvider, useRunClock } from "../lib/useNow";
+import { runElapsed } from "../lib/time";
 
 export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
   const runId = useStore((s) => s.selectedRunId)!;
@@ -43,6 +45,7 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
   let lastRole: RoleId | null = null;
 
   return (
+    <RunClockProvider value={{ live: liveRun && !scrubbing, lastTs: model.lastTs }}>
     <div className="h-full flex flex-col">
       <PhaseStepper model={model} />
       {pending.length > 0 && (
@@ -128,6 +131,7 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
         </div>
       </div>
     </div>
+    </RunClockProvider>
   );
 }
 
@@ -140,7 +144,7 @@ function EndCard({ model }: { model: RunModel }) {
   const interrupted = /interrupted|restart/i.test(reason);
   const budget = /budget/i.test(reason);
   const next = status === "completed" ? "Review the changes and the evaluator's evidence on the Contract tab. Use Run again to see whether it passes consistently." : interrupted ? "Use Run again to retry; progress notes in .reins/ carry over to the next session." : budget ? "Raise the budget in New run (Run again keeps every other setting)." : status === "cancelled" ? "Files the agent already changed are still in the workspace; check Changes." : "Read the last turns above and Details › Guardrails; then use Run again, possibly with a component turned off in Harness.";
-  const dur = model.summary?.durationMs ?? (model.startedTs && model.lastTs ? Date.parse(model.lastTs) - Date.parse(model.startedTs) : 0);
+  const dur = runElapsed(model, 0, false);
   return (
     <div className="card p-4 border-l-4 fade-in" style={{ borderLeftColor: tone }} role="status">
       <div className="font-semibold">{title}</div>
@@ -171,6 +175,7 @@ function PhaseStepper({ model }: { model: RunModel }) {
               <span className={`w-2 h-2 rounded-full ${state === "done" ? "bg-[var(--ok)]" : state === "active" ? "bg-[var(--accent)] pulse" : "bg-[var(--line-strong)]"}`} />
               {PHASE_LABEL[p]}
               {p === "build" && rounds > 1 && <span className="badge badge-neutral">×{rounds}</span>}
+              {stat && <Elapsed start={stat.startedTs} end={stat.finishedTs} className="faint mono text-caption font-normal" title="Time in this phase" />}
             </div>
           </React.Fragment>
         );
@@ -316,7 +321,9 @@ function ContractItem({ item }: { item: Extract<FeedItem, { kind: "contract" }> 
 
 function TurnRow({ item, showThinking, showRole }: { item: Extract<FeedItem, { kind: "turn" }>; showThinking: boolean; showRole: boolean }) {
   const [open, setOpen] = useState(false);
-  const hasBody = !!item.text || item.calls.length > 0 || (showThinking && item.thinking);
+  const runClock = useRunClock();
+  const active = !item.finishedTs && runClock.live;
+  const hasBody = !!item.text || item.calls.length > 0 || (showThinking && item.thinking) || active;
   if (!hasBody) return null;
   const entries = groupCalls(item.calls);
   return (
@@ -335,11 +342,17 @@ function TurnRow({ item, showThinking, showRole }: { item: Extract<FeedItem, { k
           </button>
         )}
         <span>{clock(item.ts)}</span>
+        <Elapsed start={item.ts} end={item.finishedTs} className="" title="Turn time" />
       </span>
       <div className="flex-1 min-w-0 py-0.5">
-        {showRole && (
+        {(showRole || active) && (
           <div className="flex items-center gap-2 text-small">
-            <RoleChip role={item.role} />
+            {showRole && <RoleChip role={item.role} />}
+            {active && (
+              <span className="faint text-caption" data-active-turn>
+                working · <Elapsed start={item.ts} end={item.finishedTs} className="mono" title="Time in this turn" />
+              </span>
+            )}
           </div>
         )}
         {showThinking && item.thinking && <div className="muted italic mt-1 leading-relaxed whitespace-pre-wrap">{item.thinking}</div>}
@@ -409,7 +422,7 @@ export function CallRow({ call, expanded = false }: { call: ToolCall; expanded?:
             you {g.verdict === "allow" ? "approved" : "declined"}
           </Badge>
         )}
-        {call.result && <span className="faint mono text-caption">{duration(call.result.durationMs)}</span>}
+        <Elapsed start={call.ts} fixedMs={call.result?.durationMs} title={pending ? "Running for" : "Took"} />
         {open ? <ChevronDown size={14} className="faint shrink-0" aria-hidden /> : <ChevronRight size={14} className="faint shrink-0" aria-hidden />}
       </button>
       {open && (

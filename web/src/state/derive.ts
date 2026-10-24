@@ -28,7 +28,7 @@ export interface ToolCall {
 
 export type FeedItem =
   | { kind: "phase"; seq: number; ts: string; phase: Phase; round: number; finished?: { summary: string; costUsd: number; durationMs: number } }
-  | { kind: "turn"; seq: number; ts: string; role: RoleId; turn: number; thinking?: string; text?: string; calls: ToolCall[]; usage?: Usage; costUsd?: number; stopReason?: string }
+  | { kind: "turn"; seq: number; ts: string; role: RoleId; turn: number; thinking?: string; text?: string; calls: ToolCall[]; usage?: Usage; costUsd?: number; stopReason?: string; finishedTs?: string }
   | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
   | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string }
@@ -160,6 +160,7 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
           if (ev.usage.input + ev.usage.output + ev.usage.cacheRead + ev.usage.cacheWrite > 0) currentTurn.usage = ev.usage;
           currentTurn.costUsd = (currentTurn.costUsd ?? 0) + ev.costUsd;
           if (ev.stopReason) currentTurn.stopReason = ev.stopReason;
+          currentTurn.finishedTs = ev.ts;
         }
         m.costUsd += ev.costUsd;
         m.costByRole[ev.role] = (m.costByRole[ev.role] ?? 0) + ev.costUsd;

@@ -118,6 +118,8 @@ export interface RunConfig {
   createdAt: string;
   /** Name of the preset the run was started from, recorded for traceability. Absent on older runs. */
   preset?: string;
+  /** Extra one-line instructions appended to every role's system prompt ("Guidance for this run"). */
+  guidance?: string[];
 }
 
 /** A finding from checkRunConfig. Warnings never block a run. */
@@ -144,6 +146,33 @@ export interface Preset {
   description: string;
   builtIn: boolean;
   config: PresetConfig;
+  /** On an engine that ignores some switches it turns on, the preset switches those off instead of being unavailable. */
+  adaptive?: boolean;
+  /** Composed from lessons (shared/presets.ts), not stored anywhere. */
+  generated?: boolean;
+  /** The lesson domain it was composed for, e.g. "web". */
+  domain?: string;
+  /** The lessons it was built from, with what each contributed. */
+  basis?: PresetBasis[];
+  /** Lesson slugs a user preset was built from (kept for traceability). */
+  lessons?: string[];
+}
+
+/** One lesson's contribution to a generated preset. */
+export interface PresetBasis {
+  slug: string;
+  title: string;
+  /** e.g. "on: Evaluator; guidance", or "overridden by <slug>" for a lost conflict. */
+  effect: string;
+}
+
+/** Whether a preset fits an engine (presetCompatibility in shared/presets.ts). */
+export interface PresetCompatibility {
+  ok: boolean;
+  /** ok only because the preset adapts: the components in `dropped` are switched off on this engine. */
+  adaptive: boolean;
+  reasons: string[];
+  dropped: ComponentId[];
 }
 
 /** One finding about a lesson file. Errors make lessons:check fail; warnings do not. */
@@ -352,6 +381,13 @@ export interface Lesson {
   /** Architectural foundations (not switchable) this lesson informs. */
   foundations: string[];
   tags: string[];
+  /** Preset domains this lesson shapes (e.g. web, cli): frontmatter `domains:`. */
+  domains?: string[];
+  /** Components a preset for those domains turns on / off: frontmatter `enables:` / `disables:`. */
+  enables?: ComponentId[];
+  disables?: ComponentId[];
+  /** One line of run guidance the preset adds: frontmatter `guidance:`. */
+  guidance?: string;
   /** Bundled with Reins (lessons/) or from the user's library ($REINS_HOME/lessons). */
   source: "bundled" | "user";
 }

@@ -4,6 +4,9 @@ date: 2026-03-24
 url: https://www.anthropic.com/engineering/harness-design-long-running-apps
 tags: harness, long-running, multi-agent, evals, coding-agents
 takeaway: Long application builds improved sharply when a planner, generator and separate skeptical evaluator exchanged files and negotiated sprint contracts, because agents overrate their own work and an independent evaluator is easier to make critical. But every harness component encodes an assumption about what the model cannot do alone, and those assumptions go stale, so remove components one at a time as new models ship.
+domains: web
+enables: evaluator, contracts, progressFile
+guidance: Evaluate against the running app (pages and HTTP responses), criterion by criterion with hard thresholds; never accept the builder's own claim that it works.
 ---
 
 ## Learnings

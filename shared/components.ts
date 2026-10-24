@@ -349,6 +349,7 @@ export function defaultRunConfig(partial: Partial<RunConfig> & { task: string; w
     maxFixRounds: partial.maxFixRounds ?? 2,
     createdAt: partial.createdAt ?? new Date().toISOString(),
     ...(typeof partial.preset === "string" && partial.preset.trim() ? { preset: partial.preset.trim().slice(0, 80) } : {}),
+    ...(Array.isArray(partial.guidance) && cleanGuidance(partial.guidance).lines.length ? { guidance: cleanGuidance(partial.guidance).lines } : {}),
   };
 }
 
@@ -386,4 +387,30 @@ export function groupTrials(runs: RunSummary[], trialsByRun: Map<string, Trial>,
     out.push(set);
   }
   return out.sort((a, b) => (a.trials[0].createdAt < b.trials[0].createdAt ? 1 : -1));
+}
+
+// ---- Run guidance -----------------------------------------------------------
+
+export const GUIDANCE_MAX_LINES = 10;
+export const GUIDANCE_MAX_CHARS = 200;
+
+/**
+ * Normalise run guidance: strings only (others are dropped and reported by
+ * index), newlines collapsed to spaces, each line capped at GUIDANCE_MAX_CHARS,
+ * blank and duplicate lines removed, at most GUIDANCE_MAX_LINES lines.
+ */
+export function cleanGuidance(raw: unknown[]): { lines: string[]; dropped: string[] } {
+  const lines: string[] = [];
+  const dropped: string[] = [];
+  const seen = new Set<string>();
+  raw.forEach((v, i) => {
+    if (typeof v !== "string") return void dropped.push(`guidance[${i}]`);
+    const line = v.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, GUIDANCE_MAX_CHARS).trim();
+    const key = line.toLowerCase();
+    if (!line || seen.has(key)) return;
+    seen.add(key);
+    if (lines.length >= GUIDANCE_MAX_LINES) return void dropped.push(`guidance[${i}]`);
+    lines.push(line);
+  });
+  return { lines, dropped };
 }

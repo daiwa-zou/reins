@@ -48,7 +48,9 @@ Decisions that are not switches (the append-only log, file handoff, owning the l
 - **Guardrails**: every gating decision, who made it and why.
 - **Files**: changed files and diffs against the commit the run started from.
 - **Harness**: every component with what it does, when off, engines and requires, linked to its lessons. With a run selected: its effective config, recorded preset, diff from defaults and checker warnings, plus *run with/without →*. With none: the presets with *Start a run with…*. Also lists the installed skills for the workspace.
+  Presets are gated by engine (Full and Careful need Direct API) and include ones generated from lessons, Web app and CLI / tool, each showing the lessons it was built from.
 - **Lessons**: 30 distilled posts plus your own from `$REINS_HOME/lessons` (picked up without a restart; same slug overrides). Filter by component, tag or search; the open lesson is in the URL; *informs* badges jump to the Harness card; invalid files are listed with the reason. Start a new one from [docs/lesson-template.md](docs/lesson-template.md). The agents read the same library with `list_lessons` (query/tag/component filters) and `read_lesson`.
+  Lessons with `domains:`/`enables:`/`disables:`/`guidance:` shape the generated presets; select lessons and *Build a preset from these* to start a run from them.
 - **Reliability**: runs of the same task group into trial sets with pass^k and pass@k; "Run 3 more" queues identical trials one after another.
 
 Keyboard: `n` new run, `d` demo, `space` pause/resume, `1`-`9` tabs, `?` help.

@@ -19,6 +19,40 @@ The New run dialog has a preset picker, **Save as preset…**, **Reset to defaul
 
 Built-ins are defined in `shared/config.ts` and cannot be overwritten or deleted.
 
+### Presets generated from lessons: Web app, CLI / tool, and your domains
+
+Lessons can carry preset effects in their frontmatter (see [lesson-template.md](lesson-template.md)):
+
+```
+domains: web, cli
+enables: evaluator, selfVerification
+disables: narration
+guidance: Give yourself a check you can run and show its output as evidence.
+```
+
+Reins composes a preset per domain (`shared/presets.ts`, `composePreset`), recomputed from the current library on every `GET /api/presets`, so adding a lesson file changes it without a restart:
+
+- **Recipes.** `web` is **Web app** and `cli` is **CLI / tool**. Both start from the Full config with no engine and add verify-like-a-user guidance: Web app starts the dev server with a timeout and makes real HTTP requests; CLI / tool runs `--help`, one happy path, and bad input expecting a non-zero exit code and a message on stderr. A domain only lessons name (e.g. `domains: games`) gets a generic preset named after it ("Games") on the same Full base.
+- **Composition order.** Matching lessons apply oldest `date` first, then by slug, so a newer lesson wins a conflict. Guidance lines are the recipe's plus one per lesson, deduplicated, at most 10.
+- **Basis.** Each generated preset lists the lessons it was built from with what each contributed (`on: …; off: …; guidance`), and a lesson that lost a conflict says `overridden by <slug>`. New run and Harness show this as "Built from N lessons", each linking to the lesson; a lesson with domains shows "Shapes presets: …".
+- **Engine adaptation.** Generated presets are *adaptive*: on Claude Code they switch off the components only Direct API honours (Scouts, Compaction, Context editing, Task budget, Tool search, Tool examples) instead of being unavailable, and New run says "adapted for Claude Code: N switches off (…)".
+- In Lessons, select lessons (or use the current filter) and click **Build a preset from these** to open New run prefilled with the composition; **Save as preset…** stores it with its `lessons` list.
+
+Generated names (Web app, CLI / tool, …) are reserved: `POST /api/presets` with one returns 400.
+
+### Which presets fit which engine (compatibility)
+
+`presetCompatibility(preset, engine)` decides, for built-in, generated and your presets alike:
+
+- A preset that names an engine fits only that engine (Claude Code fits only claude-code). Picking it in New run switches the engine and says so.
+- A preset that turns on a component the engine ignores does not fit, unless it is adaptive. So **Full** and **Careful** need Direct API: on Claude Code they are shown disabled with the reason. **Minimal** fits both.
+- Switching the engine away from a preset that does not fit clears it to Custom with a one-line notice. "My default" is applied only if it fits the engine New run opens on; otherwise New run starts from the defaults and says why.
+- `GET /api/presets` returns a `compatibility` entry per engine for every preset, and Harness opens *Start a run with…* on an engine that fits (or disables it with the reason).
+
+### Run guidance
+
+`guidance` is an optional list of one-line instructions in a run config or preset. `systemPromptFor()` appends them to every role's system prompt under "Guidance for this run", for both engines. Non-string entries are dropped, newlines are collapsed, each line is capped at 200 characters and the list at 10 lines. New run shows the lines before start; edit, remove or add them there.
+
 ### Your presets: `$REINS_HOME/presets.json`
 
 The file is written by the server; you can also edit it by hand.

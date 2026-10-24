@@ -2,7 +2,7 @@
 // server/src/lessons.ts; this module only sees strings, so vitest, the server,
 // the lessons:check script and the agent tools share one parser.
 import type { ComponentId, Lesson, LessonProblem } from "./types.js";
-import { COMPONENTS, COMPONENT_IDS, FOUNDATIONS } from "./components.js";
+import { COMPONENTS, COMPONENT_IDS, FOUNDATIONS, GUIDANCE_MAX_CHARS } from "./components.js";
 
 export type ParseProblem = Pick<LessonProblem, "level" | "message">;
 
@@ -66,6 +66,28 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
     else err(`unknown foundation id "${id}" in foundations: (known: ${FOUNDATIONS.map((f) => f.id).join(", ")})`);
   }
 
+  // Preset effects: which domains this lesson shapes, and how (see docs/lesson-template.md).
+  const effectIds = (key: "enables" | "disables") => {
+    const out: ComponentId[] = [];
+    for (const id of list(meta[key])) {
+      if ((COMPONENT_IDS as string[]).includes(id)) out.push(id as ComponentId);
+      else err(`unknown component id "${id}" in ${key}: (see docs/configuring.md for the ids)`);
+    }
+    return [...new Set(out)];
+  };
+  const domains: string[] = [];
+  for (const d of list(meta.domains)) {
+    if (/^[a-z0-9][a-z0-9-]{0,39}$/.test(d)) domains.push(d);
+    else err(`invalid domain "${d}" in domains: (use lowercase letters, digits and -, e.g. web, cli)`);
+  }
+  const enables = effectIds("enables");
+  const disables = effectIds("disables");
+  for (const id of enables) if (disables.includes(id)) err(`component "${id}" is in both enables: and disables:`);
+  const guidance = (meta.guidance ?? "").replace(/\s+/g, " ").trim();
+  if (guidance.length > GUIDANCE_MAX_CHARS) err(`guidance: is ${guidance.length} characters; keep it to one line of at most ${GUIDANCE_MAX_CHARS}`);
+  if (!domains.length && (enables.length || disables.length || guidance))
+    problems.push({ level: "warn", message: "enables:/disables:/guidance: have no effect without domains: (e.g. domains: web)" });
+
   const section = (name: string) => {
     const re = new RegExp(`(?:^|\\n)##[ \\t]*${name}[ \\t]*\\n([\\s\\S]*?)(?=\\n##[ \\t]|$)`, "i");
     return (body.match(re)?.[1] ?? "")
@@ -94,6 +116,10 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
       components,
       foundations,
       tags: list(meta.tags),
+      ...(domains.length ? { domains } : {}),
+      ...(enables.length ? { enables } : {}),
+      ...(disables.length ? { disables } : {}),
+      ...(guidance ? { guidance: guidance.slice(0, GUIDANCE_MAX_CHARS) } : {}),
       source,
     },
     problems,

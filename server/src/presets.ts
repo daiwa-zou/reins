@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Preset, PresetConfig } from "../../shared/types.js";
+import type { EngineId, Preset, PresetCompatibility, PresetConfig } from "../../shared/types.js";
+import { compatibilityByEngine, generatedPresets, isGeneratedPresetName } from "../../shared/presets.js";
+import { listLessons } from "./lessons.js";
 import { BUILT_IN_PRESETS, FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
 
 /**
@@ -14,6 +16,7 @@ interface StoredPreset {
   description: string;
   config: PresetConfig;
   createdAt: string;
+  lessons?: string[];
 }
 interface PresetFile {
   default: string | null;
@@ -32,7 +35,8 @@ function read(): PresetFile {
       const name = sanitizePresetName(p?.name);
       if (!name || isBuiltInPresetName(name)) continue;
       try {
-        presets.push({ name, description: String(p.description ?? "").slice(0, 300), config: validatePresetConfig(p.config).config, createdAt: String(p.createdAt ?? "") });
+        const lessons = Array.isArray(p.lessons) ? p.lessons.filter((s: unknown): s is string => typeof s === "string").slice(0, 50) : [];
+        presets.push({ name, description: String(p.description ?? "").slice(0, 300), config: validatePresetConfig(p.config).config, createdAt: String(p.createdAt ?? ""), ...(lessons.length ? { lessons } : {}) });
       } catch {
         /* a hand-edited entry with a bad field is ignored rather than crashing the list */
       }
@@ -54,14 +58,18 @@ function write(f: PresetFile) {
 
 function resolveDefault(f: PresetFile): string | null {
   if (!f.default) return null;
-  const all = [...BUILT_IN_PRESETS.map((p) => p.name), ...f.presets.map((p) => p.name)];
+  const all = [...BUILT_IN_PRESETS.map((p) => p.name), ...generatedPresets(listLessons()).map((p) => p.name), ...f.presets.map((p) => p.name)];
   return all.find((n) => n.toLowerCase() === f.default!.toLowerCase()) ?? null;
 }
 
-export function listPresets(): { presets: (Preset & { isDefault: boolean })[]; default: string | null; file: string } {
+export type ListedPreset = Preset & { isDefault: boolean; compatibility: Record<EngineId, PresetCompatibility> };
+
+/** Built-in, then lesson-generated (recomposed from the current lesson library on every call), then the user's. */
+export function listPresets(): { presets: ListedPreset[]; default: string | null; file: string } {
   const f = read();
   const def = resolveDefault(f);
-  const presets = [...BUILT_IN_PRESETS, ...f.presets.map((p) => ({ name: p.name, description: p.description, builtIn: false, config: p.config }))].map((p) => ({ ...p, isDefault: p.name === def }));
+  const user: Preset[] = f.presets.map((p) => ({ name: p.name, description: p.description, builtIn: false, config: p.config, ...(p.lessons ? { lessons: p.lessons } : {}) }));
+  const presets = [...BUILT_IN_PRESETS, ...generatedPresets(listLessons()), ...user].map((p) => ({ ...p, isDefault: p.name === def, compatibility: compatibilityByEngine(p) }));
   return { presets, default: def, file: presetsFile() };
 }
 
@@ -74,21 +82,29 @@ export function savePreset(body: unknown): { preset: Preset; dropped: string[]; 
   const name = sanitizePresetName(b.name);
   if (!name) throw new PresetValidationError("name must contain letters or digits");
   if (isBuiltInPresetName(name)) throw new PresetValidationError(`"${name}" is a built-in preset and cannot be overwritten; pick another name`);
+  if (isGeneratedPresetName(name, listLessons())) throw new PresetValidationError(`"${name}" is a preset generated from lessons and cannot be overwritten; pick another name`);
+  if (b.lessons !== undefined && (!Array.isArray(b.lessons) || b.lessons.some((s) => typeof s !== "string"))) throw new PresetValidationError("lessons must be an array of lesson slugs");
   if (b.config === undefined) throw new PresetValidationError("config is required (an object, e.g. {\"components\":{\"planner\":false}})");
   if (b.description !== undefined && typeof b.description !== "string") throw new PresetValidationError("description must be a string");
   if (b.default !== undefined && typeof b.default !== "boolean") throw new PresetValidationError("default must be true or false");
   const { config, dropped } = validatePresetConfig(b.config);
   const droppedAll = [...dropped];
-  for (const k of Object.keys(b)) if (!["name", "description", "config", "default"].includes(k)) droppedAll.push(k);
+  for (const k of Object.keys(b)) if (!["name", "description", "config", "default", "lessons"].includes(k)) droppedAll.push(k);
+  const known = new Set(listLessons().map((l) => l.slug));
+  const lessons = [...new Set((b.lessons as string[] | undefined) ?? [])].filter((s) => {
+    if (known.has(s)) return true;
+    droppedAll.push(`lessons.${s} (no such lesson)`);
+    return false;
+  });
   // Forbidden keys are reported by validatePresetConfig as dropped; make the reason explicit.
   const reported = droppedAll.map((k) => ((FORBIDDEN_PRESET_KEYS as readonly string[]).includes(k) ? `${k} (presets never carry ${k})` : k));
   const f = read();
-  const stored: StoredPreset = { name, description: String(b.description ?? "").trim().slice(0, 300), config, createdAt: new Date().toISOString() };
+  const stored: StoredPreset = { name, description: String(b.description ?? "").trim().slice(0, 300), config, createdAt: new Date().toISOString(), ...(lessons.length ? { lessons } : {}) };
   f.presets = [...f.presets.filter((p) => p.name.toLowerCase() !== name.toLowerCase()), stored];
   if (b.default === true) f.default = name;
   else if (b.default === false && f.default?.toLowerCase() === name.toLowerCase()) f.default = null;
   write(f);
-  return { preset: { name, description: stored.description, builtIn: false, config }, dropped: reported, default: resolveDefault(f) };
+  return { preset: { name, description: stored.description, builtIn: false, config, ...(lessons.length ? { lessons } : {}) }, dropped: reported, default: resolveDefault(f) };
 }
 
 export function deletePreset(rawName: string): void {
@@ -112,7 +128,7 @@ export function setDefaultPreset(raw: unknown): string | null {
     return null;
   }
   const name = sanitizePresetName(raw);
-  const exists = BUILT_IN_PRESETS.some((p) => p.name.toLowerCase() === name.toLowerCase()) || f.presets.some((p) => p.name.toLowerCase() === name.toLowerCase());
+  const exists = BUILT_IN_PRESETS.some((p) => p.name.toLowerCase() === name.toLowerCase()) || isGeneratedPresetName(name, listLessons()) || f.presets.some((p) => p.name.toLowerCase() === name.toLowerCase());
   if (!exists) throw new PresetNotFound(`no preset named "${raw}"`);
   f.default = name;
   write(f);

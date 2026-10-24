@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMPONENT_IDS } from "../../shared/components.js";
 import { parseLesson } from "../../shared/lessons.js";
+import { PRESET_RECIPES } from "../../shared/presets.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
@@ -13,6 +14,14 @@ describe("docs cannot drift", () => {
     const doc = read("docs/configuring.md");
     const missing = COMPONENT_IDS.filter((id) => !doc.includes(`\`${id}\``));
     expect(missing).toEqual([]);
+  });
+
+  it("docs/configuring.md names every built-in preset recipe", () => {
+    const doc = read("docs/configuring.md");
+    for (const r of PRESET_RECIPES) {
+      expect(doc).toContain(`\`${r.id}\``);
+      expect(doc).toContain(r.name);
+    }
   });
 
   it("covers presets.json, lessons:check and the user lessons dir", () => {

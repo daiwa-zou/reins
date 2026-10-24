@@ -9,6 +9,9 @@ import { listRunIds, loadConfig, readEvents, saveConfig, summarize, deleteRun as
 import { startReplay } from "./replay.js";
 import { execFileSync } from "node:child_process";
 
+/** Events that change a run's summary row (phase, round, cost), so the run list is pushed again. */
+const SUMMARY_EVENTS = new Set<RunEvent["type"]>(["phase.started", "phase.finished", "turn.finished", "run.summary"]);
+
 interface PendingApproval {
   request: ApprovalRequest;
   resolve: (r: { approved: boolean; note?: string; criteria?: ContractCriterion[] }) => void;
@@ -28,6 +31,27 @@ interface ActiveRun {
 /** Owns every live run: creation, approvals, steering, pause/cancel, and the fan-out of events. */
 export class RunManager extends EventEmitter {
   private active = new Map<string, ActiveRun>();
+  /** Minimum gap between two "runs" pushes, across all runs. */
+  runsThrottleMs = 1000;
+  private lastRunsEmit = 0;
+  private runsTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Ask for a "runs" push (the sidebar list). Throttled across all runs to at
+   * most one per runsThrottleMs: the first call goes out at once, later calls
+   * in the window collapse into one trailing push so the last state is sent.
+   */
+  notifyRuns() {
+    if (this.runsTimer) return;
+    const wait = this.lastRunsEmit + this.runsThrottleMs - Date.now();
+    const fire = () => {
+      this.runsTimer = null;
+      this.lastRunsEmit = Date.now();
+      this.emit("runs");
+    };
+    if (wait <= 0) fire();
+    else this.runsTimer = setTimeout(fire, wait);
+  }
   private _client: Anthropic | null = null;
   get client(): Anthropic | null {
     return this._client;
@@ -98,13 +122,16 @@ export class RunManager extends EventEmitter {
   deleteRun(id: string) {
     if (this.active.has(id)) throw new Error("Run is still active; cancel it first.");
     deleteRunDir(id);
-    this.emit("runs");
+    this.notifyRuns();
   }
 
   private attach(config: RunConfig): ActiveRun {
     const bus = new RunBus(config.id);
     const run: ActiveRun = { config, bus, abort: new AbortController(), paused: false, pauseWaiters: [], steer: [], pending: new Map(), costUsd: () => 0 };
-    bus.on("event", (ev: RunEvent) => this.emit("event", ev));
+    bus.on("event", (ev: RunEvent) => {
+      this.emit("event", ev);
+      if (SUMMARY_EVENTS.has(ev.type)) this.notifyRuns();
+    });
     this.active.set(config.id, run);
     return run;
   }
@@ -114,7 +141,7 @@ export class RunManager extends EventEmitter {
     saveConfig(config);
     const run = this.attach(config);
     run.bus.emitEvent({ type: "run.created", config });
-    this.emit("runs");
+    this.notifyRuns();
     if (config.engine === "replay") this.startReplayRun(run);
     else this.startLiveRun(run);
     return config;
@@ -122,7 +149,7 @@ export class RunManager extends EventEmitter {
 
   private status(run: ActiveRun, status: RunSummary["status"], reason?: string) {
     run.bus.emitEvent({ type: "run.status", status, reason });
-    this.emit("runs");
+    this.notifyRuns();
   }
 
   private control(run: ActiveRun): OrchestratorControl {

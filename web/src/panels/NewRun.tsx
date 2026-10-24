@@ -5,7 +5,8 @@ import { api } from "../lib/api";
 import { defaultRunConfig, MODELS } from "@shared/components";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
 import { money } from "../lib/format";
-import type { ComponentId, EffortLevel, HarnessComponent, Preset, RunConfig } from "@shared/types";
+import type { ComponentId, EffortLevel, EngineId, HarnessComponent, Preset, PresetBasis, RunConfig } from "@shared/types";
+import { adaptPreset, generatedPresets, presetCompatibility } from "@shared/presets";
 import { GROUP_LABEL } from "./Harness";
 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
@@ -28,16 +29,24 @@ export function NewRun() {
   const storePresets = useStore((s) => s.presets);
   const defaultPreset = useStore((s) => s.defaultPreset);
   const refreshPresets = useStore((s) => s.refreshPresets);
-  const presets: (Preset & { isDefault?: boolean })[] = storePresets.length ? storePresets : BUILT_IN_PRESETS;
+  const presets: (Preset & { isDefault?: boolean })[] = storePresets.length ? storePresets : [...BUILT_IN_PRESETS, ...generatedPresets([])];
   const preferredEngine = info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic";
   const fresh = (keep: Partial<RunConfig> = {}) => defaultRunConfig({ task: keep.task ?? "", workspace: keep.workspace ?? info?.defaultWorkspace ?? "", engine: (keep.engine as RunConfig["engine"]) ?? preferredEngine, title: keep.title });
   // Start from: the prefill (run again / Harness), else the surviving draft, else your default preset, else the defaults.
-  const base = useMemo(() => {
-    if (prefill || draft) return defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: preferredEngine, ...((prefill ?? draft) as any) });
+  // "My default" is applied only if it fits the engine New run opens on; otherwise the defaults, with a notice.
+  const opening = useMemo((): { cfg: RunConfig; notice: string | null } => {
+    if (prefill || draft) return { cfg: defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: preferredEngine, ...((prefill ?? draft) as any) }), notice: ((prefill as any)?.__notice as string) ?? null };
     const def = defaultPreset ? presets.find((p) => p.name === defaultPreset) : undefined;
-    return def ? applyPreset(fresh(), def) : fresh();
+    if (!def) return { cfg: fresh(), notice: null };
+    const fit = presetCompatibility(def, preferredEngine);
+    if (!fit.ok) return { cfg: fresh(), notice: `Your default preset "${def.name}" does not fit ${ENGINE_LABEL[preferredEngine]} (${fit.reasons[0]}), so New run starts from the defaults.` };
+    return { cfg: applyPreset(fresh(), adaptPreset(def, preferredEngine)), notice: null };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill, info]);
+  const base = opening.cfg;
+  const [notice, setNotice] = useState<string | null>(opening.notice);
+  // A preset built in Lessons ("Build a preset from these") brings its basis along.
+  const prefillBasis = ((prefill as any)?.__basis as PresetBasis[] | undefined) ?? undefined;
   const [cfg, setCfgRaw] = useState<RunConfig>(base);
   const setCfg = (updater: RunConfig | ((c: RunConfig) => RunConfig)) =>
     setCfgRaw((c) => {
@@ -86,18 +95,54 @@ export function NewRun() {
 
   // Presets: pick one (applied over fresh defaults, keeping task, folder and engine unless the preset sets one).
   const activePreset = cfg.preset ? presets.find((p) => p.name === cfg.preset) : undefined;
-  const presetModified = !!activePreset && JSON.stringify(diffFromDefaults(applyPreset(fresh(cfg), activePreset))) !== JSON.stringify(diffFromDefaults(cfg));
+  const engineNow: EngineId = cfg.engine === "replay" ? preferredEngine : cfg.engine;
+  const presetModified = !!activePreset && JSON.stringify(diffFromDefaults(applyPreset(fresh(cfg), adaptPreset(activePreset, engineNow)))) !== JSON.stringify(diffFromDefaults(cfg));
+  const activeFit = activePreset ? presetCompatibility(activePreset, engineNow) : null;
+  const basis = activePreset?.basis ?? (cfg.preset ? undefined : prefillBasis);
+  // Presets are gated by engine (shared/presets.ts presetCompatibility): one that names an engine switches to it;
+  // one that turns on switches this engine ignores is unavailable unless it adapts.
   const pickPreset = (name: string) => {
     const p = presets.find((x) => x.name === name);
-    if (!p) return set({ preset: undefined });
-    setCfg(applyPreset(fresh(cfg), p));
+    if (!p) {
+      setNotice(null);
+      return set({ preset: undefined });
+    }
+    if (p.config.engine && p.config.engine !== engineNow) {
+      setCfg(applyPreset(fresh({ ...cfg, engine: p.config.engine }), p));
+      return setNotice(`${p.name} is made for ${ENGINE_LABEL[p.config.engine]}, so the engine switched from ${ENGINE_LABEL[engineNow]} to ${ENGINE_LABEL[p.config.engine]}.`);
+    }
+    const fit = presetCompatibility(p, engineNow);
+    if (!fit.ok) return setNotice(`${p.name} is not available: ${fit.reasons[0]}`);
+    setCfg(applyPreset(fresh(cfg), adaptPreset(p, engineNow)));
+    setNotice(null);
+  };
+  const switchEngine = (id: EngineId) => {
+    if (id === cfg.engine) return;
+    if (activePreset) {
+      const fit = presetCompatibility(activePreset, id);
+      if (!fit.ok) {
+        set({ engine: id, preset: undefined });
+        return setNotice(`${activePreset.name} does not fit ${ENGINE_LABEL[id]} (${fit.reasons[0]}), so the preset is now Custom; your settings are kept.`);
+      }
+      if (fit.adaptive || presetCompatibility(activePreset, engineNow).adaptive) {
+        setNotice(null);
+        return setCfg(applyPreset(fresh({ ...cfg, engine: id }), adaptPreset(activePreset, id)));
+      }
+    }
+    setNotice(null);
+    set({ engine: id });
+  };
+  const setGuidance = (lines: string[]) => set({ guidance: lines });
+  const openLesson = (slug: string) => {
+    openModal(null);
+    setLessonFilter(slug);
   };
   const resetToDefaults = () => setCfg(fresh({ task: cfg.task, workspace: cfg.workspace, title: cfg.title }));
   const [saving, setSaving] = useState<null | { name: string; makeDefault: boolean }>(null);
   const savePreset = async () => {
     if (!saving?.name.trim()) return;
     try {
-      const r = await api.savePreset({ name: saving.name, config: presetFromConfig(cfg), default: saving.makeDefault });
+      const r = await api.savePreset({ name: saving.name, config: presetFromConfig(cfg), default: saving.makeDefault, ...(basis?.length ? { lessons: basis.map((b) => b.slug) } : {}) });
       await refreshPresets();
       set({ preset: r.preset.name });
       setSaving(null);
@@ -189,7 +234,7 @@ export function NewRun() {
                 ["claude-code", "Claude Code", info?.hasClaudeCode ? "Runs each role through the local Claude Code login. Reins keeps the contract, evaluator, guardrails and log; Claude Code keeps context management." : "The claude CLI was not found on this machine."],
               ] as const
             ).map(([id, label, desc]) => (
-              <button key={id} type="button" className={`flex-1 rounded-lg border p-2.5 text-left ${cfg.engine === id ? "border-[var(--accent)] sunk" : "line"}`} onClick={() => set({ engine: id })}>
+              <button key={id} type="button" className={`flex-1 rounded-lg border p-2.5 text-left ${cfg.engine === id ? "border-[var(--accent)] sunk" : "line"}`} onClick={() => switchEngine(id)}>
                 <div className="font-medium text-[12.5px] flex items-center gap-2">
                   {label}
                   {(id === "anthropic" ? info?.hasApiKey : info?.hasClaudeCode) ? <Badge tone="ok">ready</Badge> : <Badge tone="warn">unavailable</Badge>}
@@ -207,13 +252,19 @@ export function NewRun() {
             </label>
             <select id="preset-pick" className="input" style={{ width: 200 }} value={activePreset ? activePreset.name : ""} onChange={(e) => pickPreset(e.target.value)}>
               <option value="">Custom (no preset)</option>
-              {presets.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                  {p.builtIn ? "" : " (yours)"}
-                  {p.name === defaultPreset ? " ★ default" : ""}
-                </option>
-              ))}
+              {presets.map((p) => {
+                const fit = presetCompatibility(p, engineNow);
+                // A preset made for the other engine stays pickable (it switches the engine); one that needs the other engine's switches does not.
+                const blocked = !fit.ok && !p.config.engine;
+                return (
+                  <option key={p.name} value={p.name} disabled={blocked} title={fit.reasons[0]}>
+                    {p.name}
+                    {p.generated ? " (from lessons)" : p.builtIn ? "" : " (yours)"}
+                    {p.name === defaultPreset ? " ★ default" : ""}
+                    {blocked ? ` — needs ${ENGINE_LABEL[engineNow === "claude-code" ? "anthropic" : "claude-code"]}` : !fit.ok && p.config.engine ? ` — switches to ${ENGINE_LABEL[p.config.engine]}` : ""}
+                  </option>
+                );
+              })}
             </select>
             {presetModified && <Badge tone="warn">modified</Badge>}
             {activePreset && activePreset.name !== defaultPreset && (
@@ -238,6 +289,37 @@ export function NewRun() {
             </button>
           </div>
           {activePreset?.description && <div className="muted text-[11.5px] leading-snug">{activePreset.description}</div>}
+          {notice && (
+            <div className="text-[11.5px] leading-snug" role="status" data-preset-notice>
+              <Badge tone="warn">note</Badge> {notice}
+            </div>
+          )}
+          {activeFit?.adaptive && (
+            <div className="muted text-[11.5px] leading-snug" data-preset-adapted>
+              {activeFit.reasons[0].replace(/^Adapted/, "adapted")}
+            </div>
+          )}
+          {engineNow === "claude-code" && (
+            <div className="faint text-[11px] leading-snug">
+              Unavailable on Claude Code: {presets.filter((p) => !p.config.engine && !presetCompatibility(p, "claude-code").ok).map((p) => p.name).join(", ") || "none"} (they turn on switches only Direct API honours).
+            </div>
+          )}
+          {basis && basis.length > 0 && (
+            <div className="text-[11.5px] leading-snug" data-preset-basis>
+              <span className="font-semibold">Built from {basis.length} lesson{basis.length === 1 ? "" : "s"}:</span>
+              <ul className="mt-0.5 flex flex-col gap-0.5">
+                {basis.map((b) => (
+                  <li key={b.slug}>
+                    <button type="button" className="underline" onClick={() => openLesson(b.slug)} title="Open this lesson">
+                      {b.title}
+                    </button>{" "}
+                    <span className="muted">— {b.effect}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <GuidanceEditor lines={cfg.guidance ?? []} onChange={setGuidance} />
           {showChanges && changes.length > 0 && (
             <ul className="text-[11.5px] mono flex flex-col gap-0.5 fade-in">
               {changes.map((d) => (
@@ -496,4 +578,28 @@ function estimate(cfg: RunConfig): string {
   const turns = 12 * phases;
   const cost = turns * ((25_000 * 0.15 * m.inputPerM + 25_000 * 0.85 * m.cacheReadPerM + 600 * m.outputPerM) / 1e6);
   return `$${cost.toFixed(2)}–$${(cost * 3).toFixed(2)}, ${Math.round(turns)}–${Math.round(turns * 2.5)} model calls`;
+}
+
+/** Run guidance shown before start: every line is appended to each role's system prompt; edit or remove any. */
+function GuidanceEditor({ lines, onChange }: { lines: string[]; onChange: (l: string[]) => void }) {
+  return (
+    <div className="text-[11.5px] flex flex-col gap-1" data-guidance>
+      <div className="flex items-center gap-2">
+        <span className="font-semibold">Guidance for this run</span>
+        <span className="faint">{lines.length ? "added to every role's instructions" : "none"}</span>
+        <span className="flex-1" />
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange([...lines, ""])} disabled={lines.length >= 10}>
+          Add line
+        </button>
+      </div>
+      {lines.map((l, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <input className="input flex-1" value={l} maxLength={200} aria-label={`Guidance line ${i + 1}`} onChange={(e) => onChange(lines.map((x, j) => (j === i ? e.target.value.replace(/[\r\n]+/g, " ") : x)))} />
+          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove guidance line ${i + 1}`} onClick={() => onChange(lines.filter((_, j) => j !== i))}>
+            Remove
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
