@@ -23,6 +23,7 @@ takeaway: A take-home test built to rank engineers was saturated by successive C
 - Cycle benchmarks (lower is better; released challenge uses the v2 instruction set, single core): 2164 for Opus 4 after many hours in harness; 1790 for Opus 4.5 in a casual Claude Code session (about the best human in 2h); 1579 for Opus 4.5 at 2h in harness; 1548 for Sonnet 4.5 well over 2h; 1487 for Opus 4.5 at 11.5h; 1363 for Opus 4.5 with an "improved harness" (a generic improvement, not described) after many hours.
 - Anyone below 1487 cycles is invited to email performance-recruiting@anthropic.com with code and resume; the challenge is released at github.com/anthropics/original_performance_takehome.
 - The iterative loop used: test a pre-release checkpoint in Claude Code, observe where it stalls, supply a target to unlock the trick, use the model's failure point as the next version's starting point, and validate in the harness at 2h and longer horizons.
+- With unlimited time humans still beat the models: the model's advantage held only inside the 2-hour limit, so time-limited and open-ended results must be reported separately, and the longer horizon is where human judgment (tooling, verification, simplification) still adds the most.
 
 ## Harness implications
 - Harness quality is a measurable, first-order variable: the same model moved from 1487 to 1363 cycles purely from a "generic" harness improvement. A harness should expose its own version in every trace and benchmark itself against fixed tasks across versions.

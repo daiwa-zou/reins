@@ -1,5 +1,13 @@
 import type { ContractCriterion, HarnessComponent, Lesson, RunConfig, RunEvent, RunSummary, ServerInfo, ChangedFile, TrialSet } from "@shared/types";
 
+export interface LessonAudit {
+  slug: string;
+  checkedAgainstOriginal: string;
+  rows: { learning: string; where: string; status: "implemented" | "partial" | "gap" }[];
+  gaps: string[];
+  counts: { implemented: number; partial: number; gap: number };
+}
+
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let msg = res.statusText;
@@ -37,5 +45,7 @@ export const api = {
   checkWorkspace: (p: string) => fetch(`/api/workspaces/check?path=${encodeURIComponent(p)}`).then((r) => j<{ path: string; exists: boolean; git: boolean; files: string[] }>(r)),
   trials: (k = 3) => fetch(`/api/trials?k=${k}`).then((r) => j<TrialSet[]>(r)),
   repeat: (id: string, k: number) => post(`/api/runs/${id}/repeat?k=${k}`).then((r) => j<{ ok: true; k: number }>(r)),
+  audit: () => fetch("/api/audit").then((r) => j<LessonAudit[]>(r)),
+  testConnection: (model?: string) => post("/api/settings/test", { model }).then((r) => j<{ ok: true; model: string; usage: { input: number; output: number; cacheRead: number; cacheWrite: number }; degraded: string[]; ms: number } | { ok: false; error: string; status?: number }>(r)),
   setApiKey: (apiKey: string) => post("/api/settings/api-key", { apiKey }).then((r) => j<{ ok: true; hasApiKey: boolean }>(r)),
 };

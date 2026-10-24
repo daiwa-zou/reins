@@ -1,46 +1,66 @@
 import React from "react";
 import { useStore } from "../state/store";
-import { api } from "../lib/api";
-import { Kbd } from "./ui";
+import { Kbd, Badge } from "./ui";
+import { startDemo } from "../lib/demo";
 
 export function Welcome() {
   const openModal = useStore((s) => s.openModal);
-  const selectRun = useStore((s) => s.selectRun);
-  const toastMsg = useStore((s) => s.toastMsg);
   const info = useStore((s) => s.info);
   const lessons = useStore((s) => s.lessons);
   const setTab = useStore((s) => s.setTab);
+  const booting = useStore((s) => s.booting);
+  const bootError = useStore((s) => s.bootError);
+  const ready = !!info?.hasApiKey || !!info?.hasClaudeCode;
 
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-3xl mx-auto px-6 py-14 fade-in">
-        <div className="text-[28px] font-semibold tracking-tight leading-tight">A harness you can see.</div>
+        <div className="text-[28px] font-semibold tracking-tight leading-tight">Describe a change. Approve what "done" means. Watch it get built and checked.</div>
         <p className="muted text-[15px] mt-3 max-w-xl leading-relaxed">
-          Reins runs a planner, a builder and a skeptical evaluator against your repository. Every piece of scaffolding around the model is a switch you can flip, every
-          decision is narrated in plain language, and every lesson it is built on is one click away.
+          Reins runs AI coding agents against a folder on this computer, with a planner, a builder and a separate checker. Every step is narrated in plain language and every
+          design choice links to the Anthropic engineering post behind it.
         </p>
-        <div className="flex flex-wrap gap-2 mt-6">
-          <button className="btn btn-primary" onClick={() => api.demo().then((c) => selectRun(c.id)).catch((e) => toastMsg(e.message, "error"))}>
-            ▶ Watch a recorded run <Kbd>d</Kbd>
+
+        <ol className="grid md:grid-cols-3 gap-3 mt-8 text-[13px]">
+          {[
+            ["1. You describe", "A sentence or two is enough. The planner turns it into a spec and a feature list in your repo."],
+            ["2. You approve the definition of done", "The builder proposes concrete, checkable criteria; the checker tightens them; you edit and approve."],
+            ["3. It builds, then gets checked", "The builder works one feature at a time. The checker re-runs every criterion itself and sends it back if anything fails."],
+          ].map(([h, b]) => (
+            <li key={h} className="card p-4">
+              <div className="font-semibold mb-1">{h}</div>
+              <div className="muted text-[12.5px] leading-relaxed">{b}</div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="flex flex-wrap items-center gap-2 mt-8">
+          <button className="btn btn-primary" onClick={() => startDemo()} disabled={booting}>
+            ▶ Watch the demo <Kbd>d</Kbd>
           </button>
-          <button className="btn" onClick={() => openModal("newRun")}>
+          <button className="btn" onClick={() => openModal("newRun")} disabled={booting}>
             Start a run on your code <Kbd>n</Kbd>
           </button>
-          {!info?.hasApiKey && !info?.hasClaudeCode && (
+          {bootError ? (
+            <Badge tone="bad">Server unreachable: {bootError}</Badge>
+          ) : booting ? (
+            <span className="muted text-[12.5px]">Connecting…</span>
+          ) : ready ? (
+            <span className="muted text-[12.5px]">Ready: {info?.hasClaudeCode ? "your Claude Code login" : "API key"} will run live runs. The demo is free.</span>
+          ) : (
             <button className="btn btn-ghost" onClick={() => openModal("settings")}>
-              Add an API key for live runs →
+              Not ready yet: add an API key or install Claude Code →
             </button>
           )}
-          {!info?.hasApiKey && info?.hasClaudeCode && <span className="muted text-[12.5px] self-center">Live runs use your Claude Code login; no API key needed.</span>}
         </div>
 
         <div className="grid md:grid-cols-3 gap-3 mt-12">
-          <Card title="Contract before code" body="The builder proposes what 'done' means and how to verify it. The evaluator pushes back. You approve the final list, and the evaluator holds the builder to exactly that." />
-          <Card title="Context as a fuel gauge" body="See the prompt grow turn by turn, what it is made of, and where compaction or a handoff will kick in. Watch for the agent wrapping up early." />
-          <Card title="Switchable scaffolding" body="Each harness component states the assumption about the model it encodes. When a new model ships, turn pieces off one at a time and see what still earns its place." />
-          <Card title="Guardrails that know the task" body="Hard rules deny the dangerous. An action classifier that sees only your task and the proposed command decides the ambiguous. You get asked rarely, and for good reason." />
-          <Card title="Read the transcript" body="Every tool call, result and decision is recorded. Scrub backwards through a run like a flight recorder, and whisper a note to the agent at any point." />
-          <Card title={`${lessons.length} lessons, linked`} body="The engineering posts that justify each feature are distilled into a library the agents themselves can consult." onClick={() => setTab("lessons")} />
+          <Card title="You see the whole prompt" body="A gauge shows how full the model's context is, what it is made of, and where the harness will trim or hand off. No surprises when a long run starts forgetting." />
+          <Card title="Every piece of scaffolding is a switch" body="Each helper around the model states the assumption it encodes. When a new model ships, turn one off and see whether it still earns its place." />
+          <Card title="Guardrails that know the task" body="Dangerous commands are blocked outright. Ambiguous ones are judged against your task by a small classifier, so you are asked rarely and for a reason." />
+          <Card title="Rewind any run" body="Every tool call, result and decision is recorded. Scrub back through a run like a flight recorder, and leave the agent a note at any point." />
+          <Card title="One run proves little" body="Repeat a task and see how often it passes. Reliability, not a lucky green run, is what you are buying." />
+          <Card title={`${lessons.length} lessons, linked and audited`} body="The engineering posts behind each feature are distilled into a library, with an independent audit of where each lesson lives in the code." onClick={() => setTab("lessons")} />
         </div>
       </div>
     </div>
@@ -48,10 +68,18 @@ export function Welcome() {
 }
 
 function Card({ title, body, onClick }: { title: string; body: string; onClick?: () => void }) {
-  return (
-    <div className={`card p-4 ${onClick ? "cursor-pointer hover:border-[var(--line-strong)]" : ""}`} onClick={onClick}>
+  const cls = `card p-4 text-left ${onClick ? "cursor-pointer hover:border-[var(--line-strong)]" : ""}`;
+  const inner = (
+    <>
       <div className="font-semibold mb-1">{title}</div>
       <div className="muted text-[12.5px] leading-relaxed">{body}</div>
-    </div>
+    </>
+  );
+  return onClick ? (
+    <button className={cls} onClick={onClick}>
+      {inner}
+    </button>
+  ) : (
+    <div className={cls}>{inner}</div>
   );
 }

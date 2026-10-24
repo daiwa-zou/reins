@@ -147,10 +147,14 @@ export function Inspector({ model, live }: { model: RunModel; live: RunModel }) 
 function Section({ title, children, onClick }: { title: string; children: React.ReactNode; onClick?: () => void }) {
   return (
     <section>
-      <div className={`text-[10.5px] uppercase tracking-wider faint font-semibold mb-1.5 ${onClick ? "cursor-pointer hover:text-[var(--fg)]" : ""}`} onClick={onClick}>
-        {title}
-        {onClick && <span className="ml-1">›</span>}
-      </div>
+      {onClick ? (
+        <button type="button" className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1.5 cursor-pointer hover:text-[var(--fg)] rounded" onClick={onClick}>
+          {title}
+          <span className="ml-1">›</span>
+        </button>
+      ) : (
+        <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1.5">{title}</div>
+      )}
       {children}
     </section>
   );

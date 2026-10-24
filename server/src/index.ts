@@ -16,6 +16,9 @@ import { changedFiles, fileDiff, headSha } from "./workspace.js";
 import { loadDemoEvents } from "./engine/replay.js";
 import { allTrialSets } from "./engine/trials.js";
 import { sandboxAvailable } from "./tools/sandbox.js";
+import { listAudits } from "./audit.js";
+import { probeDirectEngine } from "./engine/loop.js";
+import { defaultRunConfig } from "../../shared/components.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.REINS_PORT ?? 5191);
@@ -56,6 +59,15 @@ function info(): ServerInfo {
 app.get("/api/info", (c) => c.json(info()));
 app.get("/api/components", (c) => c.json(COMPONENTS));
 app.get("/api/lessons", (c) => c.json(listLessons()));
+app.get("/api/audit", (c) => c.json(listAudits()));
+app.post("/api/settings/test", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const client = manager.client;
+  if (!client) return c.json({ ok: false, error: "No API key configured." });
+  const cfg = defaultRunConfig({ task: "connection test", workspace: os.tmpdir(), roles: body.model ? { builder: { model: body.model, effort: "low" } } as any : undefined });
+  cfg.roles.builder.effort = "low";
+  return c.json(await probeDirectEngine(client, cfg));
+});
 app.get("/api/runs", (c) => c.json(manager.listRuns()));
 app.get("/api/trials", (c) => c.json(allTrialSets(Number(c.req.query("k") ?? 3))));
 app.post("/api/runs/:id/repeat", (c) => {

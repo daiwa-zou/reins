@@ -76,15 +76,37 @@ export function Collapsible({ summary, children, defaultOpen = false, className 
   );
 }
 
-export function Modal({ title, onClose, children, width = 720 }: { title: React.ReactNode; onClose: () => void; children: React.ReactNode; width?: number }) {
+export function Modal({ title, onClose, children, width = 720, dismissOnBackdrop = true }: { title: React.ReactNode; onClose: () => void; children: React.ReactNode; width?: number; dismissOnBackdrop?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const previous = document.activeElement as HTMLElement | null;
+    const focusables = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []).filter((el) => !el.hasAttribute("disabled"));
+    focusables()[1]?.focus() ?? focusables()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onClose();
+      if (e.key === "Tab") {
+        const els = focusables();
+        if (!els.length) return;
+        const first = els[0];
+        const last = els[els.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previous?.focus?.();
+    };
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[6vh] px-4" style={{ background: "rgba(10,10,12,0.45)" }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="card fade-in flex flex-col max-h-[88vh] w-full" style={{ maxWidth: width, boxShadow: "var(--shadow)" }} role="dialog" aria-modal>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[6vh] px-4" style={{ background: "rgba(10,10,12,0.45)" }} onMouseDown={(e) => dismissOnBackdrop && e.target === e.currentTarget && onClose()}>
+      <div ref={ref} className="card fade-in flex flex-col max-h-[88vh] w-full" style={{ maxWidth: width, boxShadow: "var(--shadow)" }} role="dialog" aria-modal aria-label={typeof title === "string" ? title : undefined}>
         <div className="flex items-center justify-between px-5 py-3 border-b line">
           <div className="font-semibold text-[15px]">{title}</div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close">
@@ -115,19 +137,28 @@ export function Pre({ children, max = 320 }: { children: string; max?: number })
 export function useAutoScroll<T extends HTMLElement>(dep: unknown, enabled = true) {
   const ref = useRef<T>(null);
   const stick = useRef(true);
+  const [behind, setBehind] = useState(false);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const onScroll = () => {
       stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      if (stick.current) setBehind(false);
     };
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
   useEffect(() => {
-    if (enabled && stick.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+    if (!ref.current) return;
+    if (enabled && stick.current) ref.current.scrollTop = ref.current.scrollHeight;
+    else if (enabled) setBehind(true);
   }, [dep, enabled]);
-  return ref;
+  const jump = () => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+    stick.current = true;
+    setBehind(false);
+  };
+  return Object.assign(ref, { behind, jump });
 }
 
 export function Meter({ value, max, tone = "accent", height = 6 }: { value: number; max: number; tone?: "accent" | "ok" | "warn" | "bad"; height?: number }) {

@@ -16,7 +16,10 @@ export function trialFromEvents(config: RunConfig, events: RunEvent[]): Trial {
     if (ev.type === "note" && ev.text.startsWith("Environment")) harnessVersion = ev.text.match(/reins ([\d.]+)/)?.[1];
   }
   if (!durationMs && events.length) durationMs = Date.parse(events[events.length - 1].ts) - Date.parse(events[0].ts);
-  return { runId: config.id, title: config.task, status: s.status, verdict, costUsd: s.costUsd, durationMs, fixRounds, createdAt: config.createdAt, engine: config.engine, model: config.roles.builder.model, harnessVersion };
+  // A run killed by a server restart says nothing about the agent; count it like a cancel, not a failure.
+  const last = [...events].reverse().find((e) => e.type === "run.status") as Extract<RunEvent, { type: "run.status" }> | undefined;
+  const status = s.status === "failed" && /^Interrupted/.test(last?.reason ?? "") ? "cancelled" : s.status;
+  return { runId: config.id, title: config.task, status, verdict, costUsd: s.costUsd, durationMs, fixRounds, createdAt: config.createdAt, engine: config.engine, model: config.roles.builder.model, harnessVersion };
 }
 
 export function allTrialSets(k = 3): TrialSet[] {

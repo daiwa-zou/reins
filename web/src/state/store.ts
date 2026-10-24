@@ -33,6 +33,17 @@ interface State {
   scrubSeq: number | null;
   lessonFilter: string | null;
   toast?: { text: string; kind: "info" | "error" };
+  booting: boolean;
+  bootError: string | null;
+  /** Approval drafts survive tab switches. */
+  approvalDrafts: Record<string, { criteria: import("@shared/types").ContractCriterion[]; note: string } | undefined>;
+  /** New-run form draft survives closing the dialog. */
+  newRunDraft: Partial<import("@shared/types").RunConfig> | null;
+
+  setApprovalDraft: (id: string, draft: { criteria: import("@shared/types").ContractCriterion[]; note: string } | null) => void;
+  setNewRunDraft: (d: Partial<import("@shared/types").RunConfig> | null) => void;
+  /** Which live engine the server can run right now. */
+  availableEngine: () => "anthropic" | "claude-code";
 
   boot: () => Promise<void>;
   selectRun: (id: string | null) => void;
@@ -46,23 +57,29 @@ interface State {
 }
 
 let ws: WebSocket | null = null;
+let booted = false;
 const subscribed = new Set<string>();
 
 function connect(set: (p: Partial<State> | ((s: State) => Partial<State>)) => void, get: () => State) {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
-  ws = new WebSocket(url);
-  ws.onopen = () => {
+  const sock = new WebSocket(url);
+  ws = sock;
+  sock.onopen = () => {
     set({ connected: true });
     for (const id of subscribed) {
       const have = get().events[id]?.length ?? 0;
-      ws!.send(JSON.stringify({ type: "subscribe", runId: id, fromSeq: have }));
+      sock.send(JSON.stringify({ type: "subscribe", runId: id, fromSeq: have }));
     }
   };
-  ws.onclose = () => {
+  sock.onclose = () => {
     set({ connected: false });
-    setTimeout(() => connect(set, get), 1500);
+    if (ws === sock) {
+      ws = null;
+      setTimeout(() => connect(set, get), 1500);
+    }
   };
-  ws.onmessage = (e) => {
+  sock.onmessage = (e) => {
     const msg = JSON.parse(e.data) as ServerMessage;
     if (msg.type === "hello") set({ info: msg.info });
     else if (msg.type === "runs") set({ runs: msg.runs });
@@ -108,11 +125,28 @@ export const useStore = create<State>((set, get) => ({
   modal: null,
   scrubSeq: null,
   lessonFilter: null,
+  booting: true,
+  bootError: null,
+  approvalDrafts: {},
+  newRunDraft: null,
+
+  setApprovalDraft: (id, draft) => set((s) => ({ approvalDrafts: { ...s.approvalDrafts, [id]: draft ?? undefined } })),
+  setNewRunDraft: (newRunDraft) => set({ newRunDraft }),
+  availableEngine: () => (get().info?.hasApiKey ? "anthropic" : get().info?.hasClaudeCode ? "claude-code" : "anthropic"),
 
   boot: async () => {
+    if (booted) return;
+    booted = true;
     connect(set, get);
-    const [info, components, lessons, runs] = await Promise.all([api.info(), api.components(), api.lessons(), api.runs()]);
-    set({ info, components, lessons, runs });
+    let info, components, lessons, runs;
+    try {
+      [info, components, lessons, runs] = await Promise.all([api.info(), api.components(), api.lessons(), api.runs()]);
+    } catch (e) {
+      booted = false;
+      set({ booting: false, bootError: (e as Error).message });
+      return;
+    }
+    set({ info, components, lessons, runs, booting: false, bootError: null });
     const fromUrl = new URLSearchParams(location.search).get("run");
     const pick = fromUrl && runs.some((r) => r.id === fromUrl) ? fromUrl : runs.find((r) => r.status === "running" || r.status === "waiting_approval")?.id ?? runs[0]?.id ?? null;
     if (pick) get().selectRun(pick);

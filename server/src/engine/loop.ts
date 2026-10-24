@@ -203,6 +203,7 @@ export class AgentLoop {
           this.turn--;
           continue;
         }
+        (this.bus as any).lastError = `${(err as Error).message}${(err as any)?.error?.error?.message ? ` — ${(err as any).error.error.message}` : ""}`;
         this.bus.emitEvent({ type: "error", message: `Model call failed: ${(err as Error).message}`, recoverable: false, detail: String((err as any)?.error?.error?.message ?? "") });
         return this.result("error", finalText);
       }
@@ -461,5 +462,33 @@ export class AgentLoop {
     }
     if (t.name === "http_fetch") return emit(this.config.guardrail.allowNetwork ? "allow" : "deny", "policy", "network", this.config.guardrail.allowNetwork ? "Network allowed for this run." : "Network is off for this run.");
     return emit(this.config.guardrail.mode === "ask" ? "ask" : "allow", "policy", "default", "Default policy.");
+  }
+}
+
+
+/**
+ * Connection test for the direct engine: one tiny request with the exact
+ * shape the loop sends (cached system prefix, adaptive thinking, effort,
+ * betas, context management, tool search, task budget), so a rejected beta
+ * or a bad key shows up in seconds instead of at the first phase of a run.
+ */
+export async function probeDirectEngine(client: Anthropic, config: RunConfig): Promise<{ ok: true; model: string; usage: Usage; degraded: string[]; ms: number } | { ok: false; error: string; status?: number }> {
+  const bus = new RunBus("probe", false);
+  const degraded: string[] = [];
+  bus.on("event", (e: any) => {
+    if (e.type === "note" && e.level === "warn") degraded.push(e.text);
+  });
+  const control: LoopControl = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: false }), drainSteer: () => [], remainingBudget: () => 1 };
+  const loop = new AgentLoop(client, config, bus, control, { role: "builder", system: "You are a connection test. Reply with the single word ok.", tools: ["read_file", "list_files", "search", "think", "git_status", "git_diff", "list_lessons"], terminal: [], handlers: {}, maxTurns: 1 });
+  const started = Date.now();
+  try {
+    const r = await loop.run("Reply with the single word ok. Do not call tools.");
+    if (r.reason === "error") {
+      const err = (bus as any).lastError as string | undefined;
+      return { ok: false, error: err ?? "Model call failed; see the run log." };
+    }
+    return { ok: true, model: config.roles.builder.model, usage: r.usage, degraded, ms: Date.now() - started };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message, status: (err as any)?.status };
   }
 }

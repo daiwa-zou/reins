@@ -6,11 +6,11 @@ export function Help() {
   const openModal = useStore((s) => s.openModal);
   const rows: [React.ReactNode, string][] = [
     [<Kbd>n</Kbd>, "New run"],
-    [<Kbd>d</Kbd>, "Start the recorded demo"],
-    [<Kbd>space</Kbd>, "Pause / resume the selected run"],
+    [<Kbd>d</Kbd>, "Open the demo (creates it the first time)"],
+    [<Kbd>space</Kbd>, "Pause / resume the selected live run (ignored while a control has focus)"],
     [
       <>
-        <Kbd>1</Kbd>…<Kbd>8</Kbd>
+        <Kbd>1</Kbd>…<Kbd>9</Kbd>
       </>,
       TABS.map((t) => t.label).join(" · "),
     ],

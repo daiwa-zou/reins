@@ -12,6 +12,16 @@ export function Settings() {
   const setTheme = useStore((s) => s.setTheme);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [test, setTest] = useState<null | "running" | Awaited<ReturnType<typeof api.testConnection>>>(null);
+
+  const runTest = async () => {
+    setTest("running");
+    try {
+      setTest(await api.testConnection());
+    } catch (e) {
+      setTest({ ok: false, error: (e as Error).message });
+    }
+  };
 
   const save = async (value: string) => {
     setBusy(true);
@@ -38,7 +48,24 @@ export function Settings() {
           </p>
           <div className="flex items-center gap-2 mt-2">
             <span className={`badge ${info?.hasApiKey ? "badge-ok" : "badge-warn"}`}>{info?.hasApiKey ? "key present" : "no key"}</span>
+            {info?.hasApiKey && (
+              <button className="btn btn-sm" disabled={test === "running"} onClick={runTest} title="Sends one tiny request with the exact shape the direct engine uses">
+                {test === "running" ? "Testing…" : "Test connection"}
+              </button>
+            )}
           </div>
+          {test && test !== "running" && (
+            <div className={`mt-2 text-[12.5px] rounded-lg p-2.5 ${test.ok ? "badge-ok" : "badge-bad"}`} style={{ background: test.ok ? "var(--ok-soft)" : "var(--bad-soft)" }}>
+              {test.ok ? (
+                <>
+                  Reached {test.model} in {Math.round(test.ms / 1000)}s ({test.usage.input + test.usage.cacheRead + test.usage.cacheWrite} in / {test.usage.output} out). The direct engine's request shape is accepted
+                  {test.degraded.length ? ` with ${test.degraded.length} feature(s) turned off: ${test.degraded.join(" ")}` : " with every optional feature on."}
+                </>
+              ) : (
+                <>Connection failed{test.status ? ` (${test.status})` : ""}: {test.error}</>
+              )}
+            </div>
+          )}
           <div className="flex gap-2 mt-2">
             <input className="input mono" type="password" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" />
             <button className="btn btn-primary" disabled={busy || !key.trim()} onClick={() => save(key.trim())}>

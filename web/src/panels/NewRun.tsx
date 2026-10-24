@@ -3,6 +3,7 @@ import { Modal, Switch, Badge } from "../components/ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import { defaultRunConfig, MODELS } from "@shared/components";
+import { money } from "../lib/format";
 import type { ComponentId, EffortLevel, RunConfig } from "@shared/types";
 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
@@ -20,15 +21,25 @@ export function NewRun() {
   const toastMsg = useStore((s) => s.toastMsg);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
 
+  const draft = useStore((s) => s.newRunDraft);
+  const setNewRunDraft = useStore((s) => s.setNewRunDraft);
   const base = useMemo(
-    () => defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic", ...(prefill as any) }),
+    () => defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic", ...((prefill ?? draft ?? {}) as any) }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [prefill, info],
   );
-  const [cfg, setCfg] = useState<RunConfig>(base);
+  const [cfg, setCfgRaw] = useState<RunConfig>(base);
+  const setCfg = (updater: RunConfig | ((c: RunConfig) => RunConfig)) =>
+    setCfgRaw((c) => {
+      const next = typeof updater === "function" ? updater(c) : updater;
+      setNewRunDraft(next);
+      return next;
+    });
+  const [checkError, setCheckError] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const [check, setCheck] = useState<{ exists: boolean; git: boolean; files: string[]; path: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [advanced, setAdvanced] = useState<null | "harness" | "roles" | "context" | "guardrails">(prefill ? "harness" : null);
+  const [advanced, setAdvanced] = useState<null | "harness" | "roles" | "context" | "guardrails">((prefill as any)?.__openHarness ? "harness" : null);
   const [sameModel, setSameModel] = useState(true);
 
   useEffect(() => {
@@ -36,7 +47,18 @@ export function NewRun() {
   }, []);
   useEffect(() => {
     if (!cfg.workspace) return setCheck(null);
-    const t = setTimeout(() => api.checkWorkspace(cfg.workspace).then(setCheck).catch(() => setCheck(null)), 250);
+    setCheckError(false);
+    const t = setTimeout(
+      () =>
+        api
+          .checkWorkspace(cfg.workspace)
+          .then(setCheck)
+          .catch(() => {
+            setCheck(null);
+            setCheckError(true);
+          }),
+      250,
+    );
     return () => clearTimeout(t);
   }, [cfg.workspace]);
 
@@ -52,11 +74,15 @@ export function NewRun() {
     });
   const toggle = (id: ComponentId) => set({ components: { ...cfg.components, [id]: !cfg.components[id] } });
 
-  const canStart = cfg.task.trim().length > 3 && !!check?.exists && (cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode);
+  const budgetOk = Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
+  const engineOk = cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode;
+  const blocker = cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
+  const canStart = blocker === null;
   const start = async (engine: "live" | "replay") => {
     setBusy(true);
     try {
       const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, title: cfg.title || cfg.task.slice(0, 60) });
+      if (engine !== "replay") setNewRunDraft(null);
       openModal(null);
       selectRun(created.id);
       useStore.getState().setTab("stage");
@@ -70,7 +96,7 @@ export function NewRun() {
   const est = estimate(cfg);
 
   return (
-    <Modal title={prefill ? "New run from these settings" : "New run"} onClose={() => openModal(null)} width={760}>
+    <Modal title={prefill ? "New run from these settings" : "New run"} onClose={() => openModal(null)} width={760} dismissOnBackdrop={false}>
       <div className="flex flex-col gap-5">
         <div>
           <label className="text-[12px] font-semibold">What should the agent do?</label>
@@ -95,7 +121,7 @@ export function NewRun() {
           </datalist>
           <div className="flex items-center gap-2 mt-1.5 text-[11.5px] min-h-[18px]">
             {check === null ? (
-              <span className="faint">Type or pick a folder.</span>
+              <span className={checkError ? "text-[var(--bad)]" : "faint"}>{checkError ? "Could not check the folder (server unreachable)." : cfg.workspace ? "Checking…" : "Type or pick a folder."}</span>
             ) : !check.exists ? (
               <Badge tone="bad">folder not found</Badge>
             ) : (
@@ -146,7 +172,7 @@ export function NewRun() {
             </select>
           </Field>
           <Field label="Budget (USD)">
-            <input className="input" type="number" min={1} step={1} value={cfg.budgetUsd} onChange={(e) => set({ budgetUsd: Number(e.target.value) })} />
+            <input className="input" type="number" min={1} step={1} value={cfg.budgetUsd} onChange={(e) => set({ budgetUsd: Math.max(0, Number(e.target.value) || 0) })} aria-invalid={!budgetOk} />
           </Field>
         </div>
 
@@ -275,7 +301,14 @@ export function NewRun() {
 
         <div className="flex items-center gap-3 pt-2 border-t line">
           <div className="muted text-[12px] leading-snug">
-            Rough estimate: <span className="mono">{est}</span>. Live runs stop at the budget.
+            {cfg.engine === "claude-code" ? (
+              <>Uses your Claude subscription; costs are shown as list-price estimates. The run stops at the budget (~{money(cfg.budgetUsd)} est.).</>
+            ) : (
+              <>
+                Very rough estimate: <span className="mono">~{est}</span> (assumes a mid-sized task; real cost depends on the repo and effort). The run stops at the budget.
+              </>
+            )}
+            {blocker && <div className="text-[var(--warn)] mt-0.5">{blocker}</div>}
             {cfg.engine === "anthropic" && !info?.hasApiKey && (
               <div className="text-[var(--warn)]">
                 No API key yet.{" "}
@@ -315,5 +348,5 @@ function estimate(cfg: RunConfig): string {
   const phases = 1 + (cfg.components.planner ? 1 : 0) + (cfg.components.contracts ? 1 : 0) + (cfg.components.evaluator ? 1.5 : 0);
   const turns = 12 * phases;
   const cost = turns * ((25_000 * 0.15 * m.inputPerM + 25_000 * 0.85 * m.cacheReadPerM + 600 * m.outputPerM) / 1e6);
-  return `$${cost.toFixed(2)}–$${(cost * 3).toFixed(2)} · ${Math.round(turns)}–${Math.round(turns * 2.5)} model calls`;
+  return `$${cost.toFixed(2)}–$${(cost * 3).toFixed(2)}, ${Math.round(turns)}–${Math.round(turns * 2.5)} model calls`;
 }

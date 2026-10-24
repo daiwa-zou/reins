@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
+import { api, type LessonAudit } from "../lib/api";
 import { FOUNDATIONS } from "@shared/components";
 
 /** The library the harness is built from. Each lesson links back to the components it informs. */
@@ -12,6 +13,11 @@ export function LessonsPanel() {
   const [q, setQ] = useState("");
   const [tag, setTag] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(filter);
+  const [audits, setAudits] = useState<LessonAudit[]>([]);
+  React.useEffect(() => {
+    api.audit().then(setAudits).catch(() => {});
+  }, []);
+  const totals = audits.reduce((a, x) => ({ implemented: a.implemented + x.counts.implemented, partial: a.partial + x.counts.partial, gap: a.gap + x.counts.gap }), { implemented: 0, partial: 0, gap: 0 });
 
   React.useEffect(() => {
     if (filter) {
@@ -29,6 +35,12 @@ export function LessonsPanel() {
     <div className="h-full flex">
       <div className="w-[260px] shrink-0 border-r line overflow-auto p-3 flex flex-col gap-3">
         <input className="input" placeholder="Search lessons…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {audits.length > 0 && (
+          <div className="text-[11.5px] muted leading-snug" title="From docs/audit, written by an independent audit pass that re-read each post and looked for the matching code">
+            Independent audit of {audits.length} lessons: <span className="text-[var(--ok)] font-semibold">{totals.implemented}</span> implemented · <span className="text-[var(--warn)] font-semibold">{totals.partial}</span> partial ·{" "}
+            <span className="text-[var(--bad)] font-semibold">{totals.gap}</span> gaps
+          </div>
+        )}
         <div className="flex flex-wrap gap-1">
           <button className={`badge ${tag === null ? "badge-accent" : "badge-neutral"}`} onClick={() => setTag(null)}>
             all · {lessons.length}
@@ -55,6 +67,7 @@ export function LessonsPanel() {
             .map((l) => {
               const informs = components.filter((c) => c.lessons.includes(l.slug));
               const founds = FOUNDATIONS.filter((f) => f.lessons.includes(l.slug));
+              const audit = audits.find((a) => a.slug === l.slug);
               return (
                 <article key={l.slug} id={`lesson-${l.slug}`} className="card p-5 fade-in">
                   <div className="flex items-start justify-between gap-3">
@@ -82,6 +95,36 @@ export function LessonsPanel() {
                         <Badge key={f.id}>{f.label}</Badge>
                       ))}
                     </div>
+                  )}
+                  {audit && (
+                    <details className="mt-4 rounded-lg border line p-3">
+                      <summary className="cursor-pointer text-[12.5px]">
+                        <span className="font-semibold">Where this lives in Reins</span>{" "}
+                        <span className="muted">
+                          · {audit.counts.implemented} implemented · {audit.counts.partial} partial · {audit.counts.gap} gaps{audit.checkedAgainstOriginal ? ` · lesson re-checked against the original: ${audit.checkedAgainstOriginal.slice(0, 80)}` : ""}
+                        </span>
+                      </summary>
+                      <table className="w-full text-[12px] mt-2">
+                        <tbody>
+                          {audit.rows.map((r, i) => (
+                            <tr key={i} className="border-t line align-top">
+                              <td className="py-1.5 pr-2 w-1/2">{r.learning}</td>
+                              <td className="py-1.5 pr-2 mono text-[11px] muted">{r.where}</td>
+                              <td className="py-1.5 w-24">
+                                <Badge tone={r.status === "implemented" ? "ok" : r.status === "partial" ? "warn" : "bad"}>{r.status}</Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {audit.gaps.length > 0 && (
+                        <ul className="mt-2 text-[12px] list-disc pl-5 flex flex-col gap-1">
+                          {audit.gaps.map((g, i) => (
+                            <li key={i}>{g}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </details>
                   )}
                   <h3 className="text-[10.5px] uppercase tracking-wider faint font-semibold mt-5 mb-2">Learnings</h3>
                   <ul className="flex flex-col gap-1.5 text-[12.5px] leading-relaxed list-disc pl-5">

@@ -17,7 +17,17 @@ export function TopBar({ model }: { model: RunModel }) {
   const cfg = model.config;
   const live = isLive(model.status);
 
-  const act = (fn: (id: string) => Promise<unknown>) => () => selectedRunId && fn(selectedRunId).catch((e) => toastMsg(e.message, "error"));
+  const availableEngine = useStore((s) => s.availableEngine);
+  const [pendingAction, setPendingAction] = React.useState<"stopping" | "pausing" | "resuming" | null>(null);
+  React.useEffect(() => setPendingAction(null), [model.status]);
+  const act = (fn: (id: string) => Promise<unknown>, label: "stopping" | "pausing" | "resuming") => () => {
+    if (!selectedRunId) return;
+    setPendingAction(label);
+    fn(selectedRunId).catch((e) => {
+      setPendingAction(null);
+      toastMsg(e.message, "error");
+    });
+  };
   const elapsed = model.startedTs && model.lastTs ? Date.parse(model.lastTs) - Date.parse(model.startedTs) : 0;
 
   return (
@@ -36,7 +46,9 @@ export function TopBar({ model }: { model: RunModel }) {
           <div className="truncate font-medium max-w-[38vw]" title={cfg.task}>
             {cfg.title}
           </div>
-          <StatusBadge status={model.status} />
+          <span title={model.statusReason ?? undefined}>
+            <StatusBadge status={model.status} />
+          </span>
           <span className="muted text-[12px] truncate hidden md:inline" title={cfg.workspace}>
             {tilde(cfg.workspace, info?.home)}
           </span>
@@ -45,29 +57,32 @@ export function TopBar({ model }: { model: RunModel }) {
       )}
       <div className="flex-1" />
       {cfg && (
-        <div className="hidden lg:flex items-center gap-4 text-[12px] muted mono">
-          <span title="Cost so far">{money(model.costUsd)}</span>
+        <div className="hidden md:flex items-center gap-4 text-[12px] muted mono">
+          <span title={cfg.engine === "claude-code" ? "Estimated at list price; a Claude subscription is not billed per token" : "Cost so far, from reported token usage"}>
+            {cfg.engine === "claude-code" ? "est. " : ""}
+            {money(model.costUsd)}
+          </span>
           <span title="Elapsed">{duration(elapsed)}</span>
         </div>
       )}
       {cfg && live && (
         <div className="flex items-center gap-1">
           {model.status === "paused" ? (
-            <button className="btn btn-sm" onClick={act(api.resume)} title="Resume (space)">
-              ▶ Resume
+            <button className="btn btn-sm" onClick={act(api.resume, "resuming")} disabled={!!pendingAction} title="Resume (space)">
+              {pendingAction === "resuming" ? "Resuming…" : "▶ Resume"}
             </button>
           ) : (
-            <button className="btn btn-sm" onClick={act(api.pause)} title="Pause (space)">
-              ❚❚ Pause
+            <button className="btn btn-sm" onClick={act(api.pause, "pausing")} disabled={!!pendingAction} title="Pause: the agent finishes its current step, then waits (space)">
+              {pendingAction === "pausing" ? "Pausing…" : "❚❚ Pause"}
             </button>
           )}
-          <button className="btn btn-sm btn-danger" onClick={() => confirm("Cancel this run? The agent stops after its current tool call.") && act(api.cancel)()}>
-            Stop
+          <button className="btn btn-sm btn-danger" disabled={!!pendingAction} onClick={() => confirm("Stop this run? The agent is interrupted after its current tool call; files it already changed stay in the workspace.") && act(api.cancel, "stopping")()}>
+            {pendingAction === "stopping" ? "Stopping…" : "Stop"}
           </button>
         </div>
       )}
       {cfg && !live && (
-        <button className="btn btn-sm" onClick={() => openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, engine: cfg.engine === "replay" ? "anthropic" : cfg.engine } as any)} title="Start a new run with the same settings (pass^k)">
+        <button className="btn btn-sm" onClick={() => openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, title: nextTitle(cfg.title), engine: cfg.engine === "replay" ? availableEngine() : cfg.engine } as any)} title="Start a new run with the same task and settings. Repeated runs show up together on the Reliability tab.">
           ↻ Run again
         </button>
       )}
@@ -78,11 +93,17 @@ export function TopBar({ model }: { model: RunModel }) {
         {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
       </button>
       <button className="btn btn-ghost btn-sm" onClick={() => openModal("settings")} title="Settings" aria-label="Settings">
-        ⚙{!info?.hasApiKey && <span className="w-1.5 h-1.5 rounded-full bg-[var(--warn)]" />}
+        ⚙{info && !info.hasApiKey && !info.hasClaudeCode && <span className="w-1.5 h-1.5 rounded-full bg-[var(--warn)]" title="No live engine available: add an API key or install Claude Code" />}
       </button>
       <button className="btn btn-ghost btn-sm" onClick={() => openModal("help")} title="Keyboard shortcuts" aria-label="Help">
         ?
       </button>
     </header>
   );
+}
+
+/** "Title" -> "Title (2)" -> "Title (3)" so repeated runs stay distinguishable in the list. */
+export function nextTitle(title: string): string {
+  const m = title.match(/^(.*) \((\d+)\)$/);
+  return m ? `${m[1]} (${Number(m[2]) + 1})` : `${title} (2)`;
 }

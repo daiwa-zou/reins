@@ -19,11 +19,23 @@ export function ReliabilityPanel() {
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const toastMsg = useStore((s) => s.toastMsg);
 
+  const runsKey = runs.map((r) => r.id + r.status).join(",");
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    api.trials(k).then(setSets).catch((e) => toastMsg(e.message, "error"));
-  }, [k, runs, toastMsg]);
+    api
+      .trials(k)
+      .then((s) => {
+        setSets(s);
+        setError(null);
+      })
+      .catch((e) => setError(e.message));
+  }, [k, runsKey]);
 
-  const repeat = (runId: string, n: number) => api.repeat(runId, n).then(() => toastMsg(`Queued ${n} more trials; they run one after another.`)).catch((e) => toastMsg(e.message, "error"));
+  const repeat = (set: TrialSet, n: number) => {
+    const budget = runs.find((r) => r.id === set.trials[0].runId);
+    if (!confirm(`Queue ${n} more live trials of this task? They run one after another, each stopping at the run's budget.${budget ? "" : ""}`)) return;
+    api.repeat(set.trials[0].runId, n).then(() => toastMsg(`Queued ${n} more trials; they run one after another.`)).catch((e) => toastMsg(e.message, "error"));
+  };
 
   return (
     <div className="h-full overflow-auto p-4">
@@ -42,14 +54,18 @@ export function ReliabilityPanel() {
           </div>
           <p className="muted mt-1 leading-relaxed text-[12.5px]">
             Runs of the same task in the same workspace form a trial set. <b>pass^k</b> is the chance that all k attempts succeed (what you need from an agent you rely on);{" "}
-            <b>pass@k</b> is the chance that at least one does (what a leaderboard shows). Both are projected from the observed pass rate, so three trials are a start, not a verdict.{" "}
+            <b>pass@k</b> is the chance that at least one does (what a leaderboard shows). Both are projected from the observed pass rate, so three trials are a start, not a verdict. Runs stopped by you or by a server restart are not counted.{" "}
             <button className="underline" onClick={() => setLessonFilter("demystifying-evals-for-ai-agents")}>
               Read the lesson →
             </button>
           </p>
         </div>
 
-        {sets === null ? (
+        {error ? (
+          <div className="rounded-lg p-3 text-[12.5px]" style={{ background: "var(--bad-soft)", color: "var(--bad)" }}>
+            Could not load trials: {error}
+          </div>
+        ) : sets === null ? (
           <div className="muted">Loading…</div>
         ) : sets.length === 0 ? (
           <Empty title="No trial sets yet" body="Live runs (not the demo) appear here. Use “Run again” on a finished run, or “Run 3 more” below, to build a set." />
@@ -61,10 +77,16 @@ export function ReliabilityPanel() {
                   <div className="font-semibold leading-snug line-clamp-2">{set.task}</div>
                   <div className="muted text-[11.5px] mt-0.5 truncate">{tilde(set.workspace, info?.home)}</div>
                 </div>
-                <Stat label="pass rate" value={pct(set.passRate)} sub={`${set.passes}/${set.n} finished`} />
-                <Stat label={`pass^${set.k}`} value={pct(set.passPowK)} tone={set.passPowK >= 0.8 ? "ok" : set.passPowK >= 0.5 ? "warn" : "bad"} />
-                <Stat label={`pass@${set.k}`} value={pct(set.passAtK)} />
-                <button className="btn btn-sm" onClick={() => repeat(set.trials[0].runId, 3)} disabled={set.trials.some((t) => t.status === "running" || t.status === "waiting_approval")}>
+                <Stat label="pass rate" value={set.n ? pct(set.passRate) : "—"} sub={`${set.passes}/${set.n} finished`} />
+                {set.n >= set.k ? (
+                  <>
+                    <Stat label={`pass^${set.k}`} value={pct(set.passPowK)} tone={set.passPowK >= 0.8 ? "ok" : set.passPowK >= 0.5 ? "warn" : "bad"} />
+                    <Stat label={`pass@${set.k}`} value={pct(set.passAtK)} />
+                  </>
+                ) : (
+                  <Stat label={`pass^${set.k}`} value="n/a" sub={`needs ${set.k - set.n} more finished trial(s)`} />
+                )}
+                <button className="btn btn-sm" onClick={() => repeat(set, 3)} disabled={set.trials.some((t) => t.status === "running" || t.status === "waiting_approval")} title="Queues three identical live runs, one after another">
                   Run 3 more
                 </button>
               </div>

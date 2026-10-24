@@ -28,7 +28,13 @@ interface ActiveRun {
 /** Owns every live run: creation, approvals, steering, pause/cancel, and the fan-out of events. */
 export class RunManager extends EventEmitter {
   private active = new Map<string, ActiveRun>();
-  private client: Anthropic | null = null;
+  private _client: Anthropic | null = null;
+  get client(): Anthropic | null {
+    return this._client;
+  }
+  private set client(v: Anthropic | null) {
+    this._client = v;
+  }
 
   constructor() {
     super();

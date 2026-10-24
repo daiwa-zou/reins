@@ -18,6 +18,7 @@ import { Settings } from "./panels/Settings";
 import { Welcome } from "./components/Welcome";
 import { Help } from "./components/Help";
 import { api } from "./lib/api";
+import { startDemo } from "./lib/demo";
 
 export function App() {
   const boot = useStore((s) => s.boot);
@@ -42,16 +43,13 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.tagName === "BUTTON" || t.tagName === "A" || t.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (modal) return;
       const tabHit = TABS.find((x) => x.key === e.key);
       if (tabHit) return setTab(tabHit.id);
       if (e.key === "n") return openModal("newRun");
-      if (e.key === "d") {
-        api.demo().then((cfg) => useStore.getState().selectRun(cfg.id)).catch((err) => toastMsg(err.message, "error"));
-        return;
-      }
+      if (e.key === "d") return void startDemo();
       if (e.key === "?") return openModal("help");
       if (e.key === " " && selectedRunId && isLive(liveModel.status)) {
         e.preventDefault();
@@ -62,6 +60,12 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [modal, selectedRunId, liveModel.status, setTab, openModal, toastMsg]);
+
+  // The browser tab says when a run needs you, even from another window.
+  const needs = liveModel.pending.length;
+  useEffect(() => {
+    document.title = needs ? `(${needs}) Reins · needs you` : liveModel.config && isLive(liveModel.status) ? `Reins · running` : "Reins";
+  }, [needs, liveModel.status, liveModel.config]);
 
   const Panel = { stage: Stage, transcript: Transcript, contract: ContractPanel, context: ContextPanel, guardrails: GuardrailsPanel, files: FilesPanel, harness: HarnessPanel, lessons: LessonsPanel, reliability: ReliabilityPanel }[tab];
   const standalone = tab === "lessons" || tab === "harness" || tab === "reliability";
@@ -90,6 +94,14 @@ export function App() {
             )}
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">{!selectedRunId && !standalone ? <Welcome /> : <Panel model={model} live={liveModel} />}</div>
+          {useStore.getState().bootError && (
+            <div className="px-4 py-2 text-[12.5px] flex items-center gap-3" style={{ background: "var(--bad-soft)", color: "var(--bad)" }}>
+              Could not reach the Reins server ({useStore.getState().bootError}). Is `npm run dev` running?
+              <button className="btn btn-sm" onClick={() => useStore.getState().boot()}>
+                Retry
+              </button>
+            </div>
+          )}
         </main>
         {selectedRunId && !standalone && <Inspector model={model} live={liveModel} />}
       </div>

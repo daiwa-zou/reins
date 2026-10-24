@@ -4,6 +4,7 @@ import { StatusBadge } from "./ui";
 import { money, relTime, basename } from "../lib/format";
 import { api } from "../lib/api";
 import { PHASE_LABEL } from "../state/derive";
+import { startDemo } from "../lib/demo";
 
 export function RunList() {
   const runs = useStore((s) => s.runs);
@@ -14,11 +15,16 @@ export function RunList() {
   const [collapsed, setCollapsed] = useState(false);
   const [filter, setFilter] = useState("");
 
-  const visible = runs.filter((r) => !filter || r.title.toLowerCase().includes(filter.toLowerCase()) || r.workspace.toLowerCase().includes(filter.toLowerCase()));
-  const groups = new Map<string, typeof runs>();
-  for (const r of visible) {
-    const key = basename(r.workspace);
-    groups.set(key, [...(groups.get(key) ?? []), r]);
+  const q = filter.toLowerCase();
+  const visible = runs.filter((r) => !q || r.title.toLowerCase().includes(q) || r.workspace.toLowerCase().includes(q) || r.status.includes(q));
+  const rank = (s: string) => (s === "waiting_approval" ? 0 : s === "running" || s === "paused" || s === "queued" ? 1 : 2);
+  // Attention first, then recency; demo runs in their own group; group by full path so two "api" folders stay apart.
+  const groups = new Map<string, { label: string; runs: typeof runs }>();
+  for (const r of [...visible].sort((a, b) => rank(a.status) - rank(b.status) || (a.updatedAt < b.updatedAt ? 1 : -1))) {
+    const key = r.engine === "replay" ? "\u0000demo" : r.workspace;
+    const g = groups.get(key) ?? { label: r.engine === "replay" ? "Demo (recorded)" : basename(r.workspace), runs: [] };
+    g.runs.push(r);
+    groups.set(key, g);
   }
 
   if (collapsed)
@@ -46,7 +52,7 @@ export function RunList() {
           <div className="muted text-[12px] p-3 leading-relaxed">
             No runs yet.
             <div className="mt-2 flex flex-col gap-1.5">
-              <button className="btn btn-sm" onClick={() => api.demo().then((c) => selectRun(c.id)).catch((e) => toastMsg(e.message, "error"))}>
+              <button className="btn btn-sm" onClick={() => startDemo()}>
                 ▶ Watch the demo
               </button>
               <button className="btn btn-sm btn-primary" onClick={() => openModal("newRun")}>
@@ -55,27 +61,31 @@ export function RunList() {
             </div>
           </div>
         )}
-        {[...groups.entries()].map(([ws, list]) => (
+        {[...groups.entries()].map(([ws, { label, runs: list }]) => (
           <div key={ws} className="mb-2">
             <div className="px-1.5 pt-2 pb-1 text-[10.5px] uppercase tracking-wider faint font-semibold truncate" title={list[0].workspace}>
-              {ws}
+              {label}
             </div>
             {list.map((r) => (
-              <button
+              <div
                 key={r.id}
+                role="button"
+                tabIndex={0}
+                aria-current={selected === r.id ? "true" : undefined}
                 onClick={() => selectRun(r.id)}
-                className={`w-full text-left rounded-lg px-2.5 py-2 mb-0.5 transition-colors ${selected === r.id ? "sunk" : "hover:bg-[var(--bg-sunk)]"}`}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), selectRun(r.id))}
+                className={`w-full text-left rounded-lg px-2.5 py-2 mb-0.5 transition-colors cursor-pointer ${selected === r.id ? "sunk" : "hover:bg-[var(--bg-sunk)]"}`}
                 style={selected === r.id ? { boxShadow: "inset 0 0 0 1px var(--line-strong)" } : undefined}
               >
                 <div className="flex items-start justify-between gap-2 group">
                   <div className="font-medium text-[13px] leading-snug line-clamp-2">{r.title}</div>
-                  {r.engine === "replay" && <span className="faint text-[10px] mt-0.5">demo</span>}
+                  {r.engine === "replay" && <span className="badge badge-neutral">demo</span>}
                   {!["running", "paused", "waiting_approval", "queued"].includes(r.status) && (
-                    <span
-                      role="button"
-                      aria-label="Delete run"
-                      title="Delete this run's log"
-                      className="faint text-[11px] opacity-0 group-hover:opacity-100 hover:text-[var(--bad)] px-1"
+                    <button
+                      type="button"
+                      aria-label={`Delete the log of ${r.title}`}
+                      title="Delete this run's log (the workspace is untouched)"
+                      className="faint text-[11px] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-[var(--bad)] px-1 rounded"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!confirm(`Delete the log of "${r.title}"? The workspace is untouched.`)) return;
@@ -86,7 +96,7 @@ export function RunList() {
                       }}
                     >
                       ✕
-                    </span>
+                    </button>
                   )}
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-[11px] muted">
@@ -96,7 +106,7 @@ export function RunList() {
                   <span className="mono">{money(r.costUsd)}</span>
                   <span>{relTime(r.updatedAt)}</span>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         ))}

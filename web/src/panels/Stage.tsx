@@ -13,8 +13,11 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
   const toastMsg = useStore((s) => s.toastMsg);
   const [steer, setSteer] = useState("");
   const [showThinking, setShowThinking] = useState(true);
-  const feedRef = useAutoScroll<HTMLDivElement>(model.lastSeq, useStore.getState().scrubSeq === null);
+  const scrubbing = useStore((s) => s.scrubSeq) !== null;
+  const feedRef = useAutoScroll<HTMLDivElement>(model.lastSeq, !scrubbing);
   const liveRun = isLive(live.status);
+  const est = model.config?.engine === "claude-code";
+  const [taskOpen, setTaskOpen] = useState(false);
 
   const sendSteer = async () => {
     const text = steer.trim();
@@ -30,31 +33,33 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
   return (
     <div className="h-full flex flex-col">
       <PhaseStepper model={model} />
-      <div ref={feedRef} className="flex-1 overflow-auto px-4 py-3">
+      <div ref={feedRef} className="flex-1 overflow-auto px-4 py-3 relative">
+        {feedRef.behind && liveRun && (
+          <button className="btn btn-primary btn-sm sticky top-0 left-1/2 -translate-x-1/2 z-10 fade-in" onClick={feedRef.jump}>
+            New activity ↓
+          </button>
+        )}
         <div className="max-w-3xl mx-auto flex flex-col gap-2">
           {model.config && (
             <div className="card p-3.5 mb-1">
               <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1">Task</div>
-              <div className="whitespace-pre-wrap leading-relaxed">{model.config.task}</div>
+              <div className={`whitespace-pre-wrap leading-relaxed ${taskOpen ? "" : "line-clamp-4"}`}>{model.config.task}</div>
+              {model.config.task.length > 280 && (
+                <button className="btn btn-ghost btn-sm mt-1" onClick={() => setTaskOpen(!taskOpen)}>
+                  {taskOpen ? "Show less" : "Show all"}
+                </button>
+              )}
             </div>
           )}
           {model.feed.length === 0 && <div className="muted text-center py-10">Waiting for the first event…</div>}
           {model.feed.map((item) => (
             <FeedRow key={item.seq} item={item} model={model} showThinking={showThinking} />
           ))}
-          {model.pending.map((p) => (
-            <ApprovalCard key={p.approvalId} request={p} runId={runId} />
+          {(scrubbing ? model : live).pending.map((p) => (
+            <ApprovalCard key={p.approvalId} request={p} runId={runId} disabled={scrubbing} />
           ))}
           {model.status === "paused" && <div className="text-center muted text-[12px] py-2">Paused. The agent will continue when you resume.</div>}
-          {!liveRun && model.summary && (
-            <div className={`card p-4 border-l-4 fade-in`} style={{ borderLeftColor: model.status === "completed" ? "var(--ok)" : "var(--bad)" }}>
-              <div className="font-semibold">{model.status === "completed" ? "Run complete" : `Run ${model.status}`}</div>
-              <div className="mt-1 leading-relaxed">{model.summary.summary}</div>
-              <div className="muted text-[12px] mt-2 mono">
-                {money(model.summary.costUsd)} · {duration(model.summary.durationMs)} · {model.calls.length} tool calls
-              </div>
-            </div>
-          )}
+          {!liveRun && model.config && <EndCard model={model} est={est} />}
         </div>
       </div>
       <div className="border-t line px-4 py-2.5" style={{ background: "var(--bg-elev)" }}>
@@ -68,12 +73,37 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
             disabled={!liveRun}
             value={steer}
             onChange={(e) => setSteer(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendSteer()}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && sendSteer()}
+            aria-label="Note to the agent"
           />
           <button className="btn btn-primary" disabled={!liveRun || !steer.trim()} onClick={sendSteer}>
             Send
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** How the run ended, always, with a next step. A failed run that never said why is the worst outcome. */
+function EndCard({ model, est }: { model: RunModel; est: boolean }) {
+  const status = model.status;
+  const reason = model.summary?.summary ?? model.statusReason ?? model.errors[model.errors.length - 1] ?? "";
+  const tone = status === "completed" ? "var(--ok)" : status === "cancelled" ? "var(--line-strong)" : "var(--bad)";
+  const title = status === "completed" ? "Run complete" : status === "cancelled" ? "Run stopped" : status === "failed" ? "Run failed" : `Run ${status}`;
+  const interrupted = /interrupted|restart/i.test(reason);
+  const budget = /budget/i.test(reason);
+  const next = status === "completed" ? "Review the files and the evaluator's evidence on the Contract tab. Use Run again to see whether it passes consistently." : interrupted ? "Use Run again to retry; progress notes in .reins/ carry over to the next session." : budget ? "Raise the budget in New run (Run again keeps every other setting)." : status === "cancelled" ? "Files the agent already changed are still in the workspace; check the Files tab." : "Read the last turns above and the Guardrails tab; then use Run again, possibly with a component turned off on the Harness tab.";
+  const cost = model.summary?.costUsd ?? model.costUsd;
+  const dur = model.summary?.durationMs ?? (model.startedTs && model.lastTs ? Date.parse(model.lastTs) - Date.parse(model.startedTs) : 0);
+  return (
+    <div className="card p-4 border-l-4 fade-in" style={{ borderLeftColor: tone }} role="status">
+      <div className="font-semibold">{title}</div>
+      {reason && <div className="mt-1 leading-relaxed">{reason}</div>}
+      <div className="muted text-[12.5px] mt-2">{next}</div>
+      <div className="muted text-[12px] mt-2 mono">
+        {est ? "est. " : ""}
+        {money(cost)} · {duration(dur)} · {model.calls.length} tool calls
       </div>
     </div>
   );
@@ -230,6 +260,12 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
         </div>
       );
     case "note":
+      if (item.level === "info" && item.text.length > 160)
+        return (
+          <Collapsible summary={<span className="muted">{item.text.slice(0, 110)}…</span>} className="px-2 py-1 text-[12px]">
+            <div className="muted whitespace-pre-wrap">{item.text}</div>
+          </Collapsible>
+        );
       return (
         <div className={`text-[12px] px-2 py-1.5 rounded-md fade-in ${item.level === "error" ? "badge-bad" : item.level === "warn" ? "badge-warn" : "muted"}`} style={item.level === "info" ? undefined : { background: item.level === "error" ? "var(--bad-soft)" : "var(--warn-soft)" }}>
           {item.text}

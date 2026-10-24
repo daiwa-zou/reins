@@ -19,6 +19,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const openModal = useStore((s) => s.openModal);
   const runs = useStore((s) => s.runs);
+  const availableEngine = useStore((s) => s.availableEngine);
   const cfg = model.config;
   const on = cfg?.components;
 
@@ -28,7 +29,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
 
   const launchWithout = (id: ComponentId) => {
     if (!cfg) return openModal("newRun");
-    openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, engine: "anthropic", components: { ...cfg.components, [id]: !cfg.components[id] }, title: `${cfg.title} (${cfg.components[id] ? "without" : "with"} ${components.find((c) => c.id === id)?.label ?? id})` } as any);
+    openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, engine: cfg.engine === "replay" ? availableEngine() : cfg.engine, components: { ...cfg.components, [id]: !cfg.components[id] }, __openHarness: true, title: `${cfg.title} (${cfg.components[id] ? "without" : "with"} ${components.find((c) => c.id === id)?.label ?? id})` } as any);
   };
 
   const groups = [...new Set(components.map((c) => c.group))];
