@@ -3,4 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export default defineConfig({ test: { root: path.resolve(here, ".."), include: ["server/src/**/*.test.ts"] } });
+const root = path.resolve(here, "..");
+export default defineConfig({
+  resolve: { alias: { "@shared": path.resolve(root, "shared") } },
+  test: { root, include: ["server/src/**/*.test.ts", "web/src/**/*.test.ts"] },
+});

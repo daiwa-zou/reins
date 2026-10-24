@@ -34,7 +34,7 @@ export function RunList() {
     );
 
   return (
-    <aside className="w-[260px] shrink-0 border-r line flex flex-col" style={{ background: "var(--bg-elev)" }}>
+    <aside className="w-[240px] xl:w-[260px] shrink-0 border-r line flex flex-col" style={{ background: "var(--bg-elev)" }}>
       <div className="flex items-center gap-1 px-2 pt-2 pb-1">
         <input className="input" placeholder="Filter runs…" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: "4px 8px", fontSize: 12 }} />
         <button className="btn btn-ghost btn-sm" onClick={() => setCollapsed(true)} title="Hide runs">
@@ -67,9 +67,27 @@ export function RunList() {
                 className={`w-full text-left rounded-lg px-2.5 py-2 mb-0.5 transition-colors ${selected === r.id ? "sunk" : "hover:bg-[var(--bg-sunk)]"}`}
                 style={selected === r.id ? { boxShadow: "inset 0 0 0 1px var(--line-strong)" } : undefined}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-2 group">
                   <div className="font-medium text-[13px] leading-snug line-clamp-2">{r.title}</div>
                   {r.engine === "replay" && <span className="faint text-[10px] mt-0.5">demo</span>}
+                  {!["running", "paused", "waiting_approval", "queued"].includes(r.status) && (
+                    <span
+                      role="button"
+                      aria-label="Delete run"
+                      title="Delete this run's log"
+                      className="faint text-[11px] opacity-0 group-hover:opacity-100 hover:text-[var(--bad)] px-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete the log of "${r.title}"? The workspace is untouched.`)) return;
+                        api
+                          .deleteRun(r.id)
+                          .then(() => selected === r.id && selectRun(null))
+                          .catch((err) => toastMsg(err.message, "error"));
+                      }}
+                    >
+                      ✕
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-[11px] muted">
                   <StatusBadge status={r.status} />

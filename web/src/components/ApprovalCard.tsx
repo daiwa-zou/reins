@@ -46,7 +46,7 @@ export function ApprovalCard({ request, runId }: { request: ApprovalRequest; run
           {criteria.map((c, i) => (
             <div key={i} className="rounded-lg border line p-2.5 flex gap-2 items-start">
               <span className="mono faint text-[11px] w-6 pt-1.5 shrink-0">{c.id}</span>
-              <div className="flex-1 flex flex-col gap-1.5">
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                 <input className="input" value={c.text} onChange={(e) => update(i, { text: e.target.value })} aria-label={`Criterion ${c.id}`} />
                 <div className="flex items-center gap-2">
                   <span className="faint text-[11px] shrink-0">verify</span>

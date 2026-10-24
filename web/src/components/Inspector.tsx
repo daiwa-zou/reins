@@ -19,7 +19,7 @@ export function Inspector({ model, live }: { model: RunModel; live: RunModel }) 
   const latestEval = model.evaluations[model.evaluations.length - 1];
 
   return (
-    <aside className="w-[300px] shrink-0 border-l line overflow-auto p-3 flex flex-col gap-3" style={{ background: "var(--bg-elev)" }}>
+    <aside className="w-[300px] shrink-0 border-l line overflow-auto p-3 hidden lg:flex flex-col gap-3" style={{ background: "var(--bg-elev)" }}>
       <Section title="Budget" onClick={() => setTab("harness")}>
         <div className="flex items-baseline justify-between">
           <span className="text-[18px] font-semibold mono">{money(model.costUsd)}</span>

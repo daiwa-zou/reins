@@ -134,6 +134,7 @@ function FeedRow({ item, model, showThinking }: { item: FeedItem; model: RunMode
     case "turn":
       return <TurnRow item={item} showThinking={showThinking} />;
     case "approval":
+      if (!item.resolved) return null; // the live ApprovalCard renders the pending one
       return (
         <div className="card p-3 border-l-4 fade-in" style={{ borderLeftColor: item.resolved ? (item.resolved.decision === "approve" ? "var(--ok)" : "var(--bad)") : "var(--warn)" }}>
           <div className="flex items-center gap-2 text-[12px]">
