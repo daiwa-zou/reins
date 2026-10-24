@@ -3,8 +3,10 @@ import { Modal, Switch, Badge } from "../components/ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import { defaultRunConfig, MODELS } from "@shared/components";
+import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
 import { money } from "../lib/format";
-import type { ComponentId, EffortLevel, RunConfig } from "@shared/types";
+import type { ComponentId, EffortLevel, HarnessComponent, Preset, RunConfig } from "@shared/types";
+import { GROUP_LABEL } from "./Harness";
 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -23,11 +25,19 @@ export function NewRun() {
 
   const draft = useStore((s) => s.newRunDraft);
   const setNewRunDraft = useStore((s) => s.setNewRunDraft);
-  const base = useMemo(
-    () => defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic", ...((prefill ?? draft ?? {}) as any) }),
+  const storePresets = useStore((s) => s.presets);
+  const defaultPreset = useStore((s) => s.defaultPreset);
+  const refreshPresets = useStore((s) => s.refreshPresets);
+  const presets: (Preset & { isDefault?: boolean })[] = storePresets.length ? storePresets : BUILT_IN_PRESETS;
+  const preferredEngine = info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic";
+  const fresh = (keep: Partial<RunConfig> = {}) => defaultRunConfig({ task: keep.task ?? "", workspace: keep.workspace ?? info?.defaultWorkspace ?? "", engine: (keep.engine as RunConfig["engine"]) ?? preferredEngine, title: keep.title });
+  // Start from: the prefill (run again / Harness), else the surviving draft, else your default preset, else the defaults.
+  const base = useMemo(() => {
+    if (prefill || draft) return defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: preferredEngine, ...((prefill ?? draft) as any) });
+    const def = defaultPreset ? presets.find((p) => p.name === defaultPreset) : undefined;
+    return def ? applyPreset(fresh(), def) : fresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prefill, info],
-  );
+  }, [prefill, info]);
   const [cfg, setCfgRaw] = useState<RunConfig>(base);
   const setCfg = (updater: RunConfig | ((c: RunConfig) => RunConfig)) =>
     setCfgRaw((c) => {
@@ -74,6 +84,42 @@ export function NewRun() {
     });
   const toggle = (id: ComponentId) => set({ components: { ...cfg.components, [id]: !cfg.components[id] } });
 
+  // Presets: pick one (applied over fresh defaults, keeping task, folder and engine unless the preset sets one).
+  const activePreset = cfg.preset ? presets.find((p) => p.name === cfg.preset) : undefined;
+  const presetModified = !!activePreset && JSON.stringify(diffFromDefaults(applyPreset(fresh(cfg), activePreset))) !== JSON.stringify(diffFromDefaults(cfg));
+  const pickPreset = (name: string) => {
+    const p = presets.find((x) => x.name === name);
+    if (!p) return set({ preset: undefined });
+    setCfg(applyPreset(fresh(cfg), p));
+  };
+  const resetToDefaults = () => setCfg(fresh({ task: cfg.task, workspace: cfg.workspace, title: cfg.title }));
+  const [saving, setSaving] = useState<null | { name: string; makeDefault: boolean }>(null);
+  const savePreset = async () => {
+    if (!saving?.name.trim()) return;
+    try {
+      const r = await api.savePreset({ name: saving.name, config: presetFromConfig(cfg), default: saving.makeDefault });
+      await refreshPresets();
+      set({ preset: r.preset.name });
+      setSaving(null);
+      toastMsg(`Saved preset "${r.preset.name}"${r.default === r.preset.name ? " as your default" : ""}.${r.dropped.length ? ` Dropped: ${r.dropped.join(", ")}.` : ""}`);
+    } catch (e) {
+      toastMsg((e as Error).message, "error");
+    }
+  };
+  const makeDefault = async (name: string | null) => {
+    try {
+      await api.setDefaultPreset(name);
+      await refreshPresets();
+      toastMsg(name ? `"${name}" is now your New run default.` : "New run starts from the defaults again.");
+    } catch (e) {
+      toastMsg((e as Error).message, "error");
+    }
+  };
+  const changes = diffFromDefaults(cfg);
+  const [showChanges, setShowChanges] = useState(false);
+  const warnings = checkRunConfig(cfg);
+  const liveEngine = cfg.engine === "replay" ? null : cfg.engine;
+
   const budgetOk = Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
   const engineOk = cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode;
   const blocker = cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
@@ -81,7 +127,8 @@ export function NewRun() {
   const start = async (engine: "live" | "replay") => {
     setBusy(true);
     try {
-      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, title: cfg.title || cfg.task.slice(0, 60) });
+      const preset = cfg.preset ? (presetModified ? `${cfg.preset} (modified)` : cfg.preset) : undefined;
+      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, preset, title: cfg.title || cfg.task.slice(0, 60) });
       if (engine !== "replay") setNewRunDraft(null);
       openModal(null);
       selectRun(created.id, { view: "activity" });
@@ -153,6 +200,65 @@ export function NewRun() {
           </div>
         </div>
 
+        <div className="rounded-lg border line p-2.5 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+            <label className="font-semibold" htmlFor="preset-pick">
+              Preset
+            </label>
+            <select id="preset-pick" className="input" style={{ width: 200 }} value={activePreset ? activePreset.name : ""} onChange={(e) => pickPreset(e.target.value)}>
+              <option value="">Custom (no preset)</option>
+              {presets.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                  {p.builtIn ? "" : " (yours)"}
+                  {p.name === defaultPreset ? " ★ default" : ""}
+                </option>
+              ))}
+            </select>
+            {presetModified && <Badge tone="warn">modified</Badge>}
+            {activePreset && activePreset.name !== defaultPreset && (
+              <button className="btn btn-ghost btn-sm" onClick={() => makeDefault(activePreset.name)} title="Open New run with this preset from now on">
+                Make default
+              </button>
+            )}
+            {defaultPreset && activePreset?.name === defaultPreset && (
+              <button className="btn btn-ghost btn-sm" onClick={() => makeDefault(null)} title="Start New run from the built-in defaults">
+                Clear default
+              </button>
+            )}
+            <span className="flex-1" />
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowChanges(!showChanges)} aria-expanded={showChanges} disabled={!changes.length}>
+              {changes.length ? `${changes.length} change${changes.length === 1 ? "" : "s"} from defaults` : "Defaults"}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setSaving(saving ? null : { name: cfg.preset && !activePreset?.builtIn ? cfg.preset : "", makeDefault: false })}>
+              Save as preset…
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={resetToDefaults} disabled={!changes.length && !cfg.preset}>
+              Reset to defaults
+            </button>
+          </div>
+          {activePreset?.description && <div className="muted text-[11.5px] leading-snug">{activePreset.description}</div>}
+          {showChanges && changes.length > 0 && (
+            <ul className="text-[11.5px] mono flex flex-col gap-0.5 fade-in">
+              {changes.map((d) => (
+                <li key={d.path}>{d.text}</li>
+              ))}
+            </ul>
+          )}
+          {saving && (
+            <div className="flex flex-wrap items-center gap-2 fade-in">
+              <input className="input" style={{ width: 220 }} autoFocus placeholder="Preset name" value={saving.name} onChange={(e) => setSaving({ ...saving, name: e.target.value })} onKeyDown={(e) => e.key === "Enter" && void savePreset()} aria-label="Preset name" />
+              <label className="flex items-center gap-1.5 text-[12px]">
+                <input type="checkbox" checked={saving.makeDefault} onChange={(e) => setSaving({ ...saving, makeDefault: e.target.checked })} /> make it my default
+              </label>
+              <button className="btn btn-sm btn-primary" disabled={!saving.name.trim()} onClick={() => void savePreset()}>
+                Save
+              </button>
+              <span className="faint text-[11px]">Saves engine, switches, roles, pauses, context, guardrails and limits; never the task or folder.</span>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-3 gap-3">
           <Field label="Model">
             <select className="input" value={cfg.roles.builder.model} onChange={(e) => setRole("builder", { model: e.target.value })}>
@@ -184,16 +290,42 @@ export function NewRun() {
         </div>
 
         {advanced === "harness" && (
-          <div className="grid md:grid-cols-2 gap-2 fade-in">
-            {components.map((c) => (
-              <div key={c.id} className="rounded-lg border line p-2.5 flex gap-2 items-start">
-                <Switch checked={cfg.components[c.id]} onChange={() => toggle(c.id)} label={c.label} />
-                <div className="min-w-0">
-                  <div className="font-medium text-[12.5px]">{c.label}</div>
-                  <div className="muted text-[11.5px] leading-snug">{c.short}</div>
-                  <button className="text-[11px] underline muted mt-0.5" onClick={() => { openModal(null); setLessonFilter(c.lessons[0]); }}>
-                    why
-                  </button>
+          <div className="flex flex-col gap-3 fade-in">
+            {[...new Set(components.map((c) => c.group))].map((g) => (
+              <div key={g}>
+                <div className="section-label mb-1.5">{GROUP_LABEL[g as HarnessComponent["group"]]}</div>
+                <div className="grid md:grid-cols-2 gap-2">
+                  {components
+                    .filter((c) => c.group === g)
+                    .map((c) => {
+                      const ignored = liveEngine && !c.engines.includes(liveEngine);
+                      const unmet = cfg.components[c.id] ? (c.requires ?? []).filter((r) => !cfg.components[r.id]) : [];
+                      return (
+                        <div key={c.id} className="rounded-lg border line p-2.5 flex gap-2 items-start">
+                          <Switch checked={cfg.components[c.id]} onChange={() => toggle(c.id)} label={c.label} />
+                          <div className="min-w-0">
+                            <div className="font-medium text-[12.5px] flex flex-wrap items-center gap-1">
+                              {c.label}
+                              {ignored && (
+                                <Badge tone={cfg.components[c.id] ? "warn" : "neutral"} title={`Only the ${c.engines.map((e) => ENGINE_LABEL[e]).join(" / ")} engine honours this switch`}>
+                                  ignored on this engine
+                                </Badge>
+                              )}
+                              {(c.requires ?? []).map((r) => (
+                                <Badge key={r.id} tone={unmet.some((u) => u.id === r.id) ? "warn" : "neutral"} title={r.reason}>
+                                  needs {components.find((x) => x.id === r.id)?.label ?? r.id}
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="muted text-[11.5px] leading-snug">{c.short}</div>
+                            <div className="faint text-[11px] leading-snug mt-0.5">when off: {c.whenOff}</div>
+                            <button className="text-[11px] underline muted mt-0.5" onClick={() => { openModal(null); setLessonFilter(c.lessons[0]); }}>
+                              why
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
             ))}
@@ -298,6 +430,19 @@ export function NewRun() {
                 <textarea className="input mono" rows={3} value={cfg.guardrail.denyPatterns.join("\n")} onChange={(e) => set({ guardrail: { ...cfg.guardrail, denyPatterns: e.target.value.split("\n").filter(Boolean) } })} />
               </Field>
             </div>
+          </div>
+        )}
+
+        {warnings.length > 0 && (
+          <div className="rounded-lg p-2.5 text-[12px] flex flex-col gap-1" style={{ background: "var(--warn-soft)" }} role="status" aria-live="polite">
+            <div className="font-semibold text-[var(--warn)]">
+              {warnings.length} config warning{warnings.length === 1 ? "" : "s"} (the run still starts; they are recorded in its log)
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {warnings.map((w, i) => (
+                <li key={i}>{w.message}</li>
+              ))}
+            </ul>
           </div>
         )}
 

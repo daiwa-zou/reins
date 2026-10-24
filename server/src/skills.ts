@@ -18,7 +18,7 @@ export interface Skill {
 function parse(dir: string, source: Skill["source"]): Skill | null {
   const file = path.join(dir, "SKILL.md");
   if (!fs.existsSync(file)) return null;
-  const raw = fs.readFileSync(file, "utf8");
+  const raw = fs.readFileSync(file, "utf8").replace(/\r\n?/g, "\n");
   const m = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   const meta: Record<string, string> = {};
   if (m) for (const line of m[1].split("\n")) {
@@ -42,12 +42,14 @@ function scan(root: string, source: Skill["source"]): Skill[] {
  * body (and any files next to it) is read on demand with read_skill.
  * Workspace skills override user skills override bundled ones by name.
  */
-export function loadSkills(workspace: string): Skill[] {
+export function loadSkills(workspace: string | null): Skill[] {
   const byName = new Map<string, Skill>();
   for (const s of scan(BUNDLED_SKILLS_DIR, "bundled")) byName.set(s.name, s);
   for (const s of scan(path.join(process.env.REINS_HOME ?? path.join(os.homedir(), ".reins"), "skills"), "user")) byName.set(s.name, s);
-  for (const s of scan(path.join(workspace, ".reins", "skills"), "workspace")) byName.set(s.name, s);
-  for (const s of scan(path.join(workspace, ".claude", "skills"), "workspace")) if (!byName.has(s.name)) byName.set(s.name, s);
+  if (workspace) {
+    for (const s of scan(path.join(workspace, ".reins", "skills"), "workspace")) byName.set(s.name, s);
+    for (const s of scan(path.join(workspace, ".claude", "skills"), "workspace")) if (!byName.has(s.name)) byName.set(s.name, s);
+  }
   return [...byName.values()];
 }
 

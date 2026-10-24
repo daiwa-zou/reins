@@ -29,7 +29,7 @@ A run moves through five phases. Roles never share a context window; they hand w
 
 ## The parts of the harness
 
-Each component states the assumption about the model it encodes. When a new model ships, the Harness tab lets you launch the same task with one component flipped, so you can find out what is still load-bearing.
+Each component states the assumption about the model it encodes, what the harness does instead when it is off, which engines honour it and what it depends on. When a new model ships, the Harness section lets you launch the same task with one component flipped, so you can find out what is still load-bearing. Save a setup as a **preset** (built-ins: Full, Minimal, Careful, Claude Code), and a config checker warns, without blocking, about switches the engine ignores, unmet dependencies and settings that do nothing. See **[docs/configuring.md](docs/configuring.md)** for presets and `presets.json`, the per-component table, your own lessons and skills, and `npm run lessons:check`.
 
 - **Roles**: planner, sprint contracts, skeptical evaluator, scout subagents (a read-only subagent answers a codebase question and returns a summary, never its transcript).
 - **Memory**: `features.json`, `progress.md`, the workspace's own `CLAUDE.md`/`AGENTS.md`, commit per phase.
@@ -47,8 +47,8 @@ Decisions that are not switches (the append-only log, file handoff, owning the l
 - **Context**: gauge and history per role, cache hit rate, interventions.
 - **Guardrails**: every gating decision, who made it and why.
 - **Files**: changed files and diffs against the commit the run started from.
-- **Harness**: the effective configuration and the switches.
-- **Lessons**: 30 distilled posts, each linked to the components and foundations it informs. The agents can read them too.
+- **Harness**: every component with what it does, when off, engines and requires, linked to its lessons. With a run selected: its effective config, recorded preset, diff from defaults and checker warnings, plus *run with/without →*. With none: the presets with *Start a run with…*. Also lists the installed skills for the workspace.
+- **Lessons**: 30 distilled posts plus your own from `$REINS_HOME/lessons` (picked up without a restart; same slug overrides). Filter by component, tag or search; the open lesson is in the URL; *informs* badges jump to the Harness card; invalid files are listed with the reason. Start a new one from [docs/lesson-template.md](docs/lesson-template.md). The agents read the same library with `list_lessons` (query/tag/component filters) and `read_lesson`.
 - **Reliability**: runs of the same task group into trial sets with pass^k and pass@k; "Run 3 more" queues identical trials one after another.
 
 Keyboard: `n` new run, `d` demo, `space` pause/resume, `1`-`9` tabs, `?` help.
@@ -59,7 +59,8 @@ Keyboard: `n` new run, `d` demo, `space` pause/resume, `1`-`9` tabs, `?` help.
 shared/     types, component catalogue, narration (imported by both sides)
 server/     Hono + WebSocket API, the agent loop, orchestrator, tools, guardrails, JSONL run store
 web/        React + Vite + Tailwind UI
-lessons/    the distilled blog posts (markdown with frontmatter)
+lessons/    the distilled blog posts (markdown with frontmatter; lint with npm run lessons:check)
+docs/       configuring.md (presets, components, user lessons and skills), lesson-template.md, audit/
 skills/     bundled SKILL.md folders (verify-like-a-user, writing-a-contract)
 demo/       a scripted recording used by the replay engine
 ```

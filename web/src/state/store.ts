@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { HarnessComponent, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
-import { api } from "../lib/api";
+import { api, type PresetEntry } from "../lib/api";
 import { decodeNav, encodeNav, normalizeNav, sameNav, type DetailsSub, type NavState, type RunView, type Section } from "./nav";
 
 export type { Section, RunView, DetailsSub, NavState } from "./nav";
@@ -32,7 +32,14 @@ interface State {
   newRunPrefill?: Partial<import("@shared/types").RunConfig>;
   /** Scrubber: show state as of this seq (null = live). */
   scrubSeq: number | null;
-  lessonFilter: string | null;
+  /** Open lesson (Lessons section), mirrored in the URL as ?lesson=. */
+  lesson: string | null;
+  /** Lessons: component filter; Harness: focused card. Mirrored in the URL as ?component=. */
+  component: string | null;
+  presets: PresetEntry[];
+  defaultPreset: string | null;
+  refreshPresets: () => Promise<void>;
+  refreshLessons: () => Promise<void>;
   toast?: { text: string; kind: "info" | "error" };
   booting: boolean;
   bootError: string | null;
@@ -59,6 +66,7 @@ interface State {
   setTheme: (t: Theme) => void;
   openModal: (m: State["modal"], prefill?: State["newRunPrefill"]) => void;
   setScrub: (seq: number | null) => void;
+  /** Open a lesson (or the list with null) in the Lessons section. */
   setLessonFilter: (slug: string | null) => void;
   toastMsg: (text: string, kind?: "info" | "error") => void;
   refreshInfo: () => Promise<void>;
@@ -163,7 +171,10 @@ export const useStore = create<State>((set, get) => ({
   theme: savedTheme,
   modal: null,
   scrubSeq: null,
-  lessonFilter: null,
+  lesson: null,
+  component: null,
+  presets: [],
+  defaultPreset: null,
   booting: true,
   bootError: null,
   approvalDrafts: {},
@@ -186,6 +197,7 @@ export const useStore = create<State>((set, get) => ({
       return;
     }
     set({ info, components, lessons, runs, booting: false, bootError: null });
+    void get().refreshPresets();
     const known = (id: string) => get().runs.some((r) => r.id === id);
     const fromUrl = decodeNav(location.search, { runExists: known });
     const latest = get().runs;
@@ -194,13 +206,13 @@ export const useStore = create<State>((set, get) => ({
   },
   nav: () => {
     const s = get();
-    return { section: s.section, run: s.selectedRunId, view: s.view, sub: s.sub };
+    return { section: s.section, run: s.selectedRunId, view: s.view, sub: s.sub, lesson: s.lesson, component: s.component };
   },
   navigate: (patch, opts) => {
     const prev = get().nav();
     const next = normalizeNav({ ...prev, ...patch });
     if (!sameNav(prev, next)) {
-      set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
+      set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, lesson: next.lesson ?? null, component: next.component ?? null, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
       if (next.run && next.run !== prev.run) subscribe(next.run, get().events[next.run]?.length ?? 0);
     }
     writeUrl(next, !!opts?.replace);
@@ -212,7 +224,7 @@ export const useStore = create<State>((set, get) => ({
     const next = decodeNav(location.search, { runExists: known });
     const prev = s.nav();
     if (sameNav(prev, next)) return;
-    set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
+    set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, lesson: next.lesson ?? null, component: next.component ?? null, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
     if (next.run && next.run !== prev.run) subscribe(next.run, get().events[next.run]?.length ?? 0);
   },
   selectRun: (id, opts) => get().navigate({ run: id, section: "runs", ...(opts?.view ? { view: opts.view } : {}) }, { replace: opts?.replace }),
@@ -231,9 +243,21 @@ export const useStore = create<State>((set, get) => ({
   },
   openModal: (modal, prefill) => set({ modal, newRunPrefill: prefill }),
   setScrub: (scrubSeq) => set({ scrubSeq }),
-  setLessonFilter: (lessonFilter) => {
-    set({ lessonFilter });
-    get().navigate({ section: "lessons" });
+  setLessonFilter: (slug) => get().navigate({ section: "lessons", lesson: slug, component: null }),
+  refreshPresets: async () => {
+    try {
+      const p = await api.presets();
+      set({ presets: p.presets, defaultPreset: p.default });
+    } catch {
+      /* presets are optional; New run falls back to the defaults */
+    }
+  },
+  refreshLessons: async () => {
+    try {
+      set({ lessons: await api.lessons() });
+    } catch {
+      /* keep what we have */
+    }
   },
   toastMsg: (text, kind = "info") => {
     set({ toast: { text, kind } });

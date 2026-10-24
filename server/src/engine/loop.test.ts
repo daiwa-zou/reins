@@ -239,4 +239,33 @@ describe("Orchestrator", () => {
     expect(evalEv.verdict).toBe("pass");
     fs.rmSync(ws, { recursive: true, force: true });
   });
+
+  it("emits each checkRunConfig warning as a warn note before the first phase, and still runs", async () => {
+    const ws = tmpWorkspace();
+    const cfg = defaultRunConfig({
+      task: "t",
+      workspace: ws,
+      components: { planner: false, evaluator: false, osSandbox: false, actionClassifier: false } as any,
+      pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: true },
+      maxFixRounds: 0,
+    });
+    const { client } = fakeClient([
+      // contract: builder proposes; no evaluator review
+      { content: [toolUse("c1", "propose_contract", { criteria: [{ id: "C1", text: "x", verify: "y", hard: true }], rationale: "r" })], stop_reason: "tool_use" },
+      // build
+      { content: [toolUse("b1", "finish", { summary: "built", open_items: [] })], stop_reason: "tool_use" },
+    ]);
+    const bus = new RunBus("test-warn", false);
+    const events = collect(bus);
+    const orch = new Orchestrator(client, cfg, bus, { ...control(), requestPhaseApproval: async () => ({ approved: true }), requestContractApproval: async (c) => ({ approved: true, criteria: c }) });
+    const r = await orch.run();
+    expect(r.ok).toBe(true);
+    const warnIdx = events.findIndex((e) => e.type === "note" && e.level === "warn" && e.text.includes("pauses.afterEvaluation"));
+    const firstPhase = events.findIndex((e) => e.type === "phase.started");
+    expect(warnIdx).toBeGreaterThanOrEqual(0);
+    expect(firstPhase).toBeGreaterThan(warnIdx);
+    expect((events[warnIdx] as any).text).toMatch(/evaluator/i);
+    expect(events.filter((e) => e.type === "phase.started").map((e: any) => e.phase)).toEqual(["contract", "build", "wrapup"]);
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
 });

@@ -1,4 +1,11 @@
-import type { ContractCriterion, HarnessComponent, Lesson, RunConfig, RunEvent, RunSummary, ServerInfo, ChangedFile, TrialSet } from "@shared/types";
+import type { ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet } from "@shared/types";
+
+export type PresetEntry = Preset & { isDefault: boolean };
+export interface PresetList {
+  presets: PresetEntry[];
+  default: string | null;
+  file: string;
+}
 
 export interface LessonAudit {
   slug: string;
@@ -28,6 +35,12 @@ export const api = {
   info: () => fetch("/api/info").then((r) => j<ServerInfo>(r)),
   components: () => fetch("/api/components").then((r) => j<HarnessComponent[]>(r)),
   lessons: () => fetch("/api/lessons").then((r) => j<Lesson[]>(r)),
+  lessonProblems: () => fetch("/api/lessons/problems").then((r) => j<{ problems: LessonProblem[]; userDir: string; bundledDir: string }>(r)),
+  presets: () => fetch("/api/presets").then((r) => j<PresetList>(r)),
+  savePreset: (body: { name: string; description?: string; config: PresetConfig; default?: boolean }) => post("/api/presets", body).then((r) => j<{ preset: Preset; dropped: string[]; default: string | null }>(r)),
+  deletePreset: (name: string) => fetch(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) => j<{ ok: true }>(r)),
+  setDefaultPreset: (name: string | null) => post("/api/presets/default", { name }).then((r) => j<{ default: string | null }>(r)),
+  skills: (workspace?: string) => fetch(`/api/skills${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""}`).then((r) => j<SkillInfo[]>(r)),
   runs: () => fetch("/api/runs").then((r) => j<RunSummary[]>(r)),
   run: (id: string) => fetch(`/api/runs/${id}`).then((r) => j<{ config: RunConfig; events: RunEvent[]; active: boolean }>(r)),
   createRun: (body: Partial<RunConfig> & { task: string; workspace: string }) => post("/api/runs", body).then((r) => j<RunConfig>(r)),

@@ -6,6 +6,9 @@
  *  - the keyboard shortcuts (App binds them, Help lists them).
  */
 
+import { COMPONENT_IDS, FOUNDATIONS } from "@shared/components";
+import { LESSON_SLUG } from "@shared/lessons";
+
 export type Section = "runs" | "reliability" | "harness" | "lessons";
 export type RunView = "activity" | "contract" | "changes" | "details";
 export type DetailsSub = "transcript" | "context" | "guardrails";
@@ -16,12 +19,16 @@ export interface NavState {
   run: string | null;
   view: RunView;
   sub: DetailsSub;
+  /** Lessons section: the open lesson's slug. Absent = the list. */
+  lesson?: string | null;
+  /** Lessons section: component/foundation filter. Harness section: the card to focus. */
+  component?: string | null;
 }
 
 export const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: "runs", label: "Runs", hint: "Watch and steer runs" },
   { id: "reliability", label: "Reliability", hint: "Repeat a task and see how often it passes" },
-  { id: "harness", label: "Harness", hint: "Turn scaffolding components on and off" },
+  { id: "harness", label: "Harness", hint: "What each component does, presets and installed skills" },
   { id: "lessons", label: "Lessons", hint: "The engineering posts behind each feature" },
 ];
 
@@ -50,12 +57,17 @@ const RUN_ID = /^[A-Za-z0-9_-]{1,128}$/;
  * Canonical form: view and sub only mean something for a selected run, and
  * sub only for the Details view. Everything else collapses to defaults.
  */
+const COMPONENT_OR_FOUNDATION = new Set<string>([...COMPONENT_IDS, ...FOUNDATIONS.map((f) => f.id)]);
+
 export function normalizeNav(s: Partial<NavState>): NavState {
   const run = typeof s.run === "string" && RUN_ID.test(s.run) ? s.run : null;
   const section = isSection(s.section) ? s.section : DEFAULT_NAV.section;
   const view = run && isView(s.view) ? s.view : DEFAULT_NAV.view;
   const sub = run && view === "details" && isSub(s.sub) ? s.sub : DEFAULT_NAV.sub;
-  return { section, run, view, sub };
+  // Lesson and component only mean something in their sections; garbage is dropped, never thrown.
+  const lesson = section === "lessons" && typeof s.lesson === "string" && LESSON_SLUG.test(s.lesson) ? s.lesson : undefined;
+  const component = (section === "lessons" || section === "harness") && typeof s.component === "string" && COMPONENT_OR_FOUNDATION.has(s.component) ? s.component : undefined;
+  return { section, run, view, sub, ...(lesson ? { lesson } : {}), ...(component ? { component } : {}) };
 }
 
 /** Query string for a nav state ("" for the defaults). Default values are omitted. */
@@ -66,6 +78,8 @@ export function encodeNav(state: Partial<NavState>): string {
   if (s.run) p.set("run", s.run);
   if (s.view !== DEFAULT_NAV.view) p.set("view", s.view);
   if (s.sub !== DEFAULT_NAV.sub) p.set("sub", s.sub);
+  if (s.lesson) p.set("lesson", s.lesson);
+  if (s.component) p.set("component", s.component);
   const q = p.toString();
   return q ? `?${q}` : "";
 }
@@ -96,11 +110,13 @@ export function decodeNav(search: string | null | undefined, opts: { runExists?:
     run,
     view: (p.get("view") ?? undefined) as RunView,
     sub: (p.get("sub") ?? undefined) as DetailsSub,
+    lesson: p.get("lesson"),
+    component: p.get("component"),
   });
 }
 
 export function sameNav(a: NavState, b: NavState): boolean {
-  return a.section === b.section && a.run === b.run && a.view === b.view && a.sub === b.sub;
+  return a.section === b.section && a.run === b.run && a.view === b.view && a.sub === b.sub && (a.lesson ?? null) === (b.lesson ?? null) && (a.component ?? null) === (b.component ?? null);
 }
 
 // ---- Keyboard shortcuts ---------------------------------------------------

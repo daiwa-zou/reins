@@ -5,6 +5,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { RoleId } from "../../../shared/types.js";
 import { confinePath } from "../guardrails/policy.js";
 import { listLessons, getLesson } from "../lessons.js";
+import { filterLessons, lessonLine, type LessonFilter } from "../../../shared/lessons.js";
 import { loadSkills } from "../skills.js";
 import { sandboxArgs, sandboxAvailable } from "./sandbox.js";
 
@@ -316,9 +317,27 @@ const httpFetch = tool("http_fetch", "Fetch a URL over HTTP(S) and return the re
   return `HTTP ${res.status}\n\n${text}`;
 }, { deferred: true, readOnly: true });
 
-const listLessonsTool = tool("list_lessons", "List the harness lesson library (distilled Anthropic engineering posts) with one-line takeaways.", {}, [], async () => {
-  return listLessons().map((l) => `${l.slug}: ${l.title} — ${l.takeaway}`).join("\n");
-}, { deferred: true, readOnly: true });
+const listLessonsTool = tool(
+  "list_lessons",
+  "List the harness lesson library (distilled Anthropic engineering posts), one line each: slug: title — short takeaway. Narrow it with query (free text), tag, or component (a harness component id such as thinkTool). Then read_lesson(slug).",
+  {
+    query: { type: "string", description: "Optional: words to look for in the title, takeaway and learnings" },
+    tag: { type: "string", description: "Optional: a lesson tag, e.g. context" },
+    component: { type: "string", description: "Optional: a harness component or foundation id, e.g. thinkTool" },
+  },
+  [],
+  async (input) => listLessonsText(input ?? {}),
+  { deferred: true, readOnly: true },
+);
+
+/** The text list_lessons returns, from the same merged library as GET /api/lessons. */
+export function listLessonsText(input: LessonFilter): string {
+  const all = listLessons();
+  const hits = filterLessons(all, input);
+  const used = Object.entries(input).filter(([, v]) => typeof v === "string" && v.trim()).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
+  if (!hits.length) return `No lessons match ${used.join(", ")}. Call list_lessons with no filters to see all ${all.length}.`;
+  return hits.map(lessonLine).join("\n");
+}
 
 const readLesson = tool("read_lesson", "Read one lesson from the harness library by slug.", { slug: { type: "string" } }, ["slug"], async (input) => {
   const l = getLesson(input.slug);

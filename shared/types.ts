@@ -37,10 +37,26 @@ export type ComponentId =
   | "toolExamples"
   | "osSandbox";
 
+/** The live engines. "replay" only re-plays a recorded log, so no component applies to it. */
+export type EngineId = "anthropic" | "claude-code";
+
+/** A dependency between components: without `id` on, this component does nothing or much less. */
+export interface ComponentRequirement {
+  id: ComponentId;
+  /** Why, in one sentence, from the observed engine code. */
+  reason: string;
+}
+
 export interface HarnessComponent {
   id: ComponentId;
   label: string;
   short: string;
+  /** What the harness does instead when this component is off (one sentence). */
+  whenOff: string;
+  /** Which live engines actually honour this switch. On the others it is ignored. */
+  engines: EngineId[];
+  /** Components this one depends on. */
+  requires?: ComponentRequirement[];
   /** The assumption about the model this component encodes. Stress-test it per model. */
   assumption: string;
   /** Lesson slugs (files in /lessons) that justify it. */
@@ -100,6 +116,51 @@ export interface RunConfig {
   maxTurnsPerPhase: number;
   maxFixRounds: number;
   createdAt: string;
+  /** Name of the preset the run was started from, recorded for traceability. Absent on older runs. */
+  preset?: string;
+}
+
+/** A finding from checkRunConfig. Warnings never block a run. */
+export interface ConfigWarning {
+  level: "warn" | "info";
+  /** The component the warning is about, if any. */
+  component?: ComponentId;
+  /** The setting the warning is about (e.g. "pauses.afterEvaluation"), if any. */
+  setting?: string;
+  message: string;
+}
+
+/** The parts of a run config a preset may set. Never task, workspace, id or createdAt. */
+export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "components" | "roles" | "pauses" | "context" | "guardrail">> & {
+  components?: Partial<Record<ComponentId, boolean>>;
+  roles?: Partial<Record<RoleId, Partial<RoleSettings>>>;
+  pauses?: Partial<RunPauses>;
+  context?: Partial<ContextPolicy>;
+  guardrail?: Partial<GuardrailPolicy>;
+};
+
+export interface Preset {
+  name: string;
+  description: string;
+  builtIn: boolean;
+  config: PresetConfig;
+}
+
+/** One finding about a lesson file. Errors make lessons:check fail; warnings do not. */
+export interface LessonProblem {
+  /** File name (e.g. broken.md) or "catalogue" for slugs in shared/components.ts. */
+  file: string;
+  source: "bundled" | "user" | "catalogue";
+  level: "error" | "warn";
+  message: string;
+}
+
+/** A skill as listed by GET /api/skills (the body is not sent). */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  source: "bundled" | "user" | "workspace";
+  dir: string;
 }
 
 export interface Usage {
@@ -291,6 +352,8 @@ export interface Lesson {
   /** Architectural foundations (not switchable) this lesson informs. */
   foundations: string[];
   tags: string[];
+  /** Bundled with Reins (lessons/) or from the user's library ($REINS_HOME/lessons). */
+  source: "bundled" | "user";
 }
 
 /** A fixed architectural decision of the harness, with the lessons behind it. */

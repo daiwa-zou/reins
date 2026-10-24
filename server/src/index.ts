@@ -11,7 +11,10 @@ import type { ClientMessage, RunEvent, ServerInfo, ServerMessage } from "../../s
 import { COMPONENTS, HARNESS_VERSION, MODELS } from "../../shared/components.js";
 import { RunManager } from "./engine/runManager.js";
 import { ensureHome, REINS_HOME } from "./store/runStore.js";
-import { listLessons } from "./lessons.js";
+import { getLesson, loadLessonLibrary } from "./lessons.js";
+import { deletePreset, listPresets, PresetNotFound, savePreset, setDefaultPreset } from "./presets.js";
+import { PresetValidationError } from "../../shared/config.js";
+import { loadSkills } from "./skills.js";
 import { changedFiles, fileDiff, headSha } from "./workspace.js";
 import { loadDemoEvents } from "./engine/replay.js";
 import { allTrialSets } from "./engine/trials.js";
@@ -58,7 +61,71 @@ function info(): ServerInfo {
 
 app.get("/api/info", (c) => c.json(info()));
 app.get("/api/components", (c) => c.json(COMPONENTS));
-app.get("/api/lessons", (c) => c.json(listLessons()));
+// Lessons: the merged library (bundled + $REINS_HOME/lessons), re-read when a file changes.
+app.get("/api/lessons", (c) => c.json(loadLessonLibrary().lessons));
+app.get("/api/lessons/problems", (c) => {
+  const lib = loadLessonLibrary();
+  return c.json({ problems: lib.problems, userDir: lib.dirs.user, bundledDir: lib.dirs.bundled });
+});
+app.get("/api/lessons/:slug", (c) => {
+  const l = getLesson(c.req.param("slug"));
+  return l ? c.json(l) : c.json({ error: "no such lesson" }, 404);
+});
+
+// Presets: built-ins from shared/config.ts plus the user's own in $REINS_HOME/presets.json.
+const presetError = (c: any, e: unknown) => {
+  if (e instanceof PresetValidationError) return c.json({ error: e.message.split("\n")[0] }, 400);
+  if (e instanceof PresetNotFound) return c.json({ error: e.message }, 404);
+  throw e;
+};
+app.get("/api/presets", (c) => c.json(listPresets()));
+app.post("/api/presets", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  try {
+    return c.json(savePreset(body), 201);
+  } catch (e) {
+    return presetError(c, e);
+  }
+});
+app.post("/api/presets/default", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  try {
+    if (!body || typeof body !== "object" || !("name" in body)) throw new PresetValidationError('body must be {"name": "<preset>"} or {"name": null} to clear');
+    return c.json({ default: setDefaultPreset((body as any).name) });
+  } catch (e) {
+    return presetError(c, e);
+  }
+});
+app.delete("/api/presets/:name", (c) => {
+  try {
+    deletePreset(c.req.param("name"));
+    return c.json({ ok: true });
+  } catch (e) {
+    return presetError(c, e);
+  }
+});
+
+// Skills: read-only listing of what loadSkills() would give a run in this workspace.
+app.get("/api/skills", (c) => {
+  const q = c.req.query("workspace");
+  const ws = path.resolve(String(q || info().defaultWorkspace).replace(/^~/, os.homedir()));
+  const exists = fs.existsSync(ws) && fs.statSync(ws).isDirectory();
+  try {
+    const skills = loadSkills(exists ? ws : null).map(({ name, description, source, dir }) => ({ name, description, source, dir }));
+    return c.json(skills);
+  } catch (e) {
+    return c.json({ error: `Could not list skills: ${(e as Error).message}` }, 400);
+  }
+});
+// The two user-facing docs, served read-only so the UI can link to them (a fixed allow-list, never a path).
+const DOCS: Record<string, string> = { "configuring.md": "configuring.md", "lesson-template.md": "lesson-template.md" };
+app.get("/api/docs/:name", (c) => {
+  const name = c.req.param("name");
+  const f = Object.hasOwn(DOCS, name) ? DOCS[name] : undefined;
+  const p = f && path.resolve(here, "../../docs", f);
+  if (!p || !fs.existsSync(p)) return c.text("not found", 404);
+  return c.text(fs.readFileSync(p, "utf8"), 200, { "content-type": "text/plain; charset=utf-8" });
+});
 app.get("/api/audit", (c) => c.json(listAudits()));
 app.post("/api/settings/test", async (c) => {
   const body = await c.req.json().catch(() => ({}));

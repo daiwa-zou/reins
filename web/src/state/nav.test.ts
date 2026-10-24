@@ -137,3 +137,32 @@ describe("shortcut map", () => {
     expect(applyNavAction(withRun, { type: "help" })).toBeNull();
   });
 });
+
+describe("nav: lessons and harness deep links", () => {
+  it("round-trips the selected lesson slug", () => {
+    const state: NavState = { section: "lessons", run: null, view: "activity", sub: "transcript", lesson: "claude-think-tool" };
+    expect(encodeNav(state)).toBe("?section=lessons&lesson=claude-think-tool");
+    expect(decodeNav(encodeNav(state))).toEqual(state);
+    // With a run selected and a component filter too.
+    const withRun: NavState = { section: "lessons", run: "r1", view: "activity", sub: "transcript", lesson: "agent-skills", component: "skills" };
+    expect(decodeNav(encodeNav(withRun))).toEqual(withRun);
+  });
+
+  it("round-trips a focused Harness card", () => {
+    const state: NavState = { section: "harness", run: null, view: "activity", sub: "transcript", component: "thinkTool" };
+    expect(decodeNav(encodeNav(state))).toEqual(state);
+  });
+
+  it("decode tolerates a garbage slug or component and falls back to the list", () => {
+    for (const q of ["?section=lessons&lesson=..%2F..%2Fetc%2Fhosts", "?section=lessons&lesson=%00%ff", "?section=lessons&lesson=", "?section=lessons&lesson=.hidden", `?section=lessons&lesson=${"a".repeat(500)}`]) {
+      expect(() => decodeNav(q)).not.toThrow();
+      expect(decodeNav(q)).toEqual({ section: "lessons", run: null, view: "activity", sub: "transcript" });
+    }
+    expect(decodeNav("?section=lessons&component=notAComponent")).toEqual({ section: "lessons", run: null, view: "activity", sub: "transcript" });
+  });
+
+  it("drops lesson and component outside their sections", () => {
+    expect(decodeNav("?section=runs&lesson=agent-skills&component=thinkTool")).toEqual({ section: "runs", run: null, view: "activity", sub: "transcript" });
+    expect(decodeNav("?section=harness&lesson=agent-skills")).toEqual({ section: "harness", run: null, view: "activity", sub: "transcript" });
+  });
+});

@@ -7,6 +7,7 @@ import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
 import { loadSkills, skillsPromptSection } from "../skills.js";
 import { HARNESS_VERSION } from "../../../shared/components.js";
+import { checkRunConfig } from "../../../shared/config.js";
 import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor } from "../roles/prompts.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
@@ -147,6 +148,8 @@ export class Orchestrator {
       level: "info",
       text: `Environment: reins ${HARNESS_VERSION}, engine ${this.config.engine}, node ${process.version}, ${process.platform} ${process.arch}, git ${gitRepo ? `repo at ${this.baseSha?.slice(0, 7) ?? "no commits"}` : "not a repository"}.`,
     });
+    // Contradictory or ignored settings are recorded, never blocking: one warn note each, before any phase.
+    for (const w of checkRunConfig(this.config)) this.bus.emitEvent({ type: "note", level: "warn", text: `Config check: ${w.message}` });
     const existing = readWorkspaceFile(ws, ".reins/features.json");
     if (existing) {
       try {
