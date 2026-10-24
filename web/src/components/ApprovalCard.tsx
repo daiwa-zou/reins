@@ -3,6 +3,7 @@ import type { ApprovalRequest, ContractCriterion } from "@shared/types";
 import { api } from "../lib/api";
 import { useStore } from "../state/store";
 import { Pre, Badge } from "./ui";
+import { dropImplication, editImplication, IMPLICATION_KINDS, initLessonDraft, parseDomains, setDraftStanding, toLessonEdits, type DraftLessonPayload, type LessonDraftState } from "../state/lessonDraft";
 
 const CONSEQUENCE: Record<ApprovalRequest["kind"], { approve: string; reject: string }> = {
   contract: {
@@ -35,13 +36,16 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
   const [busy, setBusy] = useState(false);
   const criteria: ContractCriterion[] = draft?.criteria ?? (request.kind === "contract" ? (request.payload as ContractCriterion[]) : []);
   const note = draft?.note ?? "";
-  const setCriteria = (next: ContractCriterion[]) => setDraft(request.approvalId, { criteria: next, note });
-  const setNote = (next: string) => setDraft(request.approvalId, { criteria, note: next });
+  // A lesson approval (intake job): the implications to keep, edited, and the standing.
+  const lesson: LessonDraftState = draft?.lesson ?? initLessonDraft(request.kind === "lesson" ? (request.payload as DraftLessonPayload) : null);
+  const setCriteria = (next: ContractCriterion[]) => setDraft(request.approvalId, { criteria: next, note, lesson: draft?.lesson });
+  const setNote = (next: string) => setDraft(request.approvalId, { criteria, note: next, lesson: draft?.lesson });
+  const setLesson = (next: LessonDraftState) => setDraft(request.approvalId, { criteria, note, lesson: next });
 
   const decide = async (decision: "approve" | "reject") => {
     setBusy(true);
     try {
-      await api.approve(runId, request.approvalId, decision, note || undefined, request.kind === "contract" ? criteria : undefined);
+      await api.approve(runId, request.approvalId, decision, note || undefined, request.kind === "contract" ? criteria : undefined, request.kind === "lesson" ? toLessonEdits(lesson) : undefined);
       setDraft(request.approvalId, null);
     } catch (e) {
       toastMsg((e as Error).message, "error");
@@ -104,6 +108,8 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
         </div>
       )}
 
+      {request.kind === "lesson" && <LessonDraftEditor payload={payload as DraftLessonPayload} state={lesson} onChange={setLesson} />}
+
       {request.kind === "phase" && payload != null && (
         <div className="mt-3">
           <Pre max={1200}>{typeof payload === "string" ? payload : payload.spec ?? JSON.stringify(payload, null, 2)}</Pre>
@@ -116,7 +122,7 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
           Reject
         </button>
         <button className="btn btn-primary" disabled={busy || disabled || invalid > 0} onClick={() => decide("approve")} title={invalid ? `${invalid} criterion(s) need both a text and a verify step` : undefined}>
-          {request.kind === "contract" ? "Approve contract" : "Approve"}
+          {request.kind === "contract" ? "Approve contract" : request.kind === "lesson" ? `Adopt lesson (${toLessonEdits(lesson).implications.length} implication${toLessonEdits(lesson).implications.length === 1 ? "" : "s"})` : "Approve"}
         </button>
       </div>
       <div className="text-[11.5px] muted mt-2 leading-relaxed">
@@ -132,4 +138,47 @@ function formatAction(p: unknown): string {
   const a = p as { tool?: string; input?: any };
   if (a?.tool === "bash" && a.input?.command) return `$ ${a.input.command}`;
   return JSON.stringify(p, null, 2);
+}
+
+/** The lesson approval card body: each implication (kind, target, claim, quote, domains), editable or droppable, and the standing. */
+function LessonDraftEditor({ payload, state, onChange }: { payload: DraftLessonPayload; state: LessonDraftState; onChange: (s: LessonDraftState) => void }) {
+  return (
+    <div className="mt-3 flex flex-col gap-2" data-lesson-draft>
+      <div className="text-[12.5px]">
+        <span className="font-semibold">{payload?.title}</span> <span className="mono faint">{payload?.slug}</span>
+        {payload?.url && <span className="muted"> · {payload.url}</span>}
+      </div>
+      {payload?.takeaway && <div className="muted text-[12px] leading-relaxed">{payload.takeaway}</div>}
+      {state.items.map((imp, i) => (
+        <div key={i} className={`rounded-lg border line p-2.5 flex flex-col gap-1.5 ${imp.dropped ? "opacity-50" : ""}`} data-lesson-implication={i}>
+          <div className="flex items-center gap-2">
+            <select className="input" style={{ width: 120 }} value={imp.kind} disabled={imp.dropped} onChange={(e) => onChange(editImplication(state, i, { kind: e.target.value as typeof imp.kind }))} aria-label={`Kind of implication ${i + 1}`}>
+              {IMPLICATION_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+            <input className="input mono" style={{ width: 160 }} value={imp.kind === "gap" ? "" : imp.target} placeholder={imp.kind === "gap" ? "no target" : "target id"} disabled={imp.dropped || imp.kind === "gap"} onChange={(e) => onChange(editImplication(state, i, { target: e.target.value }))} aria-label={`Target of implication ${i + 1}`} />
+            <input className="input" value={imp.domains.join(", ")} placeholder="domains (e.g. golang, cli)" disabled={imp.dropped} onChange={(e) => onChange(editImplication(state, i, { domains: parseDomains(e.target.value) }))} aria-label={`Domains of implication ${i + 1}`} />
+            <button className="btn btn-ghost btn-sm btn-danger shrink-0" onClick={() => onChange(dropImplication(state, i, !imp.dropped))} aria-label={`${imp.dropped ? "Keep" : "Drop"} implication ${i + 1}`}>
+              {imp.dropped ? "keep" : "drop"}
+            </button>
+          </div>
+          <input className="input" value={imp.claim} disabled={imp.dropped} onChange={(e) => onChange(editImplication(state, i, { claim: e.target.value }))} aria-label={`Claim of implication ${i + 1}`} />
+          {imp.quote && <blockquote className="muted text-[11.5px] border-l-2 line pl-2 italic">“{imp.quote}”</blockquote>}
+        </div>
+      ))}
+      <div className="flex items-center gap-3 text-[12.5px]" role="radiogroup" aria-label="Standing">
+        <span className="font-semibold">Standing</span>
+        {(["unreviewed", "reviewed"] as const).map((s) => (
+          <label key={s} className="inline-flex items-center gap-1 cursor-pointer">
+            <input type="radio" name="lesson-standing" checked={state.standing === s} onChange={() => onChange(setDraftStanding(state, s))} />
+            {s}
+          </label>
+        ))}
+        <span className="muted text-[11.5px]">Only reviewed implications reach stage prompts and presets; unreviewed ones go to the Ideas list.</span>
+      </div>
+    </div>
+  );
 }

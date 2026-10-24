@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Lesson, Preset } from "../../shared/types.js";
 import { defaultRunConfig } from "../../shared/components.js";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, presetFromConfig, validatePresetConfig } from "../../shared/config.js";
-import { adaptPreset, composePreset, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
+import { adaptPreset, composePreset, composeRun, PresetCompositionError, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
 import { parseLesson } from "../../shared/lessons.js";
 import { systemPromptFor } from "./roles/prompts.js";
 
@@ -156,5 +156,14 @@ describe("run guidance", () => {
       expect(p).toContain("- Check stderr.");
     }
     expect(systemPromptFor("builder", defaultRunConfig({ task: "t", workspace: "/w" }))).not.toContain("Guidance for this run");
+  });
+});
+
+describe("composeRun refuses invalid compositions", () => {
+  it("two profiles, no profile, or an unknown domain throw PresetCompositionError", () => {
+    expect(() => composeRun(["full", "careful"], [])).toThrow(PresetCompositionError);
+    expect(() => composeRun(["golang"], [])).toThrow(PresetCompositionError);
+    expect(() => composeRun(["careful", "nosuchdomain"], [])).toThrow(PresetCompositionError);
+    expect(composeRun(["careful", "golang", "cli"], []).presets).toEqual(["careful", "golang", "cli"]);
   });
 });

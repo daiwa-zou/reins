@@ -8,7 +8,7 @@ import { RunWorkspace } from "./components/RunWorkspace";
 import { HarnessPanel } from "./panels/Harness";
 import { LessonsPanel } from "./panels/Lessons";
 import { ReliabilityPanel } from "./panels/Reliability";
-import { NewRun } from "./panels/NewRun";
+import { NewRun } from "./components/NewRun";
 import { Settings } from "./panels/Settings";
 import { Welcome } from "./components/Welcome";
 import { Help } from "./components/Help";

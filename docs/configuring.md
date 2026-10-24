@@ -96,7 +96,7 @@ Domains layer over the profile in the order picked:
 - **Roles, context and guardrail**: later wins per key.
 - **Engine**: owned by the profile; a domain never changes it.
 
-New run shows the profile picker and domain chips. The workspace check suggests domains with a reason: `go.mod` suggests `golang`, a `package.json` that depends on vite, next or react suggests `web`, a `cmd/` directory or a `bin` field in `package.json` suggests `cli`, and `pyproject.toml` suggests `python`.
+New run shows the profile picker and **domain chips** (the compose picker); an invalid composition (two profiles, none, or an unknown domain) is shown inline and blocks Start, and the API answers 400. A saved preset picked from the select below replaces the composition. The workspace check suggests domains with a reason: `go.mod` suggests `golang`, a `package.json` that depends on vite, next or react suggests `web`, a `cmd/` directory or a `bin` field in `package.json` suggests `cli`, and `pyproject.toml` suggests `python`.
 
 ### Lessons for this stage
 
@@ -182,7 +182,7 @@ Lessons carry `source:` (`post`, `article`, `paper`, `postmortem`, `note`), `dat
 On the Lessons section, "Add a lesson" starts an **intake job** from a URL or pasted text. Intake is a separate job type, not a run: it does not appear in the Runs list or trial sets, but its events stream to the Stage like a run. Files live in `$REINS_HOME/lessons/<slug>/` (`source.md`, `draft.md`, `events.jsonl`, `job.json`).
 
 1. The **librarian** role reads the source (for a URL, the harness fetches it with `http_fetch`; network is allowed for this job only), distils it into the lesson format with typed implications that each cite a quote, and ends with the `propose_lesson` tool. A quote that is not found verbatim in the source is rejected and the librarian must fix it.
-2. An approval card shows the draft: edit or drop individual implications and set the standing.
+2. A lesson **approval card** on the Stage shows the draft: each implication with its kind, target, claim, quote and domains. Edit a claim, target or domains, drop an implication (and keep it again), and pick the standing (`unreviewed` or `reviewed`). Adopt sends only the kept implications.
 3. Approval adopts the lesson: it is written to `$REINS_HOME/lessons/<slug>.md` with a `hash:` line.
 
 A source whose content hash (or URL) matches an existing lesson is refused. A later **checker** role can be added at the hook `IntakeOrchestrator.check()` in `server/src/intake/intake.ts`: it runs between the proposal and the approval card and may annotate or reject implications.

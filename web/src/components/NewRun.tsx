@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Switch, Badge } from "../components/ui";
+import { Modal, Switch, Badge } from "./ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import { defaultRunConfig, MODELS } from "@shared/components";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
 import { money } from "../lib/format";
 import type { ComponentId, EffortLevel, EngineId, HarnessComponent, Preset, PresetBasis, RunConfig } from "@shared/types";
-import { adaptPreset, generatedPresets, presetCompatibility } from "@shared/presets";
-import { GROUP_LABEL } from "./Harness";
+import { adaptPreset, composeRun, generatedPresets, presetCompatibility, profilePreset } from "@shared/presets";
+import { ComposePicker } from "./ComposePicker";
+import { compositionError } from "../state/runChip";
+import { GROUP_LABEL } from "../panels/Harness";
 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -23,6 +25,7 @@ export function NewRun() {
   const selectRun = useStore((s) => s.selectRun);
   const toastMsg = useStore((s) => s.toastMsg);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
+  const lessons = useStore((s) => s.lessons);
 
   const draft = useStore((s) => s.newRunDraft);
   const setNewRunDraft = useStore((s) => s.setNewRunDraft);
@@ -32,12 +35,22 @@ export function NewRun() {
   const presets: (Preset & { isDefault?: boolean })[] = storePresets.length ? storePresets : [...BUILT_IN_PRESETS, ...generatedPresets([])];
   const preferredEngine = info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic";
   const fresh = (keep: Partial<RunConfig> = {}) => defaultRunConfig({ task: keep.task ?? "", workspace: keep.workspace ?? info?.defaultWorkspace ?? "", engine: (keep.engine as RunConfig["engine"]) ?? preferredEngine, title: keep.title });
+  // Composable presets: one care profile plus domains, applied over fresh defaults (shared/presets.ts composeRun).
+  // An invalid composition keeps the settings and records the ids, so the error shows inline and Start is blocked.
+  const composeInto = (c: RunConfig, ids: string[]): RunConfig => {
+    if (!ids.length) return { ...c, presets: undefined };
+    if (compositionError(ids, lessons)) return { ...c, presets: ids };
+    const composed = composeRun(ids, lessons);
+    const engine: EngineId = c.engine === "replay" ? preferredEngine : c.engine;
+    const p = adaptPreset({ name: composed.label, config: composed.config, adaptive: profilePreset(composed.presets[0])?.adaptive }, engine);
+    return { ...applyPreset(fresh(c), p), preset: undefined, presets: composed.presets };
+  };
   // Start from: the prefill (run again / Harness), else the surviving draft, else your default preset, else the defaults.
   // "My default" is applied only if it fits the engine New run opens on; otherwise the defaults, with a notice.
   const opening = useMemo((): { cfg: RunConfig; notice: string | null } => {
     if (prefill || draft) return { cfg: defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: preferredEngine, ...((prefill ?? draft) as any) }), notice: ((prefill as any)?.__notice as string) ?? null };
     const def = defaultPreset ? presets.find((p) => p.name === defaultPreset) : undefined;
-    if (!def) return { cfg: fresh(), notice: null };
+    if (!def) return { cfg: composeInto(fresh(), ["full"]), notice: null };
     const fit = presetCompatibility(def, preferredEngine);
     if (!fit.ok) return { cfg: fresh(), notice: `Your default preset "${def.name}" does not fit ${ENGINE_LABEL[preferredEngine]} (${fit.reasons[0]}), so New run starts from the defaults.` };
     return { cfg: applyPreset(fresh(), adaptPreset(def, preferredEngine)), notice: null };
@@ -68,7 +81,7 @@ export function NewRun() {
     });
   const [checkError, setCheckError] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
-  const [check, setCheck] = useState<{ exists: boolean; git: boolean; files: string[]; path: string } | null>(null);
+  const [check, setCheck] = useState<{ exists: boolean; git: boolean; files: string[]; path: string; suggestions?: { domain: string; reason: string }[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState<null | "harness" | "roles" | "context" | "guardrails">((prefill as any)?.__openHarness ? "harness" : null);
   const [sameModel, setSameModel] = useState(true);
@@ -179,13 +192,14 @@ export function NewRun() {
 
   const budgetOk = Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
   const engineOk = cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode;
-  const blocker = cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
+  const composeError = compositionError(cfg.presets ?? [], lessons);
+  const blocker = composeError ? `Presets: ${composeError}.` : cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
   const canStart = blocker === null;
   const start = async (engine: "live" | "replay") => {
     setBusy(true);
     try {
       const preset = cfg.preset ? (presetModified ? `${cfg.preset} (modified)` : cfg.preset) : undefined;
-      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, preset, title: cfg.title || cfg.task.slice(0, 60) });
+      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, preset, presets: cfg.presets?.length ? cfg.presets : undefined, title: cfg.title || cfg.task.slice(0, 60) });
       if (engine !== "replay") setNewRunDraft(null);
       openModal(null);
       selectRun(created.id, { view: "activity" });
@@ -258,9 +272,18 @@ export function NewRun() {
         </div>
 
         <div className="rounded-lg border line p-2.5 flex flex-col gap-2">
+          <ComposePicker
+            lessons={lessons}
+            value={cfg.presets ?? []}
+            suggestions={check?.exists ? (check.suggestions ?? []) : []}
+            onChange={(ids) => {
+              setNotice(null);
+              setCfg((c) => composeInto(c, ids));
+            }}
+          />
           <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
             <label className="font-semibold" htmlFor="preset-pick">
-              Preset
+              {cfg.presets?.length ? "Or a saved preset" : "Preset"}
             </label>
             <select id="preset-pick" className="input" style={{ width: 200 }} value={activePreset ? activePreset.name : ""} onChange={(e) => pickPreset(e.target.value)}>
               <option value="">Custom (no preset)</option>

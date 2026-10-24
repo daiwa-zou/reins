@@ -178,6 +178,7 @@ export function LessonsPanel() {
                   </p>
                 )}
               </div>
+              <IntakeForm />
               {userProblems.length > 0 && (
                 <div className="card p-4 text-small" style={{ borderColor: "var(--warn)" }} role="status">
                   <div className="font-semibold text-[var(--warn)]">

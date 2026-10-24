@@ -5,7 +5,8 @@ import { Badge } from "../components/ui";
 import { api } from "../lib/api";
 import type { ComponentId, EngineId, HarnessComponent, Preset, RunConfig, SkillInfo } from "@shared/types";
 import { adaptPreset, generatedPresets, presetCompatibility } from "@shared/presets";
-import { defaultRunConfig, FOUNDATIONS } from "@shared/components";
+import { defaultRunConfig } from "@shared/components";
+import { ideas, linkCatalogue } from "@shared/implications";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL } from "@shared/config";
 
 export const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
@@ -31,6 +32,8 @@ export function HarnessPanel({ model }: { model: RunModel }) {
   const availableEngine = useStore((s) => s.availableEngine);
   const cfg = model.config;
   const on = cfg?.components;
+  // Foundation (and component) lesson lists come from the implications that target them.
+  const catalogue = React.useMemo(() => linkCatalogue(lessons), [lessons]);
 
   // Model-change nudge: compare the selected run's model to the most recent completed run before it.
   const previous = cfg ? runs.filter((r) => r.id !== cfg.id && r.status === "completed" && Date.parse(r.createdAt) < Date.parse(cfg.createdAt))[0] : undefined;
@@ -218,12 +221,12 @@ export function HarnessPanel({ model }: { model: RunModel }) {
         <div>
           <div className="section-label mb-2">Foundations (not switches, still from the lessons)</div>
           <div className="grid md:grid-cols-2 gap-2">
-            {FOUNDATIONS.map((f) => (
+            {catalogue.foundations.map((f) => (
               <div key={f.id} id={`component-${f.id}`} className="card p-3 flex flex-col gap-1" style={focus === f.id ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}>
                 <div className="font-semibold">{f.label}</div>
                 <div className="text-[12.5px] leading-relaxed muted">{f.short}</div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  {lessons.filter((l) => l.foundations.includes(f.id)).map((l0) => l0.slug).map((slug) => {
+                  {f.lessons.map((slug) => {
                     const l = lessons.find((x) => x.slug === slug);
                     return (
                       <button key={slug} className="badge badge-neutral hover:brightness-95" onClick={() => setLessonFilter(slug)} title={l?.takeaway}>
@@ -236,6 +239,8 @@ export function HarnessPanel({ model }: { model: RunModel }) {
             ))}
           </div>
         </div>
+
+        <IdeasList lessons={lessons} onOpen={setLessonFilter} />
 
         <SkillsList workspace={cfg && cfg.engine !== "replay" ? cfg.workspace : info?.defaultWorkspace} />
       </div>
@@ -346,6 +351,45 @@ function Row({ k, v }: { k: string; v: string }) {
       <span className="mono text-[11.5px] truncate" title={v}>
         {v}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Ideas: gap implications and unreviewed ones, with their lesson and quote.
+ * Unreviewed implications only ever appear here, never in stage prompts or presets.
+ */
+function IdeasList({ lessons, onOpen }: { lessons: import("@shared/types").Lesson[]; onOpen: (slug: string) => void }) {
+  const all = React.useMemo(() => ideas(lessons), [lessons]);
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? all : all.slice(0, 12);
+  return (
+    <div data-ideas>
+      <div className="section-label mb-1">Ideas · {all.length}</div>
+      <div className="muted text-[12px] mb-2">Claims from the lessons that no switch or stage implements yet (gaps), and implications still unreviewed. Review a user lesson in Lessons to promote it.</div>
+      {all.length === 0 ? (
+        <div className="faint text-[12px]">No ideas: every implication has a target and a standing.</div>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {shown.map((i, n) => (
+            <li key={`${i.lesson}-${n}`} className="card p-2.5 text-[12.5px] flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge tone={i.kind === "gap" ? "neutral" : "warn"}>{i.kind === "gap" ? "gap" : `${i.kind}:${i.target ?? ""} · ${i.standing}`}</Badge>
+                <span className="flex-1 min-w-0">{i.claim}</span>
+                <button className="badge badge-neutral hover:brightness-95" onClick={() => onOpen(i.lesson)} title={`Open ${i.lessonTitle} in Lessons`} data-idea-lesson={i.lesson}>
+                  {i.lessonTitle.split(":")[0].slice(0, 40)}
+                </button>
+              </div>
+              {i.quote && <blockquote className="muted text-[11.5px] border-l-2 line pl-2 italic">“{i.quote}”</blockquote>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {all.length > 12 && (
+        <button className="btn btn-ghost btn-sm mt-1" onClick={() => setShowAll(!showAll)}>
+          {showAll ? "Show fewer" : `Show all ${all.length}`}
+        </button>
+      )}
     </div>
   );
 }

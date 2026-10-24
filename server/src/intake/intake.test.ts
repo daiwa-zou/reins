@@ -113,5 +113,9 @@ describe("lesson intake job", () => {
 
     // The same source again is refused by its content hash.
     expect(() => mgr.start({ text: ARTICLE.replace(/\n/g, "\n\n") })).toThrow(IntakeRefused);
+    // The refusal names the existing lesson and creates no new job.
+    const jobsBefore = mgr.list().length;
+    expect(() => mgr.start({ text: ARTICLE })).toThrow(new RegExp(draft.slug));
+    expect(mgr.list().length).toBe(jobsBefore);
   });
 });

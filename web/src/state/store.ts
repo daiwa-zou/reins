@@ -44,11 +44,11 @@ interface State {
   booting: boolean;
   bootError: string | null;
   /** Approval drafts survive tab switches. */
-  approvalDrafts: Record<string, { criteria: import("@shared/types").ContractCriterion[]; note: string } | undefined>;
+  approvalDrafts: Record<string, { criteria: import("@shared/types").ContractCriterion[]; note: string; lesson?: import("./lessonDraft").LessonDraftState } | undefined>;
   /** New-run form draft survives closing the dialog. */
   newRunDraft: Partial<import("@shared/types").RunConfig> | null;
 
-  setApprovalDraft: (id: string, draft: { criteria: import("@shared/types").ContractCriterion[]; note: string } | null) => void;
+  setApprovalDraft: (id: string, draft: { criteria: import("@shared/types").ContractCriterion[]; note: string; lesson?: import("./lessonDraft").LessonDraftState } | null) => void;
   setNewRunDraft: (d: Partial<import("@shared/types").RunConfig> | null) => void;
   /** Which live engine the server can run right now. */
   availableEngine: () => "anthropic" | "claude-code";

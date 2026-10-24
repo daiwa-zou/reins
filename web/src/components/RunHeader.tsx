@@ -9,6 +9,8 @@ import { money, duration, tilde } from "../lib/format";
 import { nextTitle } from "./TopBar";
 import { useNow } from "../lib/useNow";
 import { runElapsed } from "../lib/time";
+import { presetsLabel } from "@shared/presets";
+import { runPresetChip } from "../state/runChip";
 
 /** Identity and controls of the selected run: the only place its cost and status sit in the chrome. */
 /** `at` is the scrubbed model while rewinding: the elapsed time is shown at that point, static. */
@@ -50,6 +52,11 @@ export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
           <span className="shrink-0" title={model.statusReason ?? undefined}>
             <StatusBadge status={model.status} />
           </span>
+          {runPresetChip(cfg) && (
+            <span className="badge badge-accent shrink-0" data-preset-chip title={cfg.presets?.length ? `Presets, in the order layered: ${presetsLabel(cfg.presets)}` : cfg.job === "intake" ? "A lesson intake job, not a run" : `Preset: ${cfg.preset}`}>
+              {runPresetChip(cfg)}
+            </span>
+          )}
           {cfg.engine === "replay" && <span className="badge badge-neutral shrink-0">recorded demo</span>}
         </div>
         <div className="flex items-center gap-2 text-small muted min-w-0 mt-0.5">

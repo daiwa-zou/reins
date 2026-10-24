@@ -27,7 +27,8 @@ export function allTrialSets(k = 3): TrialSet[] {
   const trials = new Map<string, Trial>();
   for (const id of listRunIds()) {
     const cfg = loadConfig(id);
-    if (!cfg) continue;
+    // Intake jobs live under $REINS_HOME/lessons/<slug>/, not runs/, and are never trials; guard anyway.
+    if (!cfg || cfg.job === "intake") continue;
     const events = readEvents(id);
     runs.push(summarize(cfg, events));
     trials.set(id, trialFromEvents(cfg, events));
