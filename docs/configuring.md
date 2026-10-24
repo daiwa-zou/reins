@@ -32,7 +32,7 @@ guidance: Give yourself a check you can run and show its output as evidence.
 
 Reins composes a preset per domain (`shared/presets.ts`, `composePreset`), recomputed from the current library on every `GET /api/presets`, so adding a lesson file changes it without a restart:
 
-- **Recipes.** `web` is **Web app** and `cli` is **CLI / tool**. Both start from the Full config with no engine and add verify-like-a-user guidance: Web app starts the dev server with a timeout and makes real HTTP requests; CLI / tool runs `--help`, one happy path, and bad input expecting a non-zero exit code and a message on stderr. A domain only lessons name (e.g. `domains: games`) gets a generic preset named after it ("Games") on the same Full base.
+- **Recipes.** `web` is **Web app**, `cli` is **CLI / tool**, `golang` is **Go** and `python` is **Python**. Both start from the Full config with no engine and add verify-like-a-user guidance: Web app starts the dev server with a timeout and makes real HTTP requests; CLI / tool runs `--help`, one happy path, and bad input expecting a non-zero exit code and a message on stderr. A domain only lessons name (e.g. `domains: games`) gets a generic preset named after it ("Games") on the same Full base.
 - **Composition order.** Matching lessons apply oldest `date` first, then by slug, so a newer lesson wins a conflict. Guidance lines are the recipe's plus one per lesson, deduplicated, at most 10.
 - **Basis.** Each generated preset lists the lessons it was built from with what each contributed (`on: …; off: …; guidance`), and a lesson that lost a conflict says `overridden by <slug>`. New run and Harness show this as "Built from N lessons", each linking to the lesson; a lesson with domains shows "Shapes presets: …".
 - **Engine adaptation.** Generated presets are *adaptive*: on Claude Code they switch off the components only Direct API honours (Scouts, Compaction, Context editing, Task budget, Tool search, Tool examples) instead of being unavailable, and New run says "adapted for Claude Code: N switches off (…)".
@@ -84,6 +84,24 @@ API:
 | `POST /api/presets/default` | Body `{ name }` marks any preset as the default; `{ name: null }` clears it. |
 | `DELETE /api/presets/:name` | Removes a user preset. Built-ins answer 400. |
 
+### Composable presets: one care profile plus domains
+
+A run is composed from exactly one **care profile** (`full`, `minimal`, `careful`) and any number of **domain presets** (`web`, `cli`, `golang`, `python`, and every domain a trusted lesson or implication names). The run records them in order as `presets: string[]`, e.g. `["careful", "golang", "cli"]`, and its title chip reads "Careful · Go · CLI". `POST /api/runs` accepts `presets` and composes the config on the server; explicit fields in the body still win.
+
+Domains layer over the profile in the order picked:
+
+- **Component switches**: later wins. A lesson tagged with the domain applies its `enables:`/`disables:`; when that flips a switch the profile (or an earlier lesson) set, the basis records "(overrides Careful)".
+- **Guidance**: the union of the domain recipes' lines and the lessons' `guidance:` lines, deduplicated and capped at 10.
+- **Stage lessons**: the union of trusted stage implications tagged with a picked domain plus the untagged ones, deduplicated and capped at 8 per stage (see "Lessons for this stage" below).
+- **Roles, context and guardrail**: later wins per key.
+- **Engine**: owned by the profile; a domain never changes it.
+
+New run shows the profile picker and domain chips. The workspace check suggests domains with a reason: `go.mod` suggests `golang`, a `package.json` that depends on vite, next or react suggests `web`, a `cmd/` directory or a `bin` field in `package.json` suggests `cli`, and `pyproject.toml` suggests `python`.
+
+### Lessons for this stage
+
+With the `stageLessons` component on (the default, on both engines), each phase's first message gets a block "Lessons for this stage": the stage implications (`[stage:plan]`, `[stage:contract]`, `[stage:build]`, `[stage:evaluate]`, `[stage:wrapup]`) that are bundled or reviewed, reviewed before bundled, newest lesson first, deduplicated, at most 8 lines. The lines are resolved when the run is created and recorded on the run config as `stageLessons`, so a replay or a later look at the run shows exactly what the agents saw.
+
 ## The config checker
 
 `checkRunConfig(config)` in `shared/config.ts` reports settings that will be ignored or contradict each other:
@@ -121,6 +139,7 @@ Every switch with what it does, what the harness does instead when it is off, wh
 | `narration` | Plain-language narration | Every tool call is rendered as a sentence a person can skim. | Nothing changes yet: tool calls are always narrated in the log. The switch is recorded with the run for ablation tracking. | Direct API, Claude Code | – | on |
 | `actionClassifier` | Action classifier | Classify each risky shell command against the task instead of asking about everything. | In auto mode, ambiguous shell commands ask you instead of being settled by the classifier. | Direct API, Claude Code | – | on |
 | `osSandbox` | OS sandbox (macOS) | Run shell commands under a Seatbelt profile: writes only inside the workspace and temp, no network unless allowed. | Shell commands run without the Seatbelt profile; only the policy rules stand between the agent and the machine. | Direct API, Claude Code | – | on |
+| `stageLessons` | Lessons for this stage | Each phase's first message carries a short block of reviewed stage implications from the lesson library (at most 8 lines). | No "Lessons for this stage" block: the roles get only their fixed prompts and any run guidance. | Direct API, Claude Code | – | on |
 
 The table is generated from `COMPONENTS` in `shared/components.ts`. A test (`server/src/docs.test.ts`) fails if any component id is missing here.
 
@@ -136,6 +155,37 @@ Start from [docs/lesson-template.md](lesson-template.md). It is the format the p
 **Safety.** Only regular `.md` files whose names are valid slugs are read. A symlink that resolves outside the lessons directory is not read and is reported as a problem. `GET /api/lessons/:slug` returns 404 for anything that is not a plain slug.
 
 **Problems are never silent.** A file with no frontmatter, a missing title/date/takeaway, a bad date, an unknown component or foundation id, or an empty section is listed in the Lessons view's problems panel and in `GET /api/lessons/problems`. Catalogue slugs in `shared/components.ts` that point at no lesson file are listed too.
+
+### Typed implications
+
+Every bullet under `## Harness implications` is one implication: the atomic link between a lesson and the harness. Syntax:
+
+```markdown
+- [stage:evaluate] One-sentence claim.
+  domains: web, cli
+  > A quote from the source, verbatim.
+```
+
+- The prefix is `[kind:target]`. Kinds: `component` (a component id from the table above), `stage` (`plan`, `contract`, `build`, `evaluate`, `wrapup`), `skill` (a skill name; the SKILL.md links back with a `lessons:` frontmatter line), `foundation` (a foundation id), and `gap` (no target: an idea the harness does not implement, shown on the Ideas list of the Harness section).
+- The indented `domains:` line tags the implication; a lesson-level `domains:` tags every implication in the file.
+- The indented `> quote` line is the evidence. For bundled lessons the quote must appear in the lesson's Learnings; for intake drafts it must appear verbatim in the fetched source.
+- A bullet without a prefix is still valid: it is a gap, and `npm run lessons:check` warns about it. An unknown kind or target is an error.
+- Frontmatter `components:` and `foundations:` lists still work; each entry counts as an implicit implication.
+- Each component's and foundation's lesson list on the Harness section is derived from these implications; `lessons:check` warns about a component no implication targets.
+
+### Provenance and standing
+
+Lessons carry `source:` (`post`, `article`, `paper`, `postmortem`, `note`), `date:` and `standing:`. Bundled lessons are always `bundled`; your lessons default to `unreviewed`. Only `bundled` and `reviewed` implications enter stage prompt blocks and presets; unreviewed ones appear only on the Ideas list. Set the standing on the Lessons section, or with `POST /api/lessons/:slug/standing` and a body `{"standing":"reviewed"}`.
+
+### Lesson intake
+
+On the Lessons section, "Add a lesson" starts an **intake job** from a URL or pasted text. Intake is a separate job type, not a run: it does not appear in the Runs list or trial sets, but its events stream to the Stage like a run. Files live in `$REINS_HOME/lessons/<slug>/` (`source.md`, `draft.md`, `events.jsonl`, `job.json`).
+
+1. The **librarian** role reads the source (for a URL, the harness fetches it with `http_fetch`; network is allowed for this job only), distils it into the lesson format with typed implications that each cite a quote, and ends with the `propose_lesson` tool. A quote that is not found verbatim in the source is rejected and the librarian must fix it.
+2. An approval card shows the draft: edit or drop individual implications and set the standing.
+3. Approval adopts the lesson: it is written to `$REINS_HOME/lessons/<slug>.md` with a `hash:` line.
+
+A source whose content hash (or URL) matches an existing lesson is refused. A later **checker** role can be added at the hook `IntakeOrchestrator.check()` in `server/src/intake/intake.ts`: it runs between the proposal and the approval card and may annotate or reject implications.
 
 ### `npm run lessons:check`
 

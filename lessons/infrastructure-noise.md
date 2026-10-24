@@ -4,6 +4,9 @@ date: 2026-02-05
 url: https://www.anthropic.com/engineering/infrastructure-noise
 tags: evals, infra, reliability, coding-agents
 takeaway: On Terminal-Bench 2.0, merely changing how much CPU and RAM sandboxes were allowed swung scores by 6 percentage points with model, harness and tasks held constant, more than many leaderboard gaps. Specify a guaranteed floor and a separate hard ceiling instead of one pinned value, record infrastructure configuration with every result, separate infra errors from agent failures, and distrust small score differences.
+source: post
+standing: bundled
+foundations: effectiveConfig, reliability
 ---
 
 ## Learnings

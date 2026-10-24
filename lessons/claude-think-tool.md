@@ -4,6 +4,10 @@ date: 2025-03-20
 url: https://www.anthropic.com/engineering/claude-think-tool
 tags: tools, evals, reliability, harness
 takeaway: A no-op think tool gives the model a scratchpad mid-chain to check rules and tool results before acting. It lifted consistency on policy-heavy tau-Bench airline tasks by 54% relative when paired with a domain-specific prompt in the system prompt, but extended thinking has since improved and is now recommended in most cases. Measure consistency with pass^k rather than single-shot success.
+source: post
+standing: bundled
+components: thinkTool
+foundations: reliability
 ---
 
 ## Learnings

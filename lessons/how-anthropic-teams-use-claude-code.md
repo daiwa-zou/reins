@@ -4,6 +4,10 @@ date: 2025-07-24
 url: https://www.anthropic.com/news/how-anthropic-teams-use-claude-code
 tags: coding-agents, harness, multi-agent
 takeaway: The most successful internal teams treat Claude Code as a thought partner rather than a code generator, spanning debugging, codebase navigation, testing, prototyping and automation, including non-engineers. Concrete artifacts such as stack traces and screenshots, pseudocode-first test-driven loops with periodic check-ins, and narrow specialized subagents drove the biggest gains. A harness should support both tight pairing and delegated work.
+source: post
+standing: bundled
+components: projectMemory
+foundations: reviewIntent
 ---
 
 ## Learnings

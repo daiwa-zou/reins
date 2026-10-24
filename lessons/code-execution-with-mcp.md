@@ -4,6 +4,10 @@ date: 2025-11-04
 url: https://www.anthropic.com/engineering/code-execution-with-mcp
 tags: mcp, tools, context, sandboxing
 takeaway: Loading every MCP tool definition up front and routing each intermediate result through the model burns hundreds of thousands of tokens. Presenting MCP servers as a typed code API on a filesystem lets the agent discover tools on demand, filter data in a sandbox, and keep sensitive values out of context, cutting one example from 150,000 to 2,000 tokens, at the cost of needing a secure execution environment.
+source: post
+standing: bundled
+components: toolSearch
+foundations: toolHygiene
 ---
 
 ## Learnings

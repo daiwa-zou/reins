@@ -4,6 +4,10 @@ date: 2026-04-23
 url: https://www.anthropic.com/engineering/april-23-postmortem
 tags: postmortem, coding-agents, evals, context, reliability
 takeaway: Three separate harness changes, a lowered default reasoning effort, a caching optimization that silently dropped prior reasoning, and a terse-output system prompt, combined to look like a broad quality decline that evals, tests and dogfooding all missed. Treat defaults, context pruning and prompt text as code: log every context operation, test the exact shipped build, run per-model evals and ablations, and roll out gradually.
+source: postmortem
+standing: bundled
+components: contextEditing
+foundations: effectiveConfig, cacheAsSignal
 ---
 
 ## Learnings

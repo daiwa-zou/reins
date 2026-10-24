@@ -4,6 +4,8 @@ date: 2026-01-09
 url: https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
 tags: evals, harness, reliability, coding-agents
 takeaway: Build agent evals early from real failures, grade the outcome rather than the path, and treat the transcript as the primary debugging surface. Separate capability evals from near-100% regression suites, report both pass@k and pass^k, isolate every trial, and treat a task nobody passes as a probably-broken task. Layer automated evals with production monitoring, A/B tests, feedback and manual transcript review.
+source: post
+standing: bundled
 ---
 
 ## Learnings
@@ -30,11 +32,25 @@ takeaway: Build agent evals early from real failures, grade the outcome rather t
 - Frameworks named: Harbor (hosts Terminal-Bench 2.0), Braintrust/autoevals, LangSmith, Langfuse, Arize Phoenix/AX; task quality matters more than framework.
 
 ## Harness implications
-- Record every trial as a first-class object: full `messages` transcript, tool calls with params, final environment state snapshot, and the per-trial metrics the article names (n_turns, n_toolcalls, n_total_tokens, TTFT, tokens/sec, TTLT, cost). Graders should run over this record, not over a summary.
-- Separate capability and regression suites in the UI; show regression suites as near-100% dashboards with any drop flagged, and offer one-click "graduation" of a capability task into regression.
-- Report both pass@k and pass^k per task with k trials; surface per-task variance so a flaky task is visible rather than averaged away.
-- Flag 0%-across-all-trials tasks as "probably broken" and require a reference solution that passes graders before a task is admitted to a suite.
-- Per-trial isolation is a harness responsibility: fresh sandbox, no shared git history, cache or files, and resource limits that do not correlate failures across trials.
-- Build the transcript viewer as a core surface: filter failures, show grader verdicts beside the step that triggered them, and let a reviewer mark "agent mistake" vs "grader wrong" so grader bugs feed back into the suite.
-- Grader design: outcome-based, partial credit, one isolated LLM judge per rubric dimension with an "Unknown" option, and a calibration view comparing judge verdicts to human labels. Support balanced should/shouldn't sets and track over- and under-triggering of behaviors (search, tool use) as separate metrics.
-- Treat eval tasks as code with owners, let non-engineers add tasks via PR-style contributions, detect saturation and prompt suite refresh, and layer signals: CI evals on each change, continuous production sampling with weekly transcript review, user feedback triage, and A/B only for big changes.
+- [foundation:reliability] Report pass@k and pass^k over k trials so a flaky task is visible rather than averaged away.
+  > pass@k is the probability of at least one success in k attempts and rises with k
+- [foundation:eventLog] Keep every trial's full transcript as the record that graders and reviewers read.
+  > Anthropic built transcript-viewing tooling and reads regularly
+- [component:evaluator] Grade with deterministic checks where possible and a model judge only where needed.
+  > use deterministic graders when possible, LLM where needed, humans sparingly
+- [component:narration] Make the transcript easy to read, because reading transcripts is how failures get diagnosed.
+  > "Read the transcripts!"
+- [stage:evaluate] Grade what was produced, not the path taken, and give per-criterion credit.
+  > grade "what the agent produced, not the path it took," give partial credit
+- [stage:evaluate] For each failure, decide whether the work is wrong or the check rejected a valid result, and say which.
+  > for each failure decide whether it is a genuine mistake or the grader rejected a valid solution
+- [stage:contract] Write criteria two reviewers would independently judge the same way, and make sure each one is passable.
+  > two experts should independently reach the same verdict and every task must be passable
+- [stage:contract] Include cases where the behaviour should not trigger as well as cases where it should.
+  > use balanced sets with cases where behavior should and should not trigger
+- [gap] Separate capability and regression suites, and graduate a capability task into regression once it passes reliably.
+  > A capability eval that reaches a high pass rate "graduates" into the regression suite
+- [gap] Flag a task at 0% across all trials as probably broken rather than hard.
+  > "is most often a signal of a broken task, not an incapable agent,"
+- [gap] Calibrate model judges against human labels.
+  > calibrate judges to experts

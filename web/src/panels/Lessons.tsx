@@ -6,6 +6,7 @@ import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
 import { api, type LessonAudit } from "../lib/api";
 import { FOUNDATIONS } from "@shared/components";
+import { ImplicationsByKind, IntakeForm, StandingControl } from "../components/LessonImplications";
 import type { LessonProblem } from "@shared/types";
 
 /**
@@ -224,6 +225,8 @@ export function LessonsPanel() {
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11.5px] muted">
                       <span>{l.date}</span>
+                      {l.provenance && <Badge>{l.provenance}</Badge>}
+                      <StandingControl lesson={l} />
                       {l.source === "user" && (
                         <Badge tone="accent" title={`From ${problems?.userDir ?? "$REINS_HOME/lessons"}`}>
                           user
@@ -302,11 +305,7 @@ export function LessonsPanel() {
                       ))}
                     </ul>
                     <h3 className="section-label mt-5 mb-2">Harness implications</h3>
-                    <ul className="flex flex-col gap-1.5 text-[12.5px] leading-relaxed list-disc pl-5">
-                      {l.implications.map((x, i) => (
-                        <li key={i}>{x}</li>
-                      ))}
-                    </ul>
+                    <ImplicationsByKind lesson={l} />
                   </article>
                 );
               })}

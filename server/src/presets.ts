@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { EngineId, Preset, PresetCompatibility, PresetConfig } from "../../shared/types.js";
-import { compatibilityByEngine, generatedPresets, isGeneratedPresetName } from "../../shared/presets.js";
+import { compatibilityByEngine, composeRun, domainPresets, generatedPresets, isGeneratedPresetName, PresetCompositionError } from "../../shared/presets.js";
+import { stageLessonsFor } from "../../shared/implications.js";
+import { applyPreset } from "../../shared/config.js";
+import { defaultRunConfig } from "../../shared/components.js";
+import type { RunConfig } from "../../shared/types.js";
 import { listLessons } from "./lessons.js";
 import { BUILT_IN_PRESETS, FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
 
@@ -136,3 +140,37 @@ export function setDefaultPreset(raw: unknown): string | null {
 }
 
 export class PresetNotFound extends Error {}
+
+/**
+ * The run input after preset composition. With `presets` (one care profile
+ * plus domains, e.g. ["careful","golang","cli"]) the composed config is the
+ * base and any field the caller sent explicitly wins over it. The stage
+ * lessons are always resolved here, so the run records what its agents saw.
+ */
+export function resolveRunInput<T extends Partial<RunConfig> & { task: string; workspace: string }>(input: T): T {
+  const lessons = listLessons();
+  if (!Array.isArray(input.presets) || !input.presets.length) {
+    const { presets: _drop, ...rest } = input as any;
+    return { ...rest, stageLessons: stageLessonsFor(lessons, []) } as T;
+  }
+  const composed = composeRun(input.presets.map(String), lessons);
+  const base = applyPreset(defaultRunConfig({ task: input.task, workspace: input.workspace }), { name: composed.label, config: composed.config });
+  const has = (k: keyof RunConfig) => input[k] !== undefined && input[k] !== null;
+  const out: any = { ...base, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== null)) };
+  if (has("components")) out.components = { ...base.components, ...input.components };
+  if (has("guidance")) out.guidance = [...new Set([...(base.guidance ?? []), ...(input.guidance ?? [])])];
+  // The profile owns the engine unless the caller picked one explicitly.
+  out.engine = input.engine ?? composed.config.engine ?? base.engine;
+  out.presets = composed.presets;
+  out.preset = input.preset ?? composed.label;
+  out.stageLessons = composed.stageLessons;
+  return out as T;
+}
+
+export { PresetCompositionError };
+
+/** Care profiles and domain presets for the New run picker. */
+export function composablePresets() {
+  const lessons = listLessons();
+  return { profiles: BUILT_IN_PRESETS.filter((p) => p.layer === "profile"), domains: domainPresets(lessons) };
+}

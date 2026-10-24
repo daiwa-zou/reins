@@ -4,6 +4,9 @@ date: 2025-10-20
 url: https://www.anthropic.com/engineering/claude-code-sandboxing
 tags: sandboxing, safety, coding-agents, infra
 takeaway: Constant permission prompts cause approval fatigue and make agents less safe, so Claude Code instead defines OS-level boundaries inside which it acts freely. Filesystem and network isolation are only effective together, egress goes through a proxy outside the sandbox, and credentials stay outside entirely. Internally this cut permission prompts by 84%, though no baseline or methodology was given.
+source: post
+standing: bundled
+components: actionClassifier, osSandbox
 ---
 
 ## Learnings

@@ -4,6 +4,10 @@ date: 2025-10-20
 url: https://www.anthropic.com/news/claude-code-on-the-web
 tags: sandboxing, coding-agents, infra, safety
 takeaway: Running the agent in an isolated cloud sandbox lets users delegate well-scoped coding tasks from a browser, run many in parallel, steer them mid-task and receive a pull request with a summary. Safety rests on default network and filesystem restrictions, user-controlled domain allowlists, and a git proxy that keeps credentials outside the sandbox and limits the agent to authorized repositories.
+source: post
+standing: bundled
+components: osSandbox
+foundations: secretsOutside
 ---
 
 ## Learnings

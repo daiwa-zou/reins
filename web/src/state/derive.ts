@@ -289,5 +289,5 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
 
 export const PHASE_ORDER: Phase[] = ["plan", "contract", "build", "evaluate", "wrapup"];
 export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", contract: "Contract", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
-export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier", scout: "Scout" };
+export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier", scout: "Scout", librarian: "Librarian" };
 export const isLive = (s: RunStatus) => s === "running" || s === "paused" || s === "waiting_approval" || s === "queued";

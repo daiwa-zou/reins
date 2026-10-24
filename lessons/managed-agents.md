@@ -4,6 +4,10 @@ date: 2026-04-08
 url: https://www.anthropic.com/engineering/managed-agents
 tags: infra, harness, long-running, safety
 takeaway: Managed Agents virtualizes an agent into three independently replaceable parts, a durable append-only session log, a stateless harness loop, and sandboxes reached through one uniform execute interface. Containers and harnesses become disposable, credentials stay out of the sandbox, the session is the source of truth rather than the context window, and harness features are treated as assumptions about model weakness that go stale.
+source: post
+standing: bundled
+components: resetWithHandoff
+foundations: eventLog, ownedLoop, secretsOutside, declarativeConfig
 ---
 
 ## Learnings

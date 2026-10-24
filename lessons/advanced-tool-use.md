@@ -4,6 +4,9 @@ date: 2025-11-24
 url: https://www.anthropic.com/engineering/advanced-tool-use
 tags: tools, context, mcp, harness
 takeaway: Large tool libraries fail on context cost, intermediate-result bloat and parameter errors, and each has a distinct fix. Defer tool definitions behind search, let the model write code that calls tools so intermediate data stays out of context, and add concrete usage examples to schemas. Choose the feature by measuring which bottleneck you actually have rather than enabling everything.
+source: post
+standing: bundled
+components: toolSearch, toolExamples
 ---
 
 ## Learnings

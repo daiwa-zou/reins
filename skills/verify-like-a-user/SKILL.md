@@ -1,6 +1,7 @@
 ---
 name: verify-like-a-user
 description: How to check a feature the way a person would (run it, hit it, open it) instead of trusting unit tests or your own summary. Use before calling finish or report_evaluation.
+lessons: claude-code-best-practices, effective-harnesses-for-long-running-agents
 ---
 
 # Verify like a user

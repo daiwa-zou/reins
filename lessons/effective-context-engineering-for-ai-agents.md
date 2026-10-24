@@ -4,6 +4,10 @@ date: 2025-09-29
 url: https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
 tags: context, harness, long-running, multi-agent
 takeaway: Context is a finite attention budget with diminishing returns, so the goal is the smallest set of high-signal tokens that produces the desired behavior, curated afresh every turn. Load data just in time via lightweight identifiers, keep tools and prompts at the right altitude, and for long tasks use compaction, structured note-taking or sub-agents with condensed returns, chosen by the shape of the task.
+source: post
+standing: bundled
+components: scouts, progressFile, projectMemory, compaction, contextEditing, skills
+foundations: cacheAsSignal
 ---
 
 ## Learnings

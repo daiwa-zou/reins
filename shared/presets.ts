@@ -5,7 +5,8 @@
 // A recipe names a domain (web, cli...) and its base guidance. composePreset()
 // starts from the Full config and folds in every lesson whose `domains:` names
 // that domain, oldest first (then by slug), so a newer lesson wins a conflict.
-import type { ComponentId, EngineId, Lesson, Preset, PresetBasis, PresetCompatibility, PresetConfig } from "./types.js";
+import type { ComponentId, EngineId, Lesson, Phase, Preset, PresetBasis, PresetCompatibility, PresetConfig } from "./types.js";
+import { lessonInDomain, namedDomains, stageLessonsFor } from "./implications.js";
 import { cleanGuidance, COMPONENTS, GUIDANCE_MAX_LINES } from "./components.js";
 import { BUILT_IN_PRESETS, ENGINE_LABEL, sanitizePresetName } from "./config.js";
 
@@ -16,12 +17,17 @@ export interface PresetRecipe {
   description: string;
   /** Verification guidance every run from this preset gets. */
   guidance: string[];
+  /** Chip label in a run title, e.g. "Go". */
+  short?: string;
+  /** Roles, context and guardrail keys this domain sets (later domains win per key; never the engine). */
+  config?: Pick<PresetConfig, "roles" | "context" | "guardrail">;
 }
 
 export const PRESET_RECIPES: PresetRecipe[] = [
   {
     id: "web",
     name: "Web app",
+    short: "Web",
     description: "Full, shaped by the web lessons: verify like a user by starting the dev server with a timeout and hitting real pages and endpoints.",
     guidance: [
       "Verify like a user: start the dev server with a timeout (e.g. `timeout 120 npm run dev`) and never leave it running.",
@@ -31,12 +37,27 @@ export const PRESET_RECIPES: PresetRecipe[] = [
   {
     id: "cli",
     name: "CLI / tool",
+    short: "CLI",
     description: "Full, shaped by the tool-design lessons: verify the command the way a user runs it, including --help and bad input.",
     guidance: [
       "Verify like a user: run the command's --help and check it documents what you changed.",
       "Run one happy path end to end with realistic arguments and check the output.",
       "Run it with bad input and check it exits non-zero with a clear message on stderr.",
     ],
+  },
+  {
+    id: "golang",
+    name: "Go",
+    short: "Go",
+    description: "Full, shaped for Go modules: build, vet and test with the go tool before claiming anything works.",
+    guidance: ["Run `go build ./...`, `go vet ./...` and `go test ./...` and show their output before calling finish; gofmt any file you touch."],
+  },
+  {
+    id: "python",
+    name: "Python",
+    short: "Python",
+    description: "Full, shaped for Python projects: run the test suite and the program itself from the project's environment.",
+    guidance: ["Run the project's tests (e.g. `python -m pytest -q`) from its own environment and show the output before calling finish."],
   },
 ];
 
@@ -91,7 +112,8 @@ export function recipeFor(domain: string): PresetRecipe {
 export function composePreset(recipe: PresetRecipe, lessons: Lesson[], opts: { matchAll?: boolean; name?: string } = {}): Preset {
   const base = BUILT_IN_PRESETS[0].config;
   const components: Partial<Record<ComponentId, boolean>> = { ...base.components };
-  const used = lessons.filter((l) => opts.matchAll || l.domains?.includes(recipe.id)).slice().sort(byAge);
+  // Only bundled and reviewed lessons shape presets; unreviewed ones wait on the Ideas list.
+  const used = lessons.filter((l) => l.standing !== "unreviewed" && (opts.matchAll || l.domains?.includes(recipe.id))).slice().sort(byAge);
   const owner = new Map<ComponentId, { slug: string; on: boolean }>();
   const effects = new Map<string, string[]>();
   const overridden = new Map<string, string[]>();
@@ -125,7 +147,7 @@ export function composePreset(recipe: PresetRecipe, lessons: Lesson[], opts: { m
 /** Domains named by the lessons, plus the built-in recipes, in a stable order. */
 export function presetDomains(lessons: Lesson[]): string[] {
   const out = PRESET_RECIPES.map((r) => r.id);
-  for (const l of lessons) for (const d of l.domains ?? []) if (isDomain(d) && !out.includes(d)) out.push(d);
+  for (const d of namedDomains(lessons.filter((l) => l.standing !== "unreviewed"))) if (isDomain(d) && !out.includes(d)) out.push(d);
   return out;
 }
 
@@ -145,4 +167,110 @@ export function isGeneratedPresetName(name: string, lessons: Lesson[] = []): boo
 /** Compatibility on every engine, as served by GET /api/presets. */
 export function compatibilityByEngine(preset: Pick<Preset, "config" | "adaptive">): Record<EngineId, PresetCompatibility> {
   return { anthropic: presetCompatibility(preset, "anthropic"), "claude-code": presetCompatibility(preset, "claude-code") };
+}
+
+// ---- Composable presets: one care profile + any number of domains -----------
+
+/** Care profiles: exactly one per run. */
+export const PROFILE_IDS = ["full", "minimal", "careful"] as const;
+export type ProfileId = (typeof PROFILE_IDS)[number];
+
+export function profilePreset(id: string): Preset | undefined {
+  return BUILT_IN_PRESETS.find((p) => p.layer === "profile" && p.id === id);
+}
+
+/** The chip label for a preset id: "Careful", "Go", "CLI", or a title-cased domain. */
+export function presetChip(id: string): string {
+  return profilePreset(id)?.name ?? PRESET_RECIPES.find((r) => r.id === id)?.short ?? titleCase(id);
+}
+
+/** The run title chip, e.g. "Careful · Go · CLI". */
+export function presetsLabel(ids: string[] | undefined): string {
+  return (ids ?? []).map(presetChip).join(" · ");
+}
+
+export interface ComposedRun {
+  /** Normalised: the profile first, then the domains in the order picked. */
+  presets: string[];
+  config: PresetConfig;
+  basis: PresetBasis[];
+  stageLessons: Partial<Record<Phase, string[]>>;
+  label: string;
+}
+
+export class PresetCompositionError extends Error {}
+
+/**
+ * Layer domain presets over one care profile, in the order picked:
+ * - component switches: later wins (a lesson's enables:/disables:), and an override is recorded in the basis;
+ * - guidance: the union of the domain's recipe lines and lesson lines, deduplicated and capped;
+ * - stage lessons: trusted stage implications tagged with a picked domain (or untagged), deduplicated and capped per stage;
+ * - roles / context / guardrail: later wins per key;
+ * - engine: owned by the profile, never by a domain.
+ */
+export function composeRun(ids: string[], lessons: Lesson[]): ComposedRun {
+  const clean = [...new Set((ids ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))];
+  const profiles = clean.filter((x) => (PROFILE_IDS as readonly string[]).includes(x));
+  if (profiles.length > 1) throw new PresetCompositionError(`pick exactly one care profile, not ${profiles.join(" and ")}`);
+  const profileId = profiles[0] ?? "full";
+  const profile = profilePreset(profileId)!;
+  const known = presetDomains(lessons);
+  const domains = clean.filter((x) => !(PROFILE_IDS as readonly string[]).includes(x));
+  for (const d of domains) if (!known.includes(d)) throw new PresetCompositionError(`unknown preset "${d}" (care profiles: ${PROFILE_IDS.join(", ")}; domains: ${known.join(", ")})`);
+
+  const base = profile.config;
+  const components: Partial<Record<ComponentId, boolean>> = { ...base.components };
+  const owner = new Map<ComponentId, string>(); // who set each switch last: profile name or lesson slug
+  const roles = { ...(base.roles ?? {}) } as NonNullable<PresetConfig["roles"]>;
+  const context = { ...(base.context ?? {}) };
+  const guardrail = { ...(base.guardrail ?? {}) };
+  const guidance: string[] = [...(base.guidance ?? [])];
+  const basis: PresetBasis[] = [];
+  const trusted = lessons.filter((l) => l.standing !== "unreviewed");
+  for (const d of domains) {
+    const recipe = recipeFor(d);
+    guidance.push(...recipe.guidance);
+    for (const [r, v] of Object.entries(recipe.config?.roles ?? {})) (roles as any)[r] = { ...((roles as any)[r] ?? {}), ...v };
+    Object.assign(context, recipe.config?.context ?? {});
+    Object.assign(guardrail, recipe.config?.guardrail ?? {});
+    for (const l of trusted.filter((x) => lessonInDomain(x, d)).sort(byAge)) {
+      const fx: string[] = [];
+      const set = (id: ComponentId, on: boolean) => {
+        const before = components[id] ?? COMPONENTS.find((c) => c.id === id)?.defaultOn;
+        if (before !== on) fx.push(`${on ? "on" : "off"}: ${label(id)} (overrides ${owner.get(id) ?? profile.name})`);
+        else fx.push(`${on ? "on" : "off"}: ${label(id)}`);
+        components[id] = on;
+        owner.set(id, l.slug);
+      };
+      for (const id of l.enables ?? []) set(id, true);
+      for (const id of l.disables ?? []) set(id, false);
+      if (l.guidance) {
+        guidance.push(l.guidance);
+        fx.push("guidance");
+      }
+      const stage = (l.items ?? []).filter((i) => i.kind === "stage" && i.domains.includes(d)).length;
+      if (stage) fx.push(`${stage} stage lesson${stage === 1 ? "" : "s"}`);
+      if (fx.length && !basis.some((b) => b.slug === l.slug && b.effect.startsWith(`[${d}]`))) basis.push({ slug: l.slug, title: l.title, effect: `[${d}] ${fx.join("; ")}` });
+    }
+  }
+  const config: PresetConfig = {
+    ...base,
+    engine: base.engine, // the profile owns the engine
+    components,
+    roles,
+    context,
+    guardrail,
+    guidance: cleanGuidance(guidance).lines.slice(0, GUIDANCE_MAX_LINES),
+  };
+  if (!config.engine) delete config.engine;
+  const presets = [profileId, ...domains];
+  return { presets, config, basis, stageLessons: stageLessonsFor(lessons, domains), label: presetsLabel(presets) };
+}
+
+/** Domain presets for the picker: built-in recipes plus every domain a trusted lesson or implication names. */
+export function domainPresets(lessons: Lesson[]): Preset[] {
+  return presetDomains(lessons).map((d) => {
+    const p = composePreset(recipeFor(d), lessons);
+    return { ...p, id: d, layer: "domain" as const, short: presetChip(d) };
+  });
 }

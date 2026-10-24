@@ -7,6 +7,8 @@ takeaway: Long application builds improved sharply when a planner, generator and
 domains: web
 enables: evaluator, contracts, progressFile
 guidance: Evaluate against the running app (pages and HTTP responses), criterion by criterion with hard thresholds; never accept the builder's own claim that it works.
+source: post
+standing: bundled
 ---
 
 ## Learnings
@@ -27,9 +29,25 @@ guidance: Evaluate against the running app (pages and HTTP responses), criterion
 - Recommendations: experiment with the target model, read traces on realistic problems and tune against them; decompose tasks and assign specialized agents. Re-examine the harness when a new model ships, removing non-load-bearing pieces and adding pieces that enable new capabilities. The design space shifts, it does not shrink.
 
 ## Harness implications
-- Use a separate evaluator role, skeptical by prompt, with access to the live artifact (browser, screenshots) and hard per-criterion thresholds.
-- Negotiate contracts before work ("definition of done" plus a verification plan); the UI should surface these and let the user edit and approve them.
-- Use file-based handoff between agents (progress files, specs, contracts).
-- Track cost and time per phase and show them per phase (planner, build, QA).
-- Harness components should be toggleable individually ("ablation" switches) so users can remove stale scaffolding per model.
-- Make the context strategy, compaction vs reset, a visible and configurable choice.
+- [component:evaluator] Use a separate evaluator: it is easier to make skeptical than the builder is to make self-critical.
+  > A standalone evaluator is easier to make skeptical than a generator is to make self-critical.
+- [stage:evaluate] Check the live result yourself, and when you find a real issue, fail the criterion instead of talking yourself into approving it.
+  > it finds real issues, then talks itself into approving them, and tests superficially
+- [component:contracts] Agree what done means and how to verify it before any code is written.
+  > before coding, the generator proposes what "done" means and how to verify it, the evaluator reviews, and they iterate until agreed
+- [skill:writing-a-contract] Contracts get long and specific, so the shape of a checkable criterion is worth a skill.
+  > Sprint 3 alone had 27 contract criteria.
+- [foundation:fileHandoff] Roles hand work over through files, never a shared context.
+  > Agents exchange files, not shared context.
+- [component:planner] A planner turns a short prompt into a product spec; without it the builder under-scopes.
+  > The planner turns a 1-4 sentence prompt into a product spec
+- [stage:plan] Keep the spec high level on technical design so an early wrong decision does not cascade.
+  > kept high-level on tech so early errors do not cascade
+- [stage:build] Work through the spec one feature at a time.
+  > The generator works in sprints, one feature at a time
+- [component:compaction] Compaction keeps continuity but gives no clean slate.
+  > Compaction gives continuity but no clean slate.
+- [component:resetWithHandoff] A reset with a structured handoff fixes context anxiety at the cost of orchestration overhead.
+  > A context reset (a fresh agent plus a structured handoff) fixes the anxiety but adds orchestration, token and latency overhead.
+- [gap] Show cost and time per phase so the expensive phases are visible.
+  > planner 4.7 min for $0.46

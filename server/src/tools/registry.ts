@@ -435,8 +435,39 @@ const finish = tool(
   async (input, ctx) => ctx.handlers.finish?.(input) ?? "Finished.",
 );
 
+const implicationSchema = {
+  type: "object",
+  properties: {
+    kind: { type: "string", enum: ["component", "stage", "skill", "foundation", "gap"] },
+    target: { type: "string", description: "A component id, a phase (plan, contract, build, evaluate, wrapup), a skill name or a foundation id. Empty for gap." },
+    claim: { type: "string", description: "One sentence: what the harness should do." },
+    quote: { type: "string", description: "Evidence: a passage copied verbatim from the source." },
+    domains: { type: "array", items: { type: "string" }, description: "Optional domain tags, e.g. web, cli, golang" },
+  },
+  required: ["kind", "target", "claim", "quote", "domains"],
+  additionalProperties: false,
+};
+
+const proposeLesson = tool(
+  "propose_lesson",
+  "Propose the distilled lesson: frontmatter fields, dense learnings and typed harness implications, each citing a verbatim quote from the source. A quote that is not in the source is rejected and you must fix it. This ends your turn.",
+  {
+    slug: { type: "string", description: "lowercase-with-dashes file name, no .md" },
+    title: { type: "string" },
+    date: { type: "string", description: "YYYY-MM-DD publication date of the source (today if unknown)" },
+    url: { type: "string", description: "The source URL, or empty for pasted text" },
+    source: { type: "string", enum: ["post", "article", "paper", "postmortem", "note"] },
+    takeaway: { type: "string", description: "One paragraph" },
+    tags: { type: "array", items: { type: "string" } },
+    learnings: { type: "array", items: { type: "string" }, description: "Dense bullets keeping the source's numbers and examples" },
+    implications: { type: "array", items: implicationSchema },
+  },
+  ["slug", "title", "date", "url", "source", "takeaway", "tags", "learnings", "implications"],
+  async (input, ctx) => ctx.handlers.propose_lesson?.(input) ?? "Lesson proposed.",
+);
+
 export const ALL_TOOLS: Record<string, ToolDef> = Object.fromEntries(
-  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeContract, reviewContract, reportEvaluation, finish].map((t) => [
+  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeContract, reviewContract, reportEvaluation, finish, proposeLesson].map((t) => [
     (t.schema as Anthropic.Beta.BetaTool).name,
     t,
   ]),

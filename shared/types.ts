@@ -2,7 +2,10 @@
 // from the append-only event log of a run (event sourcing), so replaying a
 // recorded log reproduces the whole experience.
 
-export type RoleId = "planner" | "builder" | "evaluator" | "classifier" | "scout";
+export type RoleId = "planner" | "builder" | "evaluator" | "classifier" | "scout" | "librarian";
+
+/** Roles every run config carries settings for. The librarian (lesson intake) borrows the planner's settings unless set. */
+export type RunRoleId = Exclude<RoleId, "librarian">;
 
 export type Phase = "plan" | "contract" | "build" | "evaluate" | "wrapup";
 
@@ -35,7 +38,8 @@ export type ComponentId =
   | "projectMemory"
   | "taskBudget"
   | "toolExamples"
-  | "osSandbox";
+  | "osSandbox"
+  | "stageLessons";
 
 /** The live engines. "replay" only re-plays a recorded log, so no component applies to it. */
 export type EngineId = "anthropic" | "claude-code";
@@ -107,7 +111,7 @@ export interface RunConfig {
   task: string;
   workspace: string;
   engine: "anthropic" | "claude-code" | "replay";
-  roles: Record<RoleId, RoleSettings>;
+  roles: Record<RunRoleId, RoleSettings> & { librarian?: RoleSettings };
   components: Record<ComponentId, boolean>;
   pauses: RunPauses;
   context: ContextPolicy;
@@ -120,6 +124,12 @@ export interface RunConfig {
   preset?: string;
   /** Extra one-line instructions appended to every role's system prompt ("Guidance for this run"). */
   guidance?: string[];
+  /** "intake" for a lesson intake job (never listed with runs); absent for a normal run. */
+  job?: "intake";
+  /** The care profile and domain presets the run was composed from, in the order picked, e.g. ["careful","golang","cli"]. */
+  presets?: string[];
+  /** "Lessons for this stage" lines per phase, resolved when the run was created (stage implications; see shared/implications.ts). */
+  stageLessons?: Partial<Record<Phase, string[]>>;
 }
 
 /** A finding from checkRunConfig. Warnings never block a run. */
@@ -133,7 +143,7 @@ export interface ConfigWarning {
 }
 
 /** The parts of a run config a preset may set. Never task, workspace, id or createdAt. */
-export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "components" | "roles" | "pauses" | "context" | "guardrail">> & {
+export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "presets" | "stageLessons" | "components" | "roles" | "pauses" | "context" | "guardrail">> & {
   components?: Partial<Record<ComponentId, boolean>>;
   roles?: Partial<Record<RoleId, Partial<RoleSettings>>>;
   pauses?: Partial<RunPauses>;
@@ -143,6 +153,12 @@ export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" |
 
 export interface Preset {
   name: string;
+  /** Stable id for composition: "full", "minimal", "careful" for care profiles, the domain id for domain presets. */
+  id?: string;
+  /** "profile" (exactly one per run) or "domain" (any number, layered in order). */
+  layer?: "profile" | "domain";
+  /** Short chip label, e.g. "Go" or "CLI". */
+  short?: string;
   description: string;
   builtIn: boolean;
   config: PresetConfig;
@@ -190,6 +206,8 @@ export interface SkillInfo {
   description: string;
   source: "bundled" | "user" | "workspace";
   dir: string;
+  /** Lesson slugs linked to this skill (its `lessons:` frontmatter and [skill:<name>] implications). */
+  lessons?: string[];
 }
 
 export interface Usage {
@@ -249,7 +267,7 @@ export interface GuardrailDecision {
   rationale: string;
 }
 
-export type ApprovalKind = "contract" | "action" | "phase";
+export type ApprovalKind = "contract" | "action" | "phase" | "lesson";
 
 export interface ApprovalRequest {
   approvalId: string;
@@ -390,6 +408,39 @@ export interface Lesson {
   guidance?: string;
   /** Bundled with Reins (lessons/) or from the user's library ($REINS_HOME/lessons). */
   source: "bundled" | "user";
+  /** Typed harness implications (one per "## Harness implications" bullet, plus frontmatter components:/foundations:). */
+  items: Implication[];
+  /** What kind of source the lesson distils: frontmatter `source:`. */
+  provenance?: LessonProvenance;
+  /** Bundled lessons are always "bundled"; user lessons default to "unreviewed". Frontmatter `standing:`. */
+  standing: Standing;
+  /** sha256 of the source text an intake job distilled this lesson from (frontmatter `hash:`). */
+  hash?: string;
+}
+
+export type ImplicationKind = "component" | "stage" | "skill" | "foundation" | "gap";
+export type Standing = "bundled" | "reviewed" | "unreviewed";
+export type LessonProvenance = "post" | "article" | "paper" | "postmortem" | "note";
+
+/** One claim a lesson makes about the harness: the atomic link between lessons, components, stages and skills. */
+export interface Implication {
+  /** `${slug}#${n}`, stable while the bullet order is. */
+  id: string;
+  lesson: string;
+  /** The lesson's date, for "newest first". */
+  date: string;
+  kind: ImplicationKind;
+  /** Component id, phase name, skill name or foundation id. Absent for kind gap. */
+  target?: string;
+  /** One sentence. */
+  claim: string;
+  /** Evidence: a verbatim quote from the source (empty when the lesson gives none). */
+  quote: string;
+  /** Domain tags: the bullet's `domains:` line plus the lesson-level `domains:`. */
+  domains: string[];
+  standing: Standing;
+  /** Derived from a frontmatter components:/foundations: entry rather than a bullet. */
+  implicit?: boolean;
 }
 
 /** A fixed architectural decision of the harness, with the lessons behind it. */

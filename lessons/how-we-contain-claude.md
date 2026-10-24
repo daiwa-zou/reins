@@ -4,6 +4,10 @@ date: 2026-05-25
 url: https://www.anthropic.com/engineering/how-we-contain-claude
 tags: safety, sandboxing, infra, multi-agent
 takeaway: Deployment risk is failure likelihood times blast radius, and model-layer defenses only reduce likelihood, so contain first at the environment layer with sandboxes, VMs and default-deny egress, then steer the model. The incidents that mattered were egress and trust-boundary problems: pre-trust config execution, user-pasted exfiltration, and data leaving through an allowlisted domain. Match isolation strength to how well the user can oversee the agent.
+source: post
+standing: bundled
+components: actionClassifier, osSandbox
+foundations: secretsOutside, untrustedOutput
 ---
 
 ## Learnings

@@ -4,6 +4,10 @@ date: 2025-09-29
 url: https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk
 tags: harness, tools, context, coding-agents
 takeaway: Give the agent a computer and structure it around a loop of gathering context, taking action and verifying work. Prefer agentic file-system search over embeddings, use subagents for parallelism and context isolation, compact automatically, keep tools few and context-efficient, and build concrete verification channels such as lint rules and screenshots. Failures then guide changes to tools and evals built from real usage.
+source: post
+standing: bundled
+components: evaluator, compaction, selfVerification
+foundations: ownedLoop
 ---
 
 ## Learnings

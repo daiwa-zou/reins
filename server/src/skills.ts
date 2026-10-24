@@ -13,6 +13,8 @@ export interface Skill {
   source: "bundled" | "user" | "workspace";
   dir: string;
   body: string;
+  /** Lesson slugs this skill is linked to: its own `lessons:` frontmatter plus the [skill:<name>] implications that target it. */
+  lessons: string[];
 }
 
 function parse(dir: string, source: Skill["source"]): Skill | null {
@@ -25,7 +27,8 @@ function parse(dir: string, source: Skill["source"]): Skill | null {
     const i = line.indexOf(":");
     if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   }
-  return { name: meta.name ?? path.basename(dir), description: meta.description ?? "", source, dir, body: m ? m[2].trim() : raw.trim() };
+  const lessons = (meta.lessons ?? "").replace(/^\[|\]$/g, "").split(",").map((s) => s.trim()).filter(Boolean);
+  return { name: meta.name ?? path.basename(dir), description: meta.description ?? "", source, dir, body: m ? m[2].trim() : raw.trim(), lessons };
 }
 
 function scan(root: string, source: Skill["source"]): Skill[] {

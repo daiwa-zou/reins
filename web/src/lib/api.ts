@@ -46,8 +46,11 @@ export const api = {
   createRun: (body: Partial<RunConfig> & { task: string; workspace: string }) => post("/api/runs", body).then((r) => j<RunConfig>(r)),
   demo: () => post("/api/runs/demo").then((r) => j<RunConfig>(r)),
   deleteRun: (id: string) => fetch(`/api/runs/${id}`, { method: "DELETE" }).then((r) => j<{ ok: true }>(r)),
-  approve: (id: string, approvalId: string, decision: "approve" | "reject", note?: string, criteria?: ContractCriterion[]) =>
-    post(`/api/runs/${id}/approve`, { approvalId, decision, note, criteria }).then((r) => j<{ ok: true }>(r)),
+  approve: (id: string, approvalId: string, decision: "approve" | "reject", note?: string, criteria?: ContractCriterion[], lesson?: unknown) =>
+    post(`/api/runs/${id}/approve`, { approvalId, decision, note, criteria, lesson }).then((r) => j<{ ok: true }>(r)),
+  setStanding: (slug: string, standing: "reviewed" | "unreviewed") => post(`/api/lessons/${encodeURIComponent(slug)}/standing`, { standing }).then((r) => j<Lesson>(r)),
+  startIntake: (body: { url?: string; text?: string }) => post("/api/intake", body).then((r) => j<{ id: string; slug: string }>(r)),
+  composablePresets: () => fetch("/api/presets/composable").then((r) => j<{ profiles: Preset[]; domains: Preset[] }>(r)),
   steer: (id: string, text: string) => post(`/api/runs/${id}/steer`, { text }).then((r) => j<{ ok: true }>(r)),
   pause: (id: string) => post(`/api/runs/${id}/pause`).then((r) => j<{ ok: true }>(r)),
   resume: (id: string) => post(`/api/runs/${id}/resume`).then((r) => j<{ ok: true }>(r)),
@@ -55,7 +58,7 @@ export const api = {
   files: (id: string) => fetch(`/api/runs/${id}/files`).then((r) => j<ChangedFile[]>(r)),
   diff: (id: string, file: string) => fetch(`/api/runs/${id}/diff?file=${encodeURIComponent(file)}`).then((r) => r.text()),
   workspaces: () => fetch("/api/workspaces").then((r) => j<{ recent: string[]; home: string }>(r)),
-  checkWorkspace: (p: string) => fetch(`/api/workspaces/check?path=${encodeURIComponent(p)}`).then((r) => j<{ path: string; exists: boolean; git: boolean; files: string[] }>(r)),
+  checkWorkspace: (p: string) => fetch(`/api/workspaces/check?path=${encodeURIComponent(p)}`).then((r) => j<{ path: string; exists: boolean; git: boolean; files: string[]; suggestions?: { domain: string; reason: string }[] }>(r)),
   trials: (k = 3) => fetch(`/api/trials?k=${k}`).then((r) => j<TrialSet[]>(r)),
   repeat: (id: string, k: number) => post(`/api/runs/${id}/repeat?k=${k}`).then((r) => j<{ ok: true; k: number }>(r)),
   audit: () => fetch("/api/audit").then((r) => j<LessonAudit[]>(r)),

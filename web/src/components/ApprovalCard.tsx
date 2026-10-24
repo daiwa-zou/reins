@@ -17,6 +17,10 @@ const CONSEQUENCE: Record<ApprovalRequest["kind"], { approve: string; reject: st
     approve: "Approve: the run continues to the next phase.",
     reject: "Reject: the run stops here; what was built so far stays in the workspace.",
   },
+  lesson: {
+    approve: "Adopt: the lesson, with your edits, is written to your lesson library with the standing you picked.",
+    reject: "Drop: the draft is discarded and nothing is written to your library.",
+  },
 };
 
 /**

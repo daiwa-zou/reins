@@ -4,6 +4,10 @@ date: 2026-10-13
 url: https://www.anthropic.com/engineering/redesigning-source-control
 tags: source-control, infra, coding-agents, multi-agent
 takeaway: Git's decentralized, offline-first design broke when tens of thousands of merges a day came from always-online agents and jobs. The replacement, Scion, makes the server do the work, with server-side lock-free changesets, content-addressed immutable data, tiered caches and optional sparse working copies. For harness builders: assume agents are always-online API clients, make writes cheap, and move human review to intent-level.
+source: post
+standing: bundled
+components: gitCommits
+foundations: reviewIntent
 ---
 
 ## Learnings

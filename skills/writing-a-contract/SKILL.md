@@ -1,6 +1,7 @@
 ---
 name: writing-a-contract
 description: How to write a definition of done the evaluator can actually verify: concrete criteria, exact verification steps, one failure path, hard vs soft. Use in the contract stage.
+lessons: harness-design-long-running-apps
 ---
 
 # Writing a contract

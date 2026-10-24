@@ -8,6 +8,7 @@ import { Orchestrator, type OrchestratorControl } from "./orchestrator.js";
 import { listRunIds, loadConfig, readEvents, saveConfig, summarize, deleteRun as deleteRunDir } from "../store/runStore.js";
 import { startReplay } from "./replay.js";
 import { execFileSync } from "node:child_process";
+import { resolveRunInput } from "../presets.js";
 
 /** Events that change a run's summary row (phase, round, cost), so the run list is pushed again. */
 const SUMMARY_EVENTS = new Set<RunEvent["type"]>(["phase.started", "phase.finished", "turn.finished", "run.summary"]);
@@ -137,7 +138,8 @@ export class RunManager extends EventEmitter {
   }
 
   createRun(input: Partial<RunConfig> & { task: string; workspace: string }): RunConfig {
-    const config = defaultRunConfig({ ...input, id: nanoid(10) });
+    // Presets compose here (profile + domains), and the stage lessons are resolved and recorded on the config.
+    const config = defaultRunConfig({ ...(input.engine === "replay" ? input : resolveRunInput(input)), id: nanoid(10) });
     saveConfig(config);
     const run = this.attach(config);
     run.bus.emitEvent({ type: "run.created", config });

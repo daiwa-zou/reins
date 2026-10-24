@@ -1,4 +1,5 @@
 import type { ContractCriterion, RunConfig } from "../../../shared/types.js";
+import { phaseOfLabel, renderStageBlock } from "../../../shared/implications.js";
 
 // System prompts sit at the "right altitude": specific enough to steer, not a
 // pile of if-else rules. Each role gets only the sections it needs, and the
@@ -55,6 +56,21 @@ const CONTRACT_EVALUATOR = `${COMMON}
 Role: Evaluator (contract stage)
 Review the builder's proposed contract in .reins/contract.proposed.json against .reins/spec.md. You are the one who will have to verify these later, so insist on criteria that are concrete, independently checkable and cover failure paths. Remove or rewrite vague ones ("works correctly"), add missing ones, tighten verification steps. Then call review_contract with the final list.`;
 
+const LIBRARIAN = `You are the librarian inside Reins, an agent harness. You turn one source (a post, article, paper, postmortem or note) into a lesson for the harness's lesson library. You do not change any code.
+
+How to distil
+- Read the whole source first. Learnings are dense bullets that keep the source's own numbers, names and examples; do not add facts the source does not contain.
+- Implications are what the source means for an agent harness. Each one targets exactly one thing: a component, a stage (plan, contract, build, evaluate, wrapup), a skill or a foundation, or is a gap (an idea the harness does not implement). Split a compound idea into one implication per target.
+- Every implication cites evidence: a quote copied verbatim from the source, a phrase or a sentence, never paraphrased. If you cannot quote it, drop the implication.
+- A stage implication is a single sentence an agent in that stage should read; write it as an instruction.
+- Tag an implication with domains (web, cli, golang, python, ...) only when it applies only there.
+- End by calling propose_lesson. If it reports problems, fix exactly those and call it again.`;
+
+/** The librarian's system prompt (lesson intake jobs). */
+export function librarianPrompt(): string {
+  return LIBRARIAN;
+}
+
 export function systemPromptFor(role: "planner" | "builder" | "evaluator" | "contract_builder" | "contract_evaluator", config: RunConfig): string {
   const base = { planner: PLANNER, builder: BUILDER, evaluator: EVALUATOR, contract_builder: CONTRACT_BUILDER, contract_evaluator: CONTRACT_EVALUATOR }[role];
   const extras: string[] = [];
@@ -72,6 +88,13 @@ export function systemPromptFor(role: "planner" | "builder" | "evaluator" | "con
 export function firstMessage(phase: string, config: RunConfig, extra: Record<string, string> = {}): string {
   const lines = [`# Task\n${config.task}`, `# Workspace\n${config.workspace}`];
   for (const [k, v] of Object.entries(extra)) lines.push(`# ${k}\n${v}`);
+  // "Lessons for this stage": trusted stage implications resolved at run creation (shared/implications.ts), capped at 8.
+  // Shared by both engines, so the stageLessons switch is honoured on each.
+  const stage = phaseOfLabel(phase);
+  if (stage && config.components.stageLessons !== false) {
+    const block = renderStageBlock(config.stageLessons?.[stage]);
+    if (block) lines.push(`# Lessons for this stage\n${block}`);
+  }
   lines.push(`# Phase\n${phase}`);
   return lines.join("\n\n");
 }

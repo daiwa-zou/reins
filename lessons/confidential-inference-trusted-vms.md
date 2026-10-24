@@ -4,6 +4,10 @@ date: 2025-06-18
 url: https://www.anthropic.com/engineering/confidential-inference-trusted-vms
 tags: safety, infra, sandboxing
 takeaway: Confidential inference shrinks the trusted computing base to a small, signed, hypervisor-isolated loader that alone decrypts data and weights, while the rest of the inference stack is treated as untrusted and free to change. A keyserver releases keys only after hardware attestation. The same design applies to harnesses: a minimal reviewed trusted core guarantees safety no matter what the rest of the system does.
+source: post
+standing: bundled
+components: osSandbox
+foundations: secretsOutside
 ---
 
 ## Learnings

@@ -7,6 +7,8 @@ takeaway: A tool is a contract between a deterministic system and a non-determin
 domains: cli
 enables: selfVerification
 guidance: Make errors actionable: on bad input, say what was expected and give an example, on stderr with a non-zero exit code.
+source: post
+standing: bundled
 ---
 
 ## Learnings
@@ -29,11 +31,23 @@ guidance: Make errors actionable: on bad input, say what was expected and give a
 - Effective tools are intentionally and clearly defined, judicious with context, composable across workflows, and enable intuitive real-world solutions. Keep an evaluation-driven process as MCP and models evolve.
 
 ## Harness implications
-- Ship an eval harness alongside the tool registry: task files with verifiable outcomes, a `while`-loop runner, and metrics (accuracy, calls, tokens, latency, errors) plus held-out sets; make transcript review and "paste transcripts to the agent to refactor tools" a built-in workflow.
-- Cap tool-result size (about 25K tokens default) with truncation messages that teach the agent a better strategy, and offer pagination, range and filter params on every potentially large tool.
-- Give large-result tools a `response_format` (concise/detailed) and default to concise; surface semantic names instead of raw IDs in results, with IDs available on request.
-- Enforce namespacing (`service_resource_action`) and a registry lint that flags overlapping tools, vague descriptions, ambiguous parameter names, and placeholder descriptions.
-- Make tool errors first-class, actionable messages (expected format, example input), and show them distinctly in the UI so users can spot description problems.
-- Surface tool annotations (read-only / destructive / open-world) in the UI and use them for permission gating.
-- Record per-tool call counts and error rates in the session and expose a "tool health" view to drive consolidation decisions.
-- Prefer consolidated workflow tools over thin endpoint wrappers when designing the harness's own built-ins (search over list, context bundles over N lookups).
+- [foundation:toolHygiene] Cap tool results, and when truncating say how to narrow the request.
+  > Claude Code caps tool responses at 25,000 tokens by default
+- [component:toolExamples] Tool descriptions and example inputs are one of the most effective levers on tool use.
+  > Principle 5, prompt-engineer descriptions and specs, one of the most effective levers
+- [component:toolSearch] More tools is not better: keep the loaded tool set small and find the rest on demand.
+  > more tools is not better, and do not just wrap existing endpoints
+- [stage:build] Give commands that can print a lot pagination, filtering or truncation with sensible defaults.
+  > use pagination, range selection, filtering, and truncation with sensible defaults
+- [stage:build] Return meaningful names rather than raw IDs from the tools and commands you build.
+  > prefer `name`, `image_url`, `file_type` over `uuid`, `256px_image_url`, `mime_type`
+- [stage:contract] Give each criterion a verifiable outcome that does not fail on formatting or punctuation.
+  > Each task needs a verifiable outcome (exact-match or LLM judge), avoiding verifiers that fail on formatting or punctuation.
+- [stage:evaluate] Exercise the tool or command on realistic tasks and data, not a toy sandbox.
+  > generate many tasks grounded in real use with realistic data
+- [gap] Ship a tool eval workflow: run tasks, collect transcripts, and paste them back to the agent to refactor the tools.
+  > concatenate transcripts and paste them into Claude Code to analyze and refactor tools
+- [gap] Lint the tool registry for namespacing and overlapping tools.
+  > prefix by service (`asana_search`, `jira_search`)
+- [gap] Show tool annotations (read-only, destructive, open-world) in the UI and use them for permission gating.
+  > Use MCP tool annotations to disclose open-world access or destructive effects.

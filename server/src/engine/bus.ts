@@ -10,19 +10,25 @@ export type Payload = DistributiveOmit<RunEvent, "seq" | "ts" | "runId">;
  * fans out to WebSocket subscribers. Persist-before-publish so a reconnecting
  * client can always catch up from the log.
  */
+/** Where a bus persists its log. Runs use $REINS_HOME/runs/<id>/events.jsonl; intake jobs bring their own. */
+export interface EventStore {
+  append(ev: RunEvent): void;
+  read(): RunEvent[];
+}
+
 export class RunBus extends EventEmitter {
   private seq: number;
-  constructor(public readonly runId: string, persist = true) {
+  private store: EventStore | null;
+  constructor(public readonly runId: string, persist = true, store?: EventStore) {
     super();
-    this.persist = persist;
-    const existing = persist ? readEvents(runId) : [];
+    this.store = store ?? (persist ? { append: appendEvent, read: () => readEvents(runId) } : null);
+    const existing = this.store ? this.store.read() : [];
     this.seq = existing.length ? existing[existing.length - 1].seq + 1 : 0;
   }
-  private persist: boolean;
 
   emitEvent(payload: Payload): RunEvent {
     const ev = { ...payload, seq: this.seq++, ts: new Date().toISOString(), runId: this.runId } as RunEvent;
-    if (this.persist) appendEvent(ev);
+    if (this.store) this.store.append(ev);
     this.emit("event", ev);
     return ev;
   }

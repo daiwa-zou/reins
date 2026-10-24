@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { danglingCatalogueSlugs, parseLesson } from "../../shared/lessons.js";
+import { parseLesson } from "../../shared/lessons.js";
+import { catalogueProblems } from "../../shared/implications.js";
 import { getLesson, LESSONS_DIR, loadLessonLibrary } from "./lessons.js";
 
 const GOOD = `---
@@ -18,7 +19,8 @@ takeaway: Short takeaway. Second sentence.
 - Second learning.
 
 ## Harness implications
-- Do the thing.
+- [component:thinkTool] Do the thing.
+  > First learning.
 `;
 
 const errors = (raw: string, slug = "x") => parseLesson(slug, raw).problems.filter((p) => p.level === "error").map((p) => p.message);
@@ -70,7 +72,7 @@ describe("parseLesson", () => {
   });
 
   it("reports empty Learnings and Harness implications sections", () => {
-    const e = errors(GOOD.replace("- First learning.\n- Second learning.\n", "").replace("- Do the thing.\n", ""));
+    const e = errors(GOOD.replace("- First learning.\n- Second learning.\n", "").replace("- [component:thinkTool] Do the thing.\n  > First learning.\n", ""));
     expect(e.join(" ")).toMatch(/Learnings/);
     expect(e.join(" ")).toMatch(/Harness implications/);
   });
@@ -85,15 +87,19 @@ describe("lesson library", () => {
       slugs.push(slug);
       for (const p of parseLesson(slug, fs.readFileSync(path.join(LESSONS_DIR, f), "utf8")).problems) errs.push(`${f} [${p.level}]: ${p.message}`);
     }
-    expect(errs).toEqual([]);
-    expect(danglingCatalogueSlugs(slugs)).toEqual([]);
+    // Untyped bullets are valid (kind gap) but warned about; errors are not allowed anywhere.
+    expect(errs.filter((e) => e.includes("[error]"))).toEqual([]);
+    // The five worked examples are fully typed, with every quote found in their Learnings.
+    const worked = ["claude-code-best-practices", "demystifying-evals-for-ai-agents", "writing-tools-for-agents", "harness-design-long-running-apps", "effective-harnesses-for-long-running-agents"];
+    expect(errs.filter((e) => worked.some((w) => e.startsWith(`${w}.md`)))).toEqual([]);
+    expect(catalogueProblems(loadLessonLibrary().lessons)).toEqual([]);
     expect(slugs.length).toBeGreaterThanOrEqual(30);
   });
 
-  it("reports dangling catalogue slugs", () => {
-    const d = danglingCatalogueSlugs(["claude-think-tool"]);
+  it("flags a component no implication targets", () => {
+    const d = catalogueProblems([]);
     expect(d.length).toBeGreaterThan(0);
-    expect(d[0]).toMatchObject({ file: "catalogue", level: "error" });
+    expect(d[0]).toMatchObject({ file: "catalogue", level: "warn" });
   });
 });
 

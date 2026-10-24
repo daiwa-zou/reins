@@ -4,6 +4,10 @@ date: 2024-12-19
 url: https://www.anthropic.com/engineering/building-effective-agents
 tags: harness, tools, multi-agent, reliability
 takeaway: The most successful agent systems use simple, composable patterns rather than heavy frameworks. Start with the simplest thing that works, move to workflows (chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer) only when evals show gains, and reserve open-ended agents for problems where steps are unpredictable. Invest as much in tool design and transparency as in prompts, because the agent-computer interface decides success.
+source: post
+standing: bundled
+components: contracts, evaluator
+foundations: ownedLoop
 ---
 
 ## Learnings

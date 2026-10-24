@@ -4,6 +4,10 @@ date: 2025-09-17
 url: https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues
 tags: postmortem, evals, infra, reliability
 takeaway: Three overlapping infrastructure bugs degraded output quality for weeks because benchmarks, canaries and spot checks were too noisy to see them, and the model's habit of recovering from isolated mistakes masked the damage. A harness needs continuous production quality checks, signals segmented by platform and routing target, and enough trace metadata to join user reports to the exact deployment that caused them.
+source: postmortem
+standing: bundled
+components: narration
+foundations: effectiveConfig
 ---
 
 ## Learnings

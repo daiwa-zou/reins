@@ -4,6 +4,10 @@ date: 2025-09-29
 url: https://www.anthropic.com/engineering/enabling-claude-code-to-work-more-autonomously
 tags: coding-agents, harness, long-running, reliability
 takeaway: Autonomy needs safety nets and deterministic hooks, not just a better model. Checkpoints that snapshot code before every edit make users willing to delegate large refactors, hooks give guarantees at lifecycle points that advisory instructions cannot, and subagents plus background tasks let work proceed in parallel. Build one UI-agnostic engine and expose it across terminal, IDE and SDK surfaces.
+source: post
+standing: bundled
+components: scouts
+foundations: eventLog
 ---
 
 ## Learnings

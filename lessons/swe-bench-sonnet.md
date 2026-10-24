@@ -4,6 +4,10 @@ date: 2025-01-06
 url: https://www.anthropic.com/engineering/swe-bench-sonnet
 tags: evals, tools, coding-agents, harness
 takeaway: The SWE-bench Verified result came from a deliberately minimal scaffold, just a prompt, a Bash tool and a string-replacement Edit tool, with the model in control of sequencing. Most of the effort went into tool descriptions and error-proofing, such as requiring absolute paths. Benchmarks measure model plus scaffold together, and grading noise and hidden tests mean successful-looking runs need independent verification.
+source: post
+standing: bundled
+components: toolExamples
+foundations: toolHygiene
 ---
 
 ## Learnings

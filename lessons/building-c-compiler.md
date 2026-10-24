@@ -4,6 +4,10 @@ date: 2026-02-05
 url: https://www.anthropic.com/engineering/building-c-compiler
 tags: multi-agent, long-running, coding-agents, harness
 takeaway: Sixteen Claude agents built a roughly 100,000-line Rust C compiler with no orchestrator, coordinated only through git lock files and a never-ending session loop. The harness did the heavy lifting: near-perfect tests, terse grep-friendly output, fast sampled test modes, oracle-based task decomposition and specialist roles. Passing autonomous tests is not the same as done, so human verification still matters.
+source: post
+standing: bundled
+components: taskBudget
+foundations: fileHandoff, toolHygiene
 ---
 
 ## Learnings

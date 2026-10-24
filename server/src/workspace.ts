@@ -102,3 +102,41 @@ export function ensureReinsIgnored(workspace: string) {
   const cur = fs.existsSync(excl) ? fs.readFileSync(excl, "utf8") : "";
   if (!cur.split("\n").includes(".reins/")) fs.appendFileSync(excl, (cur.endsWith("\n") || cur === "" ? "" : "\n") + ".reins/\n");
 }
+
+/**
+ * Domain presets this workspace looks like, each with the reason:
+ * go.mod -> golang; package.json with vite/next/react -> web; a cmd/ directory
+ * or a package.json bin field -> cli; pyproject.toml -> python.
+ */
+export function suggestDomains(dir: string): { domain: string; reason: string }[] {
+  const out: { domain: string; reason: string }[] = [];
+  const has = (f: string) => {
+    try {
+      return fs.existsSync(path.join(dir, f));
+    } catch {
+      return false;
+    }
+  };
+  if (has("go.mod")) out.push({ domain: "golang", reason: "go.mod found" });
+  let pkg: any = null;
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+  } catch {
+    /* none or unreadable */
+  }
+  if (pkg) {
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    const web = ["vite", "next", "react"].filter((d) => d in deps);
+    if (web.length) out.push({ domain: "web", reason: `package.json depends on ${web.join(", ")}` });
+  }
+  let isDir = false;
+  try {
+    isDir = fs.statSync(path.join(dir, "cmd")).isDirectory();
+  } catch {
+    /* no cmd/ */
+  }
+  if (isDir) out.push({ domain: "cli", reason: "cmd/ directory found" });
+  else if (pkg?.bin) out.push({ domain: "cli", reason: "package.json has a bin field" });
+  if (has("pyproject.toml")) out.push({ domain: "python", reason: "pyproject.toml found" });
+  return out;
+}

@@ -1,12 +1,12 @@
 // Pure helpers over RunConfig: the config checker, built-in presets, applying a
 // preset, the diff from defaults and validation of user presets. No I/O, so the
 // server, the web UI and vitest all use exactly the same rules.
-import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, Preset, PresetConfig, RoleId, RunConfig } from "./types.js";
+import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, Preset, PresetConfig, RoleId, RunRoleId, RunConfig } from "./types.js";
 import { cleanGuidance, COMPONENTS, COMPONENT_IDS, defaultRunConfig } from "./components.js";
 
 export const ENGINE_LABEL: Record<EngineId | "replay", string> = { anthropic: "Direct API", "claude-code": "Claude Code", replay: "Replay" };
 
-const ROLE_IDS: RoleId[] = ["planner", "builder", "evaluator", "classifier", "scout"];
+const ROLE_IDS: RunRoleId[] = ["planner", "builder", "evaluator", "classifier", "scout"];
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 const MODES: GuardrailMode[] = ["ask", "auto", "trust"];
 const PAUSE_KEYS = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation"] as const;
@@ -94,15 +94,19 @@ const allOff = (keep: ComponentId[]) => Object.fromEntries(COMPONENT_IDS.map((id
 const DIRECT_ONLY = COMPONENTS.filter((c) => !c.engines.includes("claude-code")).map((c) => c.id);
 
 export const BUILT_IN_PRESETS: Preset[] = [
-  { name: "Full", builtIn: true, description: "Today's defaults: every default-on component, the contract pause and the auto guardrail.", config: fullConfig() },
+  { name: "Full", id: "full", layer: "profile", builtIn: true, description: "Today's defaults: every default-on component, the contract pause and the auto guardrail.", config: fullConfig() },
   {
     name: "Minimal",
+    id: "minimal",
+    layer: "profile",
     builtIn: true,
     description: "Start simple: the builder alone, with narration and the guardrails. No planner, contract or evaluator.",
     config: { ...fullConfig(), components: allOff(["narration", "actionClassifier", "osSandbox"]), pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false }, maxFixRounds: 0 },
   },
   {
     name: "Careful",
+    id: "careful",
+    layer: "profile",
     builtIn: true,
     description: "Full, but every pause is on and the guardrail asks you before anything that is not read-only (so the action classifier, used only in auto mode, is off).",
     config: {

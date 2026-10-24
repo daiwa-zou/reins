@@ -84,7 +84,7 @@ export class AgentLoop {
   }
 
   private settings() {
-    return this.config.roles[this.opts.role];
+    return this.config.roles[this.opts.role as "planner"] ?? this.config.roles.planner;
   }
 
   private toolSchemas(): Anthropic.Beta.BetaToolUnion[] {

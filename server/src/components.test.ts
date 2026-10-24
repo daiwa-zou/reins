@@ -9,8 +9,8 @@ const DIRECT_ONLY = ["toolSearch", "toolExamples", "compaction", "contextEditing
 const BOTH = ["thinkTool", "skills", "actionClassifier", "osSandbox", "planner", "contracts", "evaluator", "featureList", "progressFile", "projectMemory", "gitCommits", "selfVerification", "resetWithHandoff"];
 
 describe("component catalogue", () => {
-  it("has 20 components, each with whenOff and a non-empty engines subset", () => {
-    expect(COMPONENTS).toHaveLength(20);
+  it("has 21 components, each with whenOff and a non-empty engines subset", () => {
+    expect(COMPONENTS).toHaveLength(21);
     for (const c of COMPONENTS) {
       expect(c.whenOff.trim().length, c.id).toBeGreaterThan(10);
       expect(c.engines.length, c.id).toBeGreaterThan(0);

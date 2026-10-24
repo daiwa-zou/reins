@@ -27,7 +27,7 @@ export function Transcript({ model }: { model: RunModel }) {
   const scrubSeq = useStore((s) => s.scrubSeq);
   const setScrub = useStore((s) => s.setScrub);
   const [on, setOn] = useState<Record<string, boolean>>({ tools: true, text: true, guard: true, context: false, flow: true, artifacts: true, notes: true });
-  const [roles, setRoles] = useState<Record<RoleId, boolean>>({ planner: true, builder: true, evaluator: true, classifier: true, scout: true });
+  const [roles, setRoles] = useState<Record<RoleId, boolean>>({ planner: true, builder: true, evaluator: true, classifier: true, scout: true, librarian: true });
   const [q, setQ] = useState("");
 
   const allowed = useMemo(() => new Set(GROUPS.filter((g) => on[g.id]).flatMap((g) => g.types)), [on]);

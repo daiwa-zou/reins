@@ -1,5 +1,7 @@
 // npm run lessons:check — lint the bundled library and $REINS_HOME/lessons.
-// Exits 1 if any error is found; warnings are printed but do not fail.
+// Exits 1 if any error is found (an unknown implication target is one);
+// warnings (untyped bullets, missing quotes, untargeted components) do not fail.
+// Point it at another library with REINS_HOME=<dir> (reads <dir>/lessons).
 import { loadLessonLibrary } from "../src/lessons.js";
 
 const lib = loadLessonLibrary();

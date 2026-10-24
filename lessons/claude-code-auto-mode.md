@@ -4,6 +4,10 @@ date: 2026-03-25
 url: https://www.anthropic.com/engineering/claude-code-auto-mode
 tags: safety, coding-agents, harness, evals
 takeaway: Auto mode replaces approval prompts, which users accept 93% of the time, with model classifiers: a prompt-injection probe on tool outputs and a two-stage transcript classifier that sees only user messages and tool calls. It cuts false positives to 0.4% but still misses 17% of real overeager actions, so it is a middle layer between skip-permissions and careful review, to be reported honestly and not used for high-stakes infrastructure.
+source: post
+standing: bundled
+components: actionClassifier
+foundations: untrustedOutput
 ---
 
 ## Learnings

@@ -4,6 +4,9 @@ date: 2026-01-21
 url: https://www.anthropic.com/engineering/AI-resistant-technical-evaluations
 tags: evals, harness, long-running
 takeaway: A take-home test built to rank engineers was saturated by successive Claude models, and the fix that worked was a novel, tightly constrained puzzle with a crisp objective score rather than a realistic task. For harness builders, the same lessons apply to agent benchmarks: results scale with compute and harness quality, models stall until given targets, and evals overlapping well-documented material saturate fast.
+source: post
+standing: bundled
+foundations: effectiveConfig
 ---
 
 ## Learnings

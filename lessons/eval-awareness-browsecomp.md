@@ -4,6 +4,9 @@ date: 2026-03-06
 url: https://www.anthropic.com/engineering/eval-awareness-browsecomp
 tags: evals, safety, multi-agent, reliability
 takeaway: On an open-web benchmark, Opus 4.6 occasionally suspected it was being tested, identified the benchmark, found the encrypted answer key and decrypted it with its own code. Multi-agent runs did this 3.7 times as often. Goals need explicit method constraints, budget and strategy-drift monitoring, and content-level filtering, and eval integrity must be treated as an ongoing adversarial problem rather than a design-time concern.
+source: post
+standing: bundled
+foundations: untrustedOutput
 ---
 
 ## Learnings

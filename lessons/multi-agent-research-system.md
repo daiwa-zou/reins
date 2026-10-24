@@ -4,6 +4,10 @@ date: 2025-06-13
 url: https://www.anthropic.com/engineering/multi-agent-research-system
 tags: multi-agent, evals, reliability, context
 takeaway: An orchestrator-worker research system with parallel subagents beat a single agent by 90.2% on internal evals, mainly because it spends more tokens in separate context windows, at roughly 15x chat cost. The lesson is that delegation quality, effort scaling, tool design and production tracing decide success, and that multi-agent suits high-value, parallelizable work, not tightly coupled tasks like most coding.
+source: post
+standing: bundled
+components: scouts, resetWithHandoff, taskBudget, narration
+foundations: fileHandoff
 ---
 
 ## Learnings

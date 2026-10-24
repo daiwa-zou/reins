@@ -4,6 +4,9 @@ date: 2025-06-26
 url: https://www.anthropic.com/engineering/desktop-extensions
 tags: mcp, tools, infra, safety
 takeaway: Desktop Extensions turn local MCP servers into single-file bundles with a declarative manifest, bundled runtimes and host-collected configuration, replacing manual config editing and dependency management. Sensitive settings live in the OS keychain, capabilities are declared up front, and enterprises get allow and block controls. Packaging integrations with a manifest is what makes them installable by non-technical users.
+source: post
+standing: bundled
+foundations: declarativeConfig
 ---
 
 ## Learnings

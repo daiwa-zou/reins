@@ -7,7 +7,7 @@ import { parseLesson } from "../../shared/lessons.js";
 import { systemPromptFor } from "./roles/prompts.js";
 
 const preset = (name: string) => BUILT_IN_PRESETS.find((p) => p.name === name)!;
-const lesson = (slug: string, date: string, extra: Partial<Lesson>): Lesson => ({ slug, title: slug, date, url: "", takeaway: "t", learnings: ["l"], implications: ["i"], components: [], foundations: [], tags: [], source: "user", ...extra });
+const lesson = (slug: string, date: string, extra: Partial<Lesson>): Lesson => ({ slug, title: slug, date, url: "", takeaway: "t", learnings: ["l"], implications: ["i"], components: [], foundations: [], tags: [], source: "user", items: [], standing: "reviewed", ...extra });
 
 describe("presetCompatibility", () => {
   it("Full and Careful need Direct API and name direct-only components", () => {
@@ -56,7 +56,8 @@ guidance: Start the dev server with a timeout.
 ## Learnings
 - a
 ## Harness implications
-- b
+- [stage:build] b
+  > a
 `;
 const withMeta = (meta: string) => good.replace(/domains:[\s\S]*?guidance:.*\n/, meta + "\n");
 

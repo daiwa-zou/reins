@@ -7,6 +7,8 @@ takeaway: Everything in effective agentic coding follows from one constraint: th
 domains: web, cli
 enables: selfVerification, evaluator
 guidance: Give yourself a check you can run (tests, build exit code, linter) and show its output as evidence instead of asserting it passed.
+source: post
+standing: bundled
 ---
 
 ## Learnings
@@ -34,11 +36,35 @@ guidance: Give yourself a check you can run (tests, build exit code, linter) and
 - The agent's own check is not the last word: after it passes, the human runs `/verify` against the running app, and the bundled `/code-review` skill reviews the current diff for bugs in a fresh subagent before the work counts as done. In non-interactive `claude -p` auto-mode runs, repeated classifier blocks do not stop the run; auto mode falls back (documented thresholds), which differs from the terminate-on-escalation behaviour described in the auto mode post.
 
 ## Harness implications
-- Make context the primary budget: a persistent context meter in the UI, cheap `/clear`-like reset per workstream, side-channel questions that never enter history, and compaction with user-supplied preservation rules.
-- Build a verification ladder into the harness: in-prompt checks, a goal condition evaluated every turn by a separate evaluator, deterministic stop hooks with a block cap, and a fresh-context reviewer subagent; require evidence artifacts to be shown, not asserted.
-- Separate read-only plan mode from execution; let the user edit the plan before approval; keep the plan as a durable artifact that can be re-entered after a reset.
-- Layered instruction system: a small always-loaded project file, on-demand skills, deterministic hooks for must-always-happen actions, and lint-style tooling that proposes pruning when the always-loaded file bloats.
-- Permissions as allowlists plus sandbox plus a classifier-based auto mode, with manual mode available; surface why something was blocked.
-- Checkpoint every turn (files and conversation), with restore-code, restore-conversation and summarize-from-here as first-class UI actions; persist and name sessions like branches.
-- First-class parallelism: worktree-isolated sessions, headless `-p` with JSON/stream-JSON output for fan-out scripts and CI, writer/reviewer pairing, and a batch primitive that shards work over N worktree subagents.
-- Prefer CLIs and MCP over bespoke integrations; make it easy to pipe data in and out.
+- [component:selfVerification] Give the agent a check it can run, so "looks done" is never the only stop signal.
+  > give Claude a check it can run (tests, build exit code, linter, diff-against-fixture script, screenshot vs design)
+- [stage:build] Before finishing, run the project's own check (tests, build exit code, linter) and show its output as evidence instead of asserting it passed.
+  > Demand evidence (test output, command plus result, screenshot) rather than assertions
+- [stage:build] Fix root causes; never suppress an error or weaken a check to make it pass.
+  > Address root causes and do not suppress errors.
+- [component:evaluator] A fresh-context reviewer tries to refute the result, so the worker is not its own grader.
+  > a fresh model tries to refute the result so the worker is not its own grader
+- [stage:evaluate] Review the diff against the criteria from a fresh context and report only correctness and requirement gaps, not style.
+  > An adversarial reviewer subagent sees only the diff and criteria, and must be told to report only correctness and requirement gaps or it will over-engineer.
+- [component:planner] Keep the plan as a durable artifact outside the conversation so the work can be reset and re-entered.
+  > Have Claude write the plan to a doc or GitHub issue so you can reset if the implementation is poor.
+- [stage:plan] Name the files and interfaces, say what is out of scope, and end the spec with an end-to-end verification step.
+  > Good specs name files and interfaces, state what is out of scope, and end with an end-to-end verification step.
+- [component:projectMemory] Keep the always-loaded project file short: every line must prevent a mistake.
+  > Keep CLAUDE.md short: for each line ask "would removing this cause mistakes?"
+- [component:skills] Put sometimes-relevant domain knowledge in skills that load on demand rather than in every prompt.
+  > Use skills (`.claude/skills/<name>/SKILL.md`) for sometimes-relevant domain knowledge so it loads on demand
+- [component:stageLessons] Give each stage only the few lessons that apply to it; a bloated always-loaded block gets ignored.
+  > Bloated files make Claude ignore instructions
+- [component:gitCommits] Commit real checkpoints: the session's own checkpoints only cover the agent's edits and are not a git replacement.
+  > Checkpoints snapshot files before each edit (only Claude's edits, not Bash), are saved with the conversation, and are not a git replacement.
+- [component:actionClassifier] Cut approval fatigue with a separate classifier that blocks only risky actions.
+  > Auto mode (default from v2.1.283) uses a separate classifier model that blocks only risky actions
+- [skill:verify-like-a-user] Without a runnable check the human becomes the verification loop; the verify-like-a-user skill packages one.
+  > Without one, "looks done" is the only stop signal and the human becomes the verification loop.
+- [gap] Offer restore-code, restore-conversation and summarize-from-here as first-class actions on any turn.
+  > `Esc Esc` or `/rewind` restores conversation and/or code to a checkpoint or summarizes from/up to a point
+- [gap] Add a batch primitive that shards one task over several worktree-isolated subagents.
+  > `/batch` splits across 5-30 subagents in worktrees (test on 2-3 files first)
+- [gap] Support deterministic hooks for actions that must always happen, since instructions are only advisory.
+  > Hooks are deterministic where CLAUDE.md is advisory

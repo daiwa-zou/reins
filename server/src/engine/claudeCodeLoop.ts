@@ -46,7 +46,7 @@ export class ClaudeCodeLoop {
   private mcpServer() {
     const role = this.opts.role;
     const defs = [];
-    const structured = ["propose_contract", "review_contract", "report_evaluation", "finish", "update_progress", "think", "list_lessons", "read_lesson", "read_skill", "delegate_scout"];
+    const structured = ["propose_contract", "review_contract", "report_evaluation", "finish", "update_progress", "think", "list_lessons", "read_lesson", "read_skill", "delegate_scout", "propose_lesson"];
     for (const name of structured) {
       // Terminal tools arrive in opts.terminal, not opts.tools; both must be exposed.
       if (!this.opts.tools.includes(name) && !this.opts.terminal.includes(name)) continue;
@@ -173,7 +173,7 @@ export class ClaudeCodeLoop {
 
   async run(firstUserMessage?: string): Promise<LoopResult> {
     const role = this.opts.role;
-    const s = this.config.roles[role];
+    const s = this.config.roles[role as "planner"] ?? this.config.roles.planner;
     const steer = this.control.drainSteer();
     const prompt = [firstUserMessage ?? "Continue.", ...steer.map((n) => `Operator note: ${n}`)].join("\n\n");
     for (const n of steer) this.bus.emitEvent({ type: "steer.delivered", text: n, role });
@@ -300,7 +300,7 @@ export class ClaudeCodeLoop {
         if (!this.open || this.open.id !== id) {
           this.closeTurn();
           this.turn++;
-          this.open = { id, usage: emptyUsage(), model: m?.model ?? this.config.roles[role].model, stopReason: "" };
+          this.open = { id, usage: emptyUsage(), model: m?.model ?? (this.config.roles[role as "planner"] ?? this.config.roles.planner).model, stopReason: "" };
           this.bus.emitEvent({ type: "turn.started", role, turn: this.turn });
         }
         const u = m?.usage ?? {};

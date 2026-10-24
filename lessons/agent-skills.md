@@ -4,6 +4,9 @@ date: 2025-10-16
 url: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills
 tags: skills, context, harness, safety
 takeaway: Skills package domain expertise as folders with a SKILL.md, loaded by progressive disclosure: only name and description sit in the system prompt, the body loads when relevant, and bundled files and scripts load or run only on demand. This keeps context cost bounded while capability grows, but because skills carry code and instructions, installation needs trust and audit controls.
+source: post
+standing: bundled
+components: skills
 ---
 
 ## Learnings

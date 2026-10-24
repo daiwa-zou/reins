@@ -4,6 +4,8 @@ date: 2025-11-26
 url: https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
 tags: long-running, harness, coding-agents, reliability
 takeaway: Agents working in discrete sessions have no memory of earlier ones, so the harness must carry the handoff in files and git, not in context. Use an initializer session that writes a structured feature list, an init script and a progress log, then have each coding session follow a fixed startup routine, do one feature, verify it end to end, and leave a clean committed state.
+source: post
+standing: bundled
 ---
 
 ## Learnings
@@ -27,11 +29,31 @@ takeaway: Agents working in discrete sessions have no memory of earlier ones, so
 - Future work: it is unclear whether one general-purpose coding agent or specialized agents (testing, QA, code cleanup) do better. The demo is full-stack web apps, and the lessons may generalize to scientific research or financial modeling. A related post is "Harness design for long-running application development" (Mar 24, 2026).
 
 ## Harness implications
-- Separate a one-time initialization phase (spec expansion, environment script, progress log, initial commit) from a repeatable work phase; the harness should run them as distinct prompts over the same tools.
-- Maintain a machine-readable, append-only-ish task ledger (JSON) where the agent may only change status fields; the harness should enforce that structurally (schema validation, diff checks), not just by prompt.
-- Force a fixed session preamble: cwd, git log, progress file, task ledger, environment bootstrap, smoke test. The UI should surface this "orientation" phase distinctly from feature work.
-- Enforce one unit of work per session and a clean-state exit: commit, progress note, status update. The harness can refuse to end a session (or flag it) when the tree is dirty or the progress file is unchanged.
-- Treat compaction as lossy; durable handoff lives in files and git, not in the context window. The UI should show the progress file and recent commits as first-class panels.
-- Require end-to-end verification tooling (browser automation, screenshots) before a task can be marked done, and record what verification was performed; show verification evidence in the UI. Know the blind spots of the verifier (e.g. native alert modals invisible to Puppeteer) and represent them in task metadata so humans can review those features manually.
-- Make the environment bootstrap (`init.sh`) a harness-known artifact that is run automatically, with its output logged, rather than rediscovered each session.
-- Keep the door open for role-specialized sessions (test, QA, cleanup) by making the session prompt pluggable while the harness stays constant.
+- [component:featureList] Keep a structured feature list where the agent may only flip status, never delete entries.
+  > Coding agents may only flip `passes`.
+- [component:progressFile] Each session starts with no memory of the last, so progress must live outside the context window.
+  > each new session has no memory of the previous one
+- [component:planner] An initializer session expands the prompt into a feature list before any coding session.
+  > the initializer agent in the first session expands the prompt into a feature list
+- [component:gitCommits] Commit with descriptive messages so bad changes can be reverted and working states recovered.
+  > git lets bad changes be reverted and working states recovered
+- [component:selfVerification] Agents mark features done after unit tests alone unless told to verify end to end.
+  > Claude tended to mark features complete after unit tests or `curl` checks without end-to-end verification.
+- [stage:build] Start every session the same way: read git log, the progress notes and the feature list, then pick the highest-priority unfinished feature.
+  > read git logs and progress files; read the feature list and pick the highest-priority unfinished feature
+- [stage:build] Work on one feature at a time and leave a clean state: commit, progress note, status update.
+  > One feature per session was critical to curbing one-shotting.
+- [stage:build] Before marking a feature done, verify it end to end as a human user would, not only with unit tests or curl.
+  > test "as a human user would"
+- [stage:build] Run a basic end-to-end smoke test before starting new work.
+  > Before new work, the agent runs a basic end-to-end smoke test
+- [stage:plan] Write a feature list that covers every feature the prompt implies.
+  > set up an initial environment that covers every feature the prompt implies
+- [stage:wrapup] Existing progress is not completion: check the feature list before declaring the job done.
+  > a fresh agent sees existing progress and declares the whole job done.
+- [skill:verify-like-a-user] Verification tools have blind spots; record them so a human checks those features.
+  > Claude cannot see browser-native alert modals through Puppeteer MCP
+- [gap] Make the environment bootstrap script a harness-known artifact that runs automatically with its output logged.
+  > The `init.sh` written by the initializer starts the dev server
+- [gap] Allow role-specialised sessions (testing, QA, cleanup) with a pluggable session prompt.
+  > it is unclear whether one general-purpose coding agent or specialized agents (testing, QA, code cleanup) do better
