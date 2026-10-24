@@ -78,12 +78,17 @@ export function Collapsible({ summary, children, defaultOpen = false, className 
 
 export function Modal({ title, onClose, children, width = 720, dismissOnBackdrop = true }: { title: React.ReactNode; onClose: () => void; children: React.ReactNode; width?: number; dismissOnBackdrop?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers usually pass a fresh arrow function for onClose on every render;
+  // keep it in a ref so the focus effect runs once per mount, not per keystroke.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const focusables = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []).filter((el) => !el.hasAttribute("disabled"));
-    focusables()[1]?.focus() ?? focusables()[0]?.focus();
+    // Skip the Close button (first focusable) when there is anything else to focus.
+    (focusables()[1] ?? focusables()[0])?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return onClose();
+      if (e.key === "Escape") return onCloseRef.current();
       if (e.key === "Tab") {
         const els = focusables();
         if (!els.length) return;
@@ -103,7 +108,7 @@ export function Modal({ title, onClose, children, width = 720, dismissOnBackdrop
       window.removeEventListener("keydown", onKey);
       previous?.focus?.();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[6vh] px-4" style={{ background: "rgba(10,10,12,0.45)" }} onMouseDown={(e) => dismissOnBackdrop && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="card fade-in flex flex-col max-h-[88vh] w-full" style={{ maxWidth: width, boxShadow: "var(--shadow)" }} role="dialog" aria-modal aria-label={typeof title === "string" ? title : undefined}>

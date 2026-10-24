@@ -41,17 +41,27 @@ export class Orchestrator {
     private control: OrchestratorControl,
   ) {}
 
-  /** Lines every role gets in its first message: project memory and the skills index. */
+  /** Lines every role gets in its first message: project memory, the skills index, and the clock (agents are time-blind). */
   private projectContext(): Record<string, string> {
     const extra: Record<string, string> = {};
+    const elapsedMin = Math.round((Date.now() - this.startedAt) / 60000);
+    extra["Budget and time"] = `$${Math.max(0, this.config.budgetUsd - this.totalCost).toFixed(2)} of $${this.config.budgetUsd} remaining; ${elapsedMin} minutes elapsed; at most ${this.config.maxTurnsPerPhase} turns in this phase. Pace yourself and leave the workspace clean if you must stop early.`;
     if (this.config.components.projectMemory) {
       for (const f of ["CLAUDE.md", "AGENTS.md"]) {
         const body = readWorkspaceFile(this.config.workspace, f);
-        if (body) extra[`Project notes (${f})`] = body.length > 6000 ? body.slice(0, 6000) + "\n[... truncated]" : body;
+        if (body) {
+          if (body.length > 6000) this.bus.emitEvent({ type: "note", level: "warn", text: `${f} is ${body.length} characters; only the first 6000 are given to the agents. Shorter project notes work better.` });
+          extra[`Project notes (${f})`] = body.length > 6000 ? body.slice(0, 6000) + "\n[... truncated]" : body;
+        }
       }
     }
     if (this.config.components.skills) {
-      const section = skillsPromptSection(loadSkills(this.config.workspace));
+      const skills = loadSkills(this.config.workspace);
+      for (const sk of skills) {
+        if (!sk.description) this.bus.emitEvent({ type: "note", level: "warn", text: `Skill "${sk.name}" has no description, so the agents cannot tell when to use it.` });
+        else if (sk.description.length > 240) this.bus.emitEvent({ type: "note", level: "warn", text: `Skill "${sk.name}" has a ${sk.description.length}-character description; keep it to one line so the index stays cheap.` });
+      }
+      const section = skillsPromptSection(skills);
       if (section) extra.Skills = section.replace(/^# Skills\n/, "");
     }
     return extra;
@@ -216,7 +226,8 @@ export class Orchestrator {
     let lastEval: { results: CriterionResult[]; verdict: "pass" | "fail"; summary: string } | null = null;
     for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
       const stop = await this.phase("build", round, async () => {
-        const extra: Record<string, string> = { ...(this.builderHistory ? {} : this.projectContext()), Contract: renderContract(this.contract) };
+        const ctx = this.projectContext();
+        const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : ctx), Contract: renderContract(this.contract) };
         if (lastEval) extra["Evaluation of the previous round"] = `${lastEval.summary}\n\n${lastEval.results.filter((r) => !r.pass).map((r) => `- ${r.id} FAILED: ${r.evidence}`).join("\n")}\n\nFix the failures, re-run the verification steps, update progress, then call finish.`;
         else extra.Instructions = "Follow the session preamble, then implement the features. Call finish only when every hard criterion's verification step has been run and passed.";
         if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";

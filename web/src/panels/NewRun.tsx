@@ -288,7 +288,10 @@ export function NewRun() {
             <label className="flex items-center gap-2 text-[12.5px]">
               <input type="checkbox" checked={cfg.guardrail.allowNetwork} onChange={(e) => set({ guardrail: { ...cfg.guardrail, allowNetwork: e.target.checked } })} /> Allow network (package installs, fetches) without asking
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Allow without asking (narrow regex, one per line)" hint="blanket interpreters like ^python are ignored">
+                <textarea className="input mono" rows={3} value={(cfg.guardrail.allowPatterns ?? []).join("\n")} onChange={(e) => set({ guardrail: { ...cfg.guardrail, allowPatterns: e.target.value.split("\n").filter(Boolean) } })} />
+              </Field>
               <Field label="Always ask (regex, one per line)">
                 <textarea className="input mono" rows={3} value={cfg.guardrail.askPatterns.join("\n")} onChange={(e) => set({ guardrail: { ...cfg.guardrail, askPatterns: e.target.value.split("\n").filter(Boolean) } })} />
               </Field>

@@ -70,6 +70,8 @@ export interface ContextPolicy {
 export interface GuardrailPolicy {
   mode: GuardrailMode;
   allowNetwork: boolean;
+  /** Narrow shell patterns (regex source) that are allowed without asking, e.g. ^npm run lint. Blanket interpreters are ignored. */
+  allowPatterns?: string[];
   /** Extra shell patterns (regex source) that always need approval. */
   askPatterns: string[];
   /** Extra shell patterns (regex source) that are always denied. */

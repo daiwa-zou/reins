@@ -88,7 +88,15 @@ export function runShell(
 ): Promise<{ code: number | null; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const spawnSpec = sandbox && sandboxAvailable() ? sandboxArgs(command, sandbox.workspace, sandbox.allowNetwork) : { file: "/bin/zsh", args: ["-lc", command] };
-    const child = spawn(spawnSpec.file, spawnSpec.args, { cwd, env: { ...scrubbedEnv(), ...env, REINS: "1", CI: "1", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+    // Own process group: a timeout kills the whole tree, and a stray `kill` inside cannot reach the server.
+    const child = spawn(spawnSpec.file, spawnSpec.args, { cwd, env: { ...scrubbedEnv(), ...env, REINS: "1", CI: "1", GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const killTree = () => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    };
     let out = "";
     let timedOut = false;
     const cap = (chunk: Buffer) => {
@@ -98,9 +106,9 @@ export function runShell(
     child.stderr.on("data", cap);
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killTree();
     }, timeoutMs);
-    const onAbort = () => child.kill("SIGKILL");
+    const onAbort = () => killTree();
     signal.addEventListener("abort", onAbort, { once: true });
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -318,11 +326,16 @@ const readLesson = tool("read_lesson", "Read one lesson from the harness library
   return `# ${l.title}\n\n${l.learnings.map((x) => "- " + x).join("\n")}\n\n## Harness implications\n${l.implications.map((x) => "- " + x).join("\n")}`;
 }, { deferred: true, readOnly: true });
 
-const readSkill = tool("read_skill", "Read the full body of a skill from the skills index in your instructions. Skills hold procedures and checklists; read one when its description matches what you are doing.", { name: { type: "string" } }, ["name"], async (input, ctx) => {
+const readSkill = tool("read_skill", "Read a skill from the skills index in your instructions, or one of the files bundled next to it. Skills hold procedures and checklists; read one when its description matches what you are doing.", { name: { type: "string" }, file: { type: "string", description: "Optional: a file listed next to the skill (e.g. reference.md)" } }, ["name"], async (input, ctx) => {
   const s = loadSkills(ctx.workspace).find((x) => x.name === input.name);
   if (!s) throw new Error(`No skill named ${input.name}.`);
+  if (input.file) {
+    const c = confinePath(s.dir, input.file);
+    if (!c.ok || !fs.existsSync(c.abs)) throw new Error(`No file ${input.file} in skill ${s.name}.`);
+    return fs.readFileSync(c.abs, "utf8");
+  }
   const extra = fs.readdirSync(s.dir).filter((f) => f !== "SKILL.md");
-  return `# ${s.name}\n${s.body}${extra.length ? `\n\nFiles next to this skill (read with read_file if the path is inside the workspace): ${extra.join(", ")}` : ""}`;
+  return `# ${s.name}\n${s.body}${extra.length ? `\n\nFiles next to this skill (read with read_skill name + file): ${extra.join(", ")}` : ""}`;
 }, { readOnly: true });
 
 const delegateScout = tool(

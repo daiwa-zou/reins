@@ -7,6 +7,10 @@ import { addUsage, costUsd, emptyUsage, estimateTokens } from "./pricing.js";
 import { ALL_TOOLS, TOOL_SEARCH_SCHEMA, truncate, type ToolContext, type ToolDef } from "../tools/registry.js";
 import { classifyBash, mentionsOutsidePaths } from "../guardrails/policy.js";
 import { classifyAction, sniffInjection } from "../guardrails/classifier.js";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { REINS_HOME } from "../store/runStore.js";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
 
@@ -63,6 +67,7 @@ export class AgentLoop {
   private systemRoleFailed = false;
   private examplesFailed = false;
   private taskBudgetFailed = false;
+  private denials = { consecutive: 0, total: 0 };
 
   constructor(
     private client: Anthropic,
@@ -192,6 +197,15 @@ export class AgentLoop {
 
       this.deliverSteer();
       this.turn++;
+      if (this.turn === 1) {
+        // Joinable trace of what the request looked like: a prompt edit or a dropped beta shows up next to a quality change.
+        const cm = this.contextManagement();
+        this.bus.emitEvent({
+          type: "note",
+          level: "info",
+          text: `Request shape for the ${role}: model ${this.settings().model}, effort ${this.settings().effort}, system prompt ${createHash("sha256").update(this.opts.system).digest("hex").slice(0, 10)}, betas [${this.betas().join(", ")}], context edits [${(cm?.edits ?? []).map((e: any) => e.type).join(", ") || "none"}], ${this.toolSchemas().length} tools.`,
+        });
+      }
       this.bus.emitEvent({ type: "turn.started", role, turn: this.turn });
 
       let message: Anthropic.Beta.BetaMessage;
@@ -386,6 +400,7 @@ export class AgentLoop {
     const started = Date.now();
     const done = (ok: boolean, output: string) => {
       const tr = truncate(output);
+      if (tr.truncated) saveFullOutput(this.bus.runId, t.id, output);
       this.bus.emitEvent({ type: "tool.result", role, toolUseId: t.id, name: t.name, ok, output: tr.text, truncated: tr.truncated, durationMs: Date.now() - started });
       return { ok, block: { type: "tool_result", tool_use_id: t.id, content: tr.text, is_error: !ok } as Anthropic.Beta.BetaToolResultBlockParam };
     };
@@ -394,12 +409,19 @@ export class AgentLoop {
 
     // Guardrails
     const gate = await this.gate(t);
-    if (gate.verdict === "deny") return done(false, `Denied by guardrails: ${gate.rationale}`);
+    if (gate.verdict === "deny") {
+      await this.noteDenial();
+      return done(false, `Denied by guardrails: ${gate.rationale}`);
+    }
     if (gate.verdict === "ask") {
       const { approved, note } = await this.control.requestApproval("action", narration, gate.rationale, { tool: t.name, input: t.input });
       this.bus.emitEvent({ type: "guardrail.decision", role, toolUseId: t.id, tool: t.name, verdict: approved ? "allow" : "deny", source: "user", rule: "approval", rationale: note || (approved ? "Approved by you." : "Rejected by you.") });
-      if (!approved) return done(false, `The operator declined this action${note ? `: ${note}` : "."} Find another way or explain why it is needed.`);
+      if (!approved) {
+        await this.noteDenial();
+        return done(false, `The operator declined this action${note ? `: ${note}` : "."} Find another way or explain why it is needed.`);
+      }
     }
+    this.denials.consecutive = 0;
 
     const handlers = { ...this.opts.handlers, delegate_scout: (input: any) => this.scout(String(input?.question ?? "")) };
     const ctx: ToolContext = { workspace: this.config.workspace, role, allowNetwork: this.config.guardrail.allowNetwork, sandbox: this.config.components.osSandbox, signal: this.control.signal, handlers };
@@ -413,6 +435,18 @@ export class AgentLoop {
       return done(true, out);
     } catch (err) {
       return done(false, (err as Error).message);
+    }
+  }
+
+  /** Deny-and-continue, with escalation: 3 denials in a row or 20 in total pause the run for a human (auto mode lesson). */
+  private async noteDenial() {
+    this.denials.consecutive++;
+    this.denials.total++;
+    if (this.denials.consecutive === 3 || this.denials.total === 20) {
+      this.bus.emitEvent({ type: "note", level: "warn", text: `${this.denials.consecutive} denials in a row (${this.denials.total} total) for the ${this.opts.role}; pausing for you.` });
+      const { approved, note } = await this.control.requestApproval("action", "The agent keeps hitting denials. Continue?", `The ${this.opts.role} has had ${this.denials.consecutive} actions denied in a row (${this.denials.total} in this phase). Approve to let it keep trying, reject to stop the phase.`, { denials: this.denials });
+      if (!approved) throw new Error(`Stopped after repeated denials${note ? `: ${note}` : "."}`);
+      this.denials.consecutive = 0;
     }
   }
 
@@ -465,6 +499,17 @@ export class AgentLoop {
   }
 }
 
+
+/** Untruncated tool output goes to disk so the UI can show what the model did not see. */
+export function saveFullOutput(runId: string, toolUseId: string, output: string) {
+  try {
+    const dir = path.join(REINS_HOME, "runs", runId, "tool-output");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${toolUseId.replace(/[^\w.-]/g, "_")}.txt`), output);
+  } catch {
+    /* best effort */
+  }
+}
 
 /**
  * Connection test for the direct engine: one tiny request with the exact

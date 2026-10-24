@@ -355,9 +355,16 @@ export function CallRow({ call, expanded = false }: { call: ToolCall; expanded?:
           )}
           {call.result && (
             <div>
-              <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1">
+              <div className="text-[10.5px] uppercase tracking-wider faint font-semibold mb-1 flex items-center gap-2">
                 {call.result.ok ? "result" : "error"}
-                {call.result.truncated && " · truncated for the model"}
+                {call.result.truncated && (
+                  <>
+                    <span>· truncated for the model</span>
+                    <a className="underline normal-case tracking-normal" href={`/api/runs/${useStore.getState().selectedRunId}/tool-output/${call.toolUseId}`} target="_blank" rel="noreferrer">
+                      full output ↗
+                    </a>
+                  </>
+                )}
               </div>
               <Pre>{call.result.output}</Pre>
             </div>

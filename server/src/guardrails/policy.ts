@@ -18,7 +18,7 @@ const DENY: [RegExp, string][] = [
   [/\bgit\s+push\b.*(--force|-f)\b/, "force push"],
   [/:\(\)\s*\{\s*:\|:&\s*\};:/, "fork bomb"],
   [/\bchmod\s+(-R\s+)?777\s+\//, "world-writable root"],
-  [/\bshutdown\b|\breboot\b|\bkillall\b/, "system control"],
+  [/\bshutdown\b|\breboot\b|\bkillall\b|\bpkill\b|\bkill\s+-9\s+-1\b/, "system control (a stray kill once took out an agent's own harness)"],
 ];
 
 // Needs a human (or the classifier) in auto mode.
@@ -55,6 +55,15 @@ export function classifyBash(command: string, policy: GuardrailPolicy): RuleDeci
     }
   }
   if (policy.mode === "trust") return { verdict: "allow", rule: "mode:trust", rationale: "Trust mode allows everything not hard-denied." };
+  for (const src of policy.allowPatterns ?? []) {
+    // A blanket interpreter or shell as an allow rule would let anything through; ignore those (auto mode lesson).
+    if (/^\^?\(?(python3?|node|ruby|sh|bash|zsh|npm run|npx)\b/.test(src.replace(/\\b/g, "")) && !/\s\S/.test(src)) continue;
+    try {
+      if (new RegExp(src).test(command)) return { verdict: "allow", rule: "allow:custom", rationale: `Matches your allow pattern /${src}/.` };
+    } catch {
+      /* ignore bad pattern */
+    }
+  }
 
   for (const src of policy.askPatterns) {
     try {

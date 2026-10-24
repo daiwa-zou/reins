@@ -76,9 +76,15 @@ npm run record-demo  # regenerate demo/sample-run.jsonl
 npm run build && npm start   # single-process production serve
 ```
 
+## Audit
+
+`docs/audit/` holds an independent audit of the harness against each post: the post is re-fetched, the lesson file checked against it, and every learning traced to code (`path:line`), a component or a foundation, with honest statuses (implemented, partial, gap) and the smallest change that would close each gap. The Lessons tab shows the same table per lesson. The audit index is in [docs/audit/README.md](docs/audit/README.md); ten of the thirty posts are audited so far and the remaining twenty are queued.
+
 ## Status
 
 - **Claude Code engine**: exercised end to end from this checkout with the local login and no `ANTHROPIC_API_KEY` (the SDK init message reports `apiKeySource: "none"`). Usage counts against the Claude subscription; the per-turn costs are the SDK's list-price estimates. Known quirk: the SDK's Bash tool runs in your login shell, so shell aliases apply (a `cat` alias that colourises output confused the agent once; it recovered with Read).
 - **Direct API engine**: the loop is tested against a scripted stand-in for the Messages API (tool execution, parallel read-only calls, guardrail approvals and denials, operator notes as mid-conversation system messages, graceful fallback when a beta is rejected) and the orchestrator end to end over a temp git repo. It has not been run against the real API from this checkout because no key was available; every optional beta (compaction, context editing, task budgets, tool examples, refusal fallbacks) degrades to a warning instead of failing the run.
-- **Sandbox**: the Seatbelt profile is probed in the test suite (writes outside the workspace and network are denied).
+- **Sandbox**: the Seatbelt profile is probed in the test suite (writes outside the workspace and network are denied). With the Claude Code engine the SDK's own sandbox is enabled instead, with network off unless the run allows it.
+- **Classifier**: single-stage and unmeasured here; the auto mode post reports 0.4% false positives and 17% misses for Anthropic's production classifier, so treat it as a filter, not a guarantee. Rules are the pre-filter; only flagged commands reach it.
+- **CI**: `.github/workflows/ci.yml` runs type-checks, tests and the web build.
 - The recorded demo is synthetic and labelled as such in the UI.

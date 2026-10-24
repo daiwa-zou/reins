@@ -165,6 +165,11 @@ app.get("/api/runs/:id/diff", async (c) => {
     return c.text("");
   }
 });
+app.get("/api/runs/:id/tool-output/:toolUseId", (c) => {
+  const p = path.join(REINS_HOME, "runs", c.req.param("id"), "tool-output", `${c.req.param("toolUseId").replace(/[^\w.-]/g, "_")}.txt`);
+  if (!fs.existsSync(p)) return c.text("Full output was not kept for this call.", 404);
+  return c.text(fs.readFileSync(p, "utf8"));
+});
 app.get("/api/workspaces", (c) => c.json({ recent: loadSettings().recentWorkspaces ?? [], home: os.homedir() }));
 app.get("/api/workspaces/check", (c) => {
   const p = path.resolve(String(c.req.query("path") ?? "").replace(/^~/, os.homedir()));

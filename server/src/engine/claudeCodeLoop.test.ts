@@ -24,9 +24,9 @@ function harness() {
     remainingBudget: () => 10,
   };
   const loop = new ClaudeCodeLoop(config, bus, control, { role: "builder", system: "sys", tools: ["read_file", "bash", "finish"], terminal: ["finish"], handlers: {}, maxTurns: 10 });
-  const pending = new Map<string, { name: string; started: number }>();
   let finalText = "";
-  const feed = (msg: any) => (loop as any).handle(msg, pending, (t: string) => (finalText = t));
+  const feed = (msg: any) => (loop as any).handle(msg, (t: string) => (finalText = t));
+  const pending = (loop as any).pending as Map<string, unknown>;
   return { events, feed, finalText: () => finalText, pending };
 }
 
@@ -50,6 +50,8 @@ describe("ClaudeCodeLoop event mapping", () => {
         ],
       },
     });
+    // A turn closes when the next API response starts or the query ends.
+    h.feed({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.01, num_turns: 1, result: "ok" });
     const types = h.events.map((e) => e.type);
     expect(types).toEqual(["note", "turn.started", "thinking", "text", "tool.called", "turn.finished", "context.snapshot"]);
     const called = h.events.find((e) => e.type === "tool.called") as Extract<RunEvent, { type: "tool.called" }>;
@@ -92,12 +94,22 @@ describe("ClaudeCodeLoop event mapping", () => {
     expect(ev.afterTokens).toBe(20_000);
   });
 
-  it("attributes the SDK's cost delta to a turn and surfaces execution errors", () => {
+  it("groups streamed blocks of one response into one turn, prices it from usage, and surfaces execution errors", () => {
     const h = harness();
-    h.feed({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.05, num_turns: 1, result: "ok" });
+    const base = { type: "assistant", parent_tool_use_id: null, session_id: "s1", uuid: "u" };
+    // The SDK streams one message per content block; all share message.id and usage.
+    h.feed({ ...base, message: { id: "msg_1", model: "claude-opus-5-5", usage, stop_reason: null, content: [{ type: "text", text: "a" }] } });
+    h.feed({ ...base, message: { id: "msg_1", model: "claude-opus-5-5", usage, stop_reason: null, content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] } });
+    h.feed({ ...base, message: { id: "msg_2", model: "claude-opus-5-5", usage: { ...usage, output_tokens: 40 }, stop_reason: "end_turn", content: [{ type: "text", text: "b" }] } });
+    h.feed({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.05, num_turns: 2, result: "ok" });
+    const finished = h.events.filter((e): e is Extract<RunEvent, { type: "turn.finished" }> => e.type === "turn.finished");
+    expect(finished).toHaveLength(2);
+    expect(finished[0].usage.output).toBe(20);
+    expect(finished[1].usage.output).toBe(40);
+    expect(finished[0].costUsd).toBeGreaterThan(0);
+    expect(h.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
+    expect(h.events.filter((e) => e.type === "context.snapshot")).toHaveLength(2);
     h.feed({ type: "result", subtype: "error_during_execution", is_error: true, total_cost_usd: 0.08, num_turns: 2, errors: ["boom"] });
-    const costs = h.events.filter((e) => e.type === "turn.finished").map((e) => (e as Extract<RunEvent, { type: "turn.finished" }>).costUsd);
-    expect(costs).toEqual([0.05, 0.08 - 0.05]);
     expect(h.events.some((e) => e.type === "error" && e.message.includes("error_during_execution"))).toBe(true);
     // max_turns is a normal stop for a phase, not an error.
     const before = h.events.filter((e) => e.type === "error").length;
