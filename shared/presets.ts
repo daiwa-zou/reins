@@ -7,7 +7,7 @@
 // that domain, oldest first (then by slug), so a newer lesson wins a conflict.
 import type { ComponentId, EngineId, Lesson, Preset, PresetBasis, PresetCompatibility, PresetConfig } from "./types.js";
 import { cleanGuidance, COMPONENTS, GUIDANCE_MAX_LINES } from "./components.js";
-import { BUILT_IN_PRESETS, ENGINE_LABEL } from "./config.js";
+import { BUILT_IN_PRESETS, ENGINE_LABEL, sanitizePresetName } from "./config.js";
 
 export interface PresetRecipe {
   /** Lesson domain id, e.g. "web". */
@@ -136,8 +136,10 @@ export function generatedPresets(lessons: Lesson[]): Preset[] {
 
 /** Names a user preset may not take: the recipes' (and any generated preset's) names. */
 export function isGeneratedPresetName(name: string, lessons: Lesson[] = []): boolean {
-  const n = name.trim().toLowerCase();
-  return PRESET_RECIPES.some((r) => r.name.toLowerCase() === n) || generatedPresets(lessons).some((p) => p.name.toLowerCase() === n);
+  // Compare both the raw and the sanitised form, so "CLI / tool" cannot slip in as "CLI - tool".
+  const forms = (s: string) => [s.trim().toLowerCase(), sanitizePresetName(s).toLowerCase()];
+  const mine = forms(name);
+  return [...PRESET_RECIPES.map((r) => r.name), ...generatedPresets(lessons).map((p) => p.name)].some((g) => forms(g).some((f) => mine.includes(f)));
 }
 
 /** Compatibility on every engine, as served by GET /api/presets. */

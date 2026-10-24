@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Switch, Badge } from "../components/ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
@@ -48,6 +48,18 @@ export function NewRun() {
   // A preset built in Lessons ("Build a preset from these") brings its basis along.
   const prefillBasis = ((prefill as any)?.__basis as PresetBasis[] | undefined) ?? undefined;
   const [cfg, setCfgRaw] = useState<RunConfig>(base);
+  // A new prefill while the dialog is open (e.g. "Build a preset from these") replaces the config and notice.
+  const firstPrefill = useRef(true);
+  useEffect(() => {
+    if (firstPrefill.current) {
+      firstPrefill.current = false;
+      return;
+    }
+    if (!prefill) return;
+    setCfgRaw(opening.cfg);
+    setNotice(opening.notice);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
   const setCfg = (updater: RunConfig | ((c: RunConfig) => RunConfig)) =>
     setCfgRaw((c) => {
       const next = typeof updater === "function" ? updater(c) : updater;

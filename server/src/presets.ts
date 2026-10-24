@@ -82,7 +82,7 @@ export function savePreset(body: unknown): { preset: Preset; dropped: string[]; 
   const name = sanitizePresetName(b.name);
   if (!name) throw new PresetValidationError("name must contain letters or digits");
   if (isBuiltInPresetName(name)) throw new PresetValidationError(`"${name}" is a built-in preset and cannot be overwritten; pick another name`);
-  if (isGeneratedPresetName(name, listLessons())) throw new PresetValidationError(`"${name}" is a preset generated from lessons and cannot be overwritten; pick another name`);
+  if (isGeneratedPresetName(name, listLessons()) || isGeneratedPresetName(b.name, listLessons())) throw new PresetValidationError(`"${name}" is a preset generated from lessons and cannot be overwritten; pick another name`);
   if (b.lessons !== undefined && (!Array.isArray(b.lessons) || b.lessons.some((s) => typeof s !== "string"))) throw new PresetValidationError("lessons must be an array of lesson slugs");
   if (b.config === undefined) throw new PresetValidationError("config is required (an object, e.g. {\"components\":{\"planner\":false}})");
   if (b.description !== undefined && typeof b.description !== "string") throw new PresetValidationError("description must be a string");

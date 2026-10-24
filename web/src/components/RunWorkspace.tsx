@@ -26,7 +26,7 @@ export function RunWorkspace({ model, live }: { model: RunModel; live: RunModel 
   return (
     <div className="h-full flex min-w-0">
       <div className="flex-1 min-w-0 flex flex-col">
-        <RunHeader model={live} />
+        <RunHeader model={live} at={scrubSeq !== null ? model : undefined} />
         <div className="flex items-end gap-2 px-4 border-b line min-w-0">
           <div role="tablist" aria-label="Run views" className="flex items-end min-w-0 overflow-x-auto">
             {RUN_VIEWS.map((t) => (

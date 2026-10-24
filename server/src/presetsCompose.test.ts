@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Lesson, Preset } from "../../shared/types.js";
 import { defaultRunConfig } from "../../shared/components.js";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, presetFromConfig, validatePresetConfig } from "../../shared/config.js";
-import { adaptPreset, composePreset, generatedPresets, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
+import { adaptPreset, composePreset, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
 import { parseLesson } from "../../shared/lessons.js";
 import { systemPromptFor } from "./roles/prompts.js";
 
@@ -113,6 +113,12 @@ describe("composePreset", () => {
     expect(games.config.components!.scouts).toBe(false);
     expect(games.config.components!.planner).toBe(true);
     expect(all.map((p) => p.name)).toEqual(expect.arrayContaining(["Web app", "CLI / tool", "Games"]));
+  });
+  it("generated names are reserved, also after sanitising", () => {
+    expect(isGeneratedPresetName("CLI / tool")).toBe(true);
+    expect(isGeneratedPresetName("cli - tool")).toBe(true);
+    expect(isGeneratedPresetName("web app")).toBe(true);
+    expect(isGeneratedPresetName("mine")).toBe(false);
   });
   it("duplicate guidance lines appear once", () => {
     const g = "Hit the endpoint with curl.";

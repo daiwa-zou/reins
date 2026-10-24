@@ -11,7 +11,8 @@ import { useNow } from "../lib/useNow";
 import { runElapsed } from "../lib/time";
 
 /** Identity and controls of the selected run: the only place its cost and status sit in the chrome. */
-export function RunHeader({ model }: { model: RunModel }) {
+/** `at` is the scrubbed model while rewinding: the elapsed time is shown at that point, static. */
+export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
   const info = useStore((s) => s.info);
   const openModal = useStore((s) => s.openModal);
   const toastMsg = useStore((s) => s.toastMsg);
@@ -35,7 +36,8 @@ export function RunHeader({ model }: { model: RunModel }) {
       toastMsg(e.message, "error");
     });
   };
-  const elapsed = runElapsed(model, now, ticking);
+  // While scrubbing: the time at the scrub point (its last event), never ticking.
+  const elapsed = scrubbing && at ? runElapsed({ startedTs: at.startedTs, lastTs: at.lastTs }, now, false) : runElapsed(model, now, ticking);
   const est = cfg.engine === "claude-code";
 
   return (
