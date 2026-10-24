@@ -1,8 +1,8 @@
 # Lesson audit
 
-Written by an independent audit pass: each post was re-fetched, the lesson file checked against it, and every learning traced to code (`path:line`), a component or a foundation. Statuses: implemented (code or UI does it), partial (something adjacent exists), gap.
+Every learning is traced to code (`path:line`), a component or a foundation, with statuses implemented (code or UI does it), partial (something adjacent exists) and gap, plus the smallest change that would close each gap. Ten files (the first ten alphabetically, a-postmortem… through claude-code-best-practices) were written by an independent audit pass that re-fetched each post; the other twenty are a self-audit by the authoring session against the distilled lesson files and are marked as such in their header. An independent re-check of those twenty is queued.
 
-**Totals across 10 lessons:** 53 implemented · 76 partial · 25 gaps
+**Totals across 30 lessons:** 112 implemented · 148 partial · 46 gaps
 
 | Lesson | implemented | partial | gap |
 |---|---|---|---|
@@ -16,6 +16,26 @@ Written by an independent audit pass: each post was re-fetched, the lesson file 
 | [Building effective agents](building-effective-agents.md) | 9 | 6 | 0 |
 | [How we built Claude Code auto mode: a safer way to skip permissions](claude-code-auto-mode.md) | 7 | 6 | 3 |
 | [Claude Code: Best practices for agentic coding](claude-code-best-practices.md) | 6 | 15 | 0 |
+| [Claude Code on the web](claude-code-on-the-web.md) | 2 | 5 | 0 |
+| [Beyond permission prompts: making Claude Code more secure and autonomous](claude-code-sandboxing.md) | 3 | 4 | 1 |
+| [The "think" tool](claude-think-tool.md) | 3 | 3 | 1 |
+| [Code execution with MCP: Building more efficient agents](code-execution-with-mcp.md) | 2 | 4 | 1 |
+| [Confidential Inference via Trusted Virtual Machines](confidential-inference-trusted-vms.md) | 4 | 4 | 0 |
+| [Demystifying evals for AI agents](demystifying-evals-for-ai-agents.md) | 2 | 3 | 3 |
+| [Desktop Extensions: One-click MCP server installation for Claude Desktop](desktop-extensions.md) | 1 | 5 | 1 |
+| [Effective context engineering for AI agents](effective-context-engineering-for-ai-agents.md) | 5 | 3 | 0 |
+| [Effective harnesses for long-running agents](effective-harnesses-for-long-running-agents.md) | 3 | 4 | 1 |
+| [Enabling Claude Code to work more autonomously](enabling-claude-code-to-work-more-autonomously.md) | 1 | 4 | 2 |
+| [Eval awareness in Claude Opus 4.6's BrowseComp performance](eval-awareness-browsecomp.md) | 4 | 3 | 0 |
+| [Harness design for long-running application development](harness-design-long-running-apps.md) | 5 | 2 | 0 |
+| [How Anthropic teams use Claude Code](how-anthropic-teams-use-claude-code.md) | 3 | 1 | 3 |
+| [How we contain Claude across products](how-we-contain-claude.md) | 3 | 5 | 1 |
+| [Infrastructure noise in agentic coding evals](infrastructure-noise.md) | 0 | 5 | 2 |
+| [Scaling Managed Agents: Decoupling the brain from the hands](managed-agents.md) | 5 | 3 | 0 |
+| [How we built our multi-agent research system](multi-agent-research-system.md) | 4 | 4 | 0 |
+| [Redesigning source control at Anthropic](redesigning-source-control.md) | 1 | 4 | 3 |
+| [Raising the bar on SWE-bench Verified with Claude 3.5 Sonnet](swe-bench-sonnet.md) | 4 | 3 | 1 |
+| [Writing effective tools for AI agents, with agents](writing-tools-for-agents.md) | 4 | 3 | 1 |
 
 ## Open gaps
 
@@ -110,3 +130,47 @@ Written by an independent audit pass: each post was re-fetched, the lesson file 
 - **claude-code-best-practices**: Fix rounds keep the polluted history: after a failed round, start the builder from a fresh conversation with the evaluation summary as the handoff (reuse `shouldResetBuilder`) when `maxFixRounds` is reached once.
 - **claude-code-best-practices**: Tests are editable by the builder: in the contract stage, record the test files named in `verify` commands and have the evaluator fail a round when `git diff` shows them modified.
 - **claude-code-best-practices**: No interview step: add an optional "Interview me" pre-phase that uses `approval.requested` prompts to ask 3-5 questions and writes the answers into the spec.
+- **claude-code-on-the-web**: Add a domain allowlist to GuardrailPolicy and pass it to the Seatbelt profile and the SDK sandbox `network.allowedDomains`.
+- **claude-code-on-the-web**: Add an optional 'open a PR' wrap-up step (gh pr create) gated by an approval, so the deliverable is a PR plus the summary.
+- **claude-code-on-the-web**: A remote execution target (SSH or container) for the same orchestrator is out of scope today; the engine interface (`LoopOptions`/`LoopResult` in `loop.ts`) is where it would plug in.
+- **claude-code-sandboxing**: Add a domain allowlist and raise an approval on first contact with a new domain; a local proxy would be the clean implementation.
+- **claude-code-sandboxing**: Emit a dedicated `sandbox.violation` event (path or host, tool) so the Stage can show boundary events apart from permission prompts.
+- **claude-code-sandboxing**: Let the run config add writable paths for the sandbox (monorepo caches, build dirs).
+- **claude-think-tool**: Expose role prompts (and their checklists) as editable templates in the Harness tab, versioned by the prompt hash already logged in the request-shape note.
+- **claude-think-tool**: After a failed evaluation round, prepend a 'list three candidate causes before editing' instruction to the fix-round message in `orchestrator.ts:228`.
+- **code-execution-with-mcp**: Generate a `servers/<name>/<tool>.ts` style shim for MCP servers once MCP integration lands (see advanced-tool-use gaps); the registry already carries schemas.
+- **code-execution-with-mcp**: Let the builder save a skill (`.reins/skills/<slug>/SKILL.md`) via a `save_skill` tool after a fix round, and list workspace skills in the Harness tab.
+- **confidential-inference-trusted-vms**: Add `GET /api/runs/:id/export` producing the JSONL with a SHA-256 chain per line so a reviewer can verify it was not edited.
+- **confidential-inference-trusted-vms**: A 'production' guardrail mode that disables trust mode and allow patterns and shows a badge in the TopBar.
+- **demystifying-evals-for-ai-agents**: Add an `unknown` outcome to `CriterionResult` and treat it as neither pass nor fail in `orchestrator.ts:250`.
+- **demystifying-evals-for-ai-agents**: Add a 'grader wrong' flag per criterion result (stored as a `note` event) so disputed verdicts are visible in the Reliability set.
+- **demystifying-evals-for-ai-agents**: Offer 'fresh worktree per trial' in the repeat endpoint (git worktree add) for isolated trials.
+- **desktop-extensions**: List installed skills (name, source, description, files) in the Harness tab with an enable switch per run.
+- **desktop-extensions**: Once MCP servers are configurable, validate their manifests and show tools and required config before the first run.
+- **effective-context-engineering-for-ai-agents**: Add `context.preserve` (free text) to RunConfig and append it to the compaction request and the reset handoff.
+- **effective-context-engineering-for-ai-agents**: A registry lint test that flags two tools whose descriptions share most words, and parameter names like `path` vs `file`.
+- **effective-harnesses-for-long-running-agents**: Add `.reins/init.sh`: written by the planner, run by the harness at the start of every build phase with its output logged.
+- **effective-harnesses-for-long-running-agents**: Refuse `finish` while `git status` is dirty when gitCommits is on, returning the dirty list to the builder.
+- **effective-harnesses-for-long-running-agents**: A deferred `screenshot` tool (Playwright) for web contracts.
+- **enabling-claude-code-to-work-more-autonomously**: Support `.reins/hooks.json` with afterEdit and beforeFinish commands run by the orchestrator, surfaced as note events.
+- **enabling-claude-code-to-work-more-autonomously**: Keep the last 20 operator notes in localStorage and offer them with the up arrow in the steer box.
+- **eval-awareness-browsecomp**: Add `constraints: string[]` to RunConfig, rendered in every role's first message as 'Do not'.
+- **eval-awareness-browsecomp**: Warn when a run's token use passes 3x the median of its trial set.
+- **harness-design-long-running-apps**: Expose role prompts as editable, versioned text in the Harness tab so evaluator calibration is a product action.
+- **harness-design-long-running-apps**: A Playwright-backed screenshot tool for the evaluator when the contract names a URL.
+- **how-anthropic-teams-use-claude-code**: Accept image attachments on the task (stored under the run dir, passed as image blocks in the first message).
+- **how-anthropic-teams-use-claude-code**: A `reins run` CLI over the same RunManager that streams events as JSONL, for CI and scripts.
+- **how-we-contain-claude**: Realpath the resolved target in confinePath when it exists, so a symlink inside the workspace cannot point outside.
+- **how-we-contain-claude**: Ask once per workspace before indexing `.reins/skills` and `.claude/skills` (approval kind `skill`).
+- **how-we-contain-claude**: Run flagged tool output through a one-shot classifier call before deciding to wrap it.
+- **infrastructure-noise**: Record per-run `process.resourceUsage()` deltas and the shell timeout in the Environment note.
+- **infrastructure-noise**: Show a Wilson interval next to the pass rate when n is small, and a config diff when two trials in a set differ in model, engine or version.
+- **managed-agents**: Persist the builder's conversation (direct engine) or session id (SDK) after each phase so an interrupted run can resume at the phase boundary.
+- **multi-agent-research-system**: Let the builder dispatch several scouts in one turn (they are read-only) and collect answers as they finish.
+- **multi-agent-research-system**: A fixed evaluator rubric (completeness, correctness, evidence quality) alongside the per-criterion results.
+- **redesigning-source-control**: Add `constraints` (globs the builder may not touch, commands it may not run) to RunConfig, enforced in confinePath and classifyBash.
+- **redesigning-source-control**: A `git_bisect` deferred tool for fix rounds when a regression is detected.
+- **swe-bench-sonnet**: Make write_file refuse to overwrite an existing file unless `overwrite: true` is passed.
+- **swe-bench-sonnet**: Add a `view_image` tool returning an image block for PNG/JPEG files in the workspace.
+- **writing-tools-for-agents**: Derive per-tool call count, error count and total result size in `derive.ts` and show a small tool-health table on the Guardrails tab.
+- **writing-tools-for-agents**: Add a registry lint test that fails on duplicate parameter semantics and descriptions under 40 characters.

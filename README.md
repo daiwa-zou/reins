@@ -78,7 +78,7 @@ npm run build && npm start   # single-process production serve
 
 ## Audit
 
-`docs/audit/` holds an independent audit of the harness against each post: the post is re-fetched, the lesson file checked against it, and every learning traced to code (`path:line`), a component or a foundation, with honest statuses (implemented, partial, gap) and the smallest change that would close each gap. The Lessons tab shows the same table per lesson. The audit index is in [docs/audit/README.md](docs/audit/README.md); ten of the thirty posts are audited so far and the remaining twenty are queued.
+`docs/audit/` holds an independent audit of the harness against each post: the post is re-fetched, the lesson file checked against it, and every learning traced to code (`path:line`), a component or a foundation, with honest statuses (implemented, partial, gap) and the smallest change that would close each gap. The Lessons tab shows the same table per lesson. The audit index is in [docs/audit/README.md](docs/audit/README.md): all thirty posts are covered (112 implemented, 148 partial, 46 gaps at the time of writing). Ten were audited independently with the post re-fetched; the other twenty are a self-audit marked as such, with an independent re-check queued.
 
 ## Status
 
