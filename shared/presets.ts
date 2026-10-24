@@ -212,7 +212,8 @@ export function composeRun(ids: string[], lessons: Lesson[]): ComposedRun {
   const clean = [...new Set((ids ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))];
   const profiles = clean.filter((x) => (PROFILE_IDS as readonly string[]).includes(x));
   if (profiles.length > 1) throw new PresetCompositionError(`pick exactly one care profile, not ${profiles.join(" and ")}`);
-  const profileId = profiles[0] ?? "full";
+  if (!profiles.length) throw new PresetCompositionError(`pick exactly one care profile (${PROFILE_IDS.join(", ")}) alongside any domains`);
+  const profileId = profiles[0];
   const profile = profilePreset(profileId)!;
   const known = presetDomains(lessons);
   const domains = clean.filter((x) => !(PROFILE_IDS as readonly string[]).includes(x));

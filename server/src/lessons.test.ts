@@ -143,3 +143,13 @@ describe("user lessons ($REINS_HOME/lessons)", () => {
     expect(getLesson("my-note")?.source).toBe("user");
   });
 });
+
+describe("inline domains", () => {
+  it("reads 'domains: a, b' right after the prefix as tags, not claim text", () => {
+    const raw = "---\ntitle: T\ndate: 2026-01-01\ntakeaway: x\n---\n\n## Learnings\n- Run the linter.\n\n## Harness implications\n- [stage:build] domains: web, cli Always run the linter.\n  > Run the linter.\n";
+    const { lesson } = parseLesson("inl", raw);
+    const i = lesson!.items.find((x) => x.kind === "stage")!;
+    expect(i.claim).toBe("Always run the linter.");
+    expect(i.domains).toEqual(["web", "cli"]);
+  });
+});

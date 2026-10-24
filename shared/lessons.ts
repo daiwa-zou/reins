@@ -95,6 +95,17 @@ export function parseImplicationHead(head: string): { kind?: string; target?: st
   return { kind: m[1].toLowerCase(), target: m[2], claim: m[3].trim(), typed: true };
 }
 
+/**
+ * Inline domains right after the prefix: "[stage:build] domains: web, cli Claim."
+ * The list is comma-separated and ends at the first tag without a trailing comma
+ * (or at ";" / "|"). Same meaning as an indented "domains:" line.
+ */
+export function splitInlineDomains(claim: string): { claim: string; domains?: string } {
+  const m = claim.match(/^domains:\s*((?:[a-z0-9][a-z0-9-]*\s*,\s*)*[a-z0-9][a-z0-9-]*)\s*[;|]?\s+(.*)$/i);
+  if (!m) return { claim };
+  return { claim: m[2].trim(), domains: m[1] };
+}
+
 /** Render one implication back to the bullet syntax (used by intake drafts and adoption). */
 export function renderImplication(i: Pick<Implication, "kind" | "target" | "claim" | "quote" | "domains">, lessonDomains: string[] = []): string {
   const own = i.domains.filter((d) => !lessonDomains.includes(d));
@@ -207,6 +218,11 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
         else if (kind === "foundation" && !FOUNDATIONS.some((f) => f.id === target)) err(`${where}: unknown foundation id "${target}" (known: ${FOUNDATIONS.map((f) => f.id).join(", ")})`);
         else if (kind === "skill" && (!SKILL_NAME.test(target) || (opts.skills && !opts.skills.includes(target)))) err(`${where}: unknown skill "${target}"${opts.skills ? ` (known: ${opts.skills.join(", ")})` : ""}`);
       }
+    }
+    const inline = splitInlineDomains(h.claim);
+    if (inline.domains !== undefined) {
+      h.claim = inline.claim;
+      b.domains = b.domains ? `${b.domains}, ${inline.domains}` : inline.domains;
     }
     const own: string[] = [];
     for (const d of list(b.domains)) {

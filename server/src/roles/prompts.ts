@@ -75,7 +75,7 @@ export function systemPromptFor(role: "planner" | "builder" | "evaluator" | "con
   const base = { planner: PLANNER, builder: BUILDER, evaluator: EVALUATOR, contract_builder: CONTRACT_BUILDER, contract_evaluator: CONTRACT_EVALUATOR }[role];
   const extras: string[] = [];
   if (config.components.thinkTool) extras.push("Use the think tool before irreversible steps and after surprising tool results: list the rules that apply, check you have what you need, verify the last result.");
-  if (config.components.toolSearch) extras.push("Rarely used tools (git_*, http_fetch, lessons) are not loaded; find them with tool_search_tool_regex when needed.");
+  if (config.components.toolSearch) extras.push("Rarely used tools (git_*, lessons) are not loaded; find them with tool_search_tool_regex when needed.");
   if (!config.components.gitCommits) extras.push("Do not create git commits in this run.");
   if (config.guardrail.allowNetwork) extras.push("Network access is allowed for this run.");
   else extras.push("Network access is off for this run; commands that download will need approval.");

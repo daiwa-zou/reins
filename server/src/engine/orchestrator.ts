@@ -18,7 +18,7 @@ export interface OrchestratorControl extends LoopControl {
   requestContractApproval: (criteria: ContractCriterion[]) => Promise<{ approved: boolean; note?: string; criteria?: ContractCriterion[] }>;
 }
 
-const READ_TOOLS = ["read_file", "list_files", "search", "think", "git_status", "git_diff", "list_lessons", "read_lesson", "http_fetch"];
+const READ_TOOLS = ["read_file", "list_files", "search", "think", "git_status", "git_diff", "list_lessons", "read_lesson"]; // http_fetch belongs to the intake librarian only
 const WRITE_TOOLS = ["write_file", "edit_file", "bash", "update_progress", "git_commit"];
 
 /**

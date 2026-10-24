@@ -310,7 +310,7 @@ const gitCommit = tool("git_commit", "Stage all changes in the workspace and com
   return `Committed ${r.out.trim()}`;
 }, { deferred: true });
 
-const httpFetch = tool("http_fetch", "Fetch a URL over HTTP(S) and return the response text (capped). Only available when network is allowed for the run.", { url: { type: "string" } }, ["url"], async (input, ctx) => {
+const httpFetch = tool("http_fetch", "Fetch a URL over HTTP(S) and return the response text (capped). Given only to the intake librarian, the one job where network is allowed.", { url: { type: "string" } }, ["url"], async (input, ctx) => {
   if (!ctx.allowNetwork) throw new Error("Network is disabled for this run.");
   const res = await fetch(input.url, { signal: ctx.signal, headers: { "user-agent": "reins/0.1" } });
   const text = await res.text();

@@ -103,6 +103,13 @@ describe("lesson intake job", () => {
     expect(fs.readFileSync(path.join(dir, "events.jsonl"), "utf8")).toContain("approval.requested");
     // Never in the runs directory.
     expect(fs.existsSync(path.join(home, "runs", id, "config.json"))).toBe(false);
+    const runsDir = path.join(home, "runs");
+    expect(fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : []).toEqual([]);
+    // The dropped implication is not in the adopted file.
+    const dropped = draft.implications.find((i) => i.kind === "gap")!;
+    expect(dropped).toBeTruthy();
+    expect(fs.readFileSync(file, "utf8")).not.toContain(dropped.claim);
+    expect(fs.readFileSync(file, "utf8")).toMatch(/^standing: reviewed$/m);
 
     // The same source again is refused by its content hash.
     expect(() => mgr.start({ text: ARTICLE.replace(/\n/g, "\n\n") })).toThrow(IntakeRefused);

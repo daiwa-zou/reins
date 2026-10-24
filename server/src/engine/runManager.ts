@@ -139,7 +139,7 @@ export class RunManager extends EventEmitter {
 
   createRun(input: Partial<RunConfig> & { task: string; workspace: string }): RunConfig {
     // Presets compose here (profile + domains), and the stage lessons are resolved and recorded on the config.
-    const config = defaultRunConfig({ ...(input.engine === "replay" ? input : resolveRunInput(input)), id: nanoid(10) });
+    const config = defaultRunConfig({ ...resolveRunInput(input), id: nanoid(10) });
     saveConfig(config);
     const run = this.attach(config);
     run.bus.emitEvent({ type: "run.created", config });

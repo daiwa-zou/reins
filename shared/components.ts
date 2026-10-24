@@ -157,7 +157,7 @@ export const COMPONENTS: HarnessComponent[] = [
     id: "toolSearch",
     label: "Tool search",
     short: "Keep rarely-used tools out of the prompt and load them on demand.",
-    whenOff: "Every tool schema, including rarely used ones (git_*, http_fetch, lessons), is loaded into every prompt.",
+    whenOff: "Every tool schema, including rarely used ones (git_*, lessons), is loaded into every prompt.",
     engines: ["anthropic"],
     assumption: "Every tool schema in context costs tokens and attention whether it is used or not.",
     lessons: [],

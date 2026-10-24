@@ -77,6 +77,7 @@ describe("composable presets", () => {
     expect(c.config.guidance!.some((g) => g.includes("go vet"))).toBe(true);
     expect(() => composeRun(["careful", "minimal"], [])).toThrow(/exactly one/);
     expect(() => composeRun(["careful", "nonsense"], [])).toThrow(/unknown preset/);
+    expect(() => composeRun(["golang"], [])).toThrow(/exactly one/);
   });
   it("later domains win component switches and the override is recorded", () => {
     const a = lesson("a", "2025-01-01", [], { domains: ["x"], enables: ["actionClassifier"] });

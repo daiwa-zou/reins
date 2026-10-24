@@ -223,7 +223,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
                 <div className="font-semibold">{f.label}</div>
                 <div className="text-[12.5px] leading-relaxed muted">{f.short}</div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  {f.lessons.map((slug) => {
+                  {lessons.filter((l) => l.foundations.includes(f.id)).map((l0) => l0.slug).map((slug) => {
                     const l = lessons.find((x) => x.slug === slug);
                     return (
                       <button key={slug} className="badge badge-neutral hover:brightness-95" onClick={() => setLessonFilter(slug)} title={l?.takeaway}>

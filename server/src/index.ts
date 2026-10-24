@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClientMessage, RunEvent, ServerInfo, ServerMessage } from "../../shared/types.js";
-import { COMPONENTS, HARNESS_VERSION, MODELS } from "../../shared/components.js";
+import { COMPONENTS, FOUNDATIONS, HARNESS_VERSION, MODELS } from "../../shared/components.js";
 import { RunManager } from "./engine/runManager.js";
 import { ensureHome, REINS_HOME } from "./store/runStore.js";
 import { getLesson, LessonNotFound, loadLessonLibrary, setLessonStanding } from "./lessons.js";
@@ -69,7 +69,12 @@ app.get("/api/info", (c) => c.json(info()));
 // Component lesson lists are derived from implications when the library loads.
 app.get("/api/components", (c) => {
   loadLessonLibrary();
-  return c.json(COMPONENTS);
+  // `default` mirrors defaultOn for API clients.
+  return c.json(COMPONENTS.map((x) => ({ ...x, default: x.defaultOn })));
+});
+app.get("/api/foundations", (c) => {
+  loadLessonLibrary();
+  return c.json(FOUNDATIONS);
 });
 // Lessons: the merged library (bundled + $REINS_HOME/lessons), re-read when a file changes.
 app.get("/api/lessons", (c) => c.json(loadLessonLibrary().lessons));
