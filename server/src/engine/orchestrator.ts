@@ -1,0 +1,276 @@
+import Anthropic from "@anthropic-ai/sdk";
+import fs from "node:fs";
+import path from "node:path";
+import type { ContractCriterion, CriterionResult, FeatureItem, Phase, RunConfig, Usage } from "../../../shared/types.js";
+import { RunBus } from "./bus.js";
+import { AgentLoop, type LoopControl, type LoopResult } from "./loop.js";
+import { addUsage, emptyUsage } from "./pricing.js";
+import { firstMessage, renderContract, systemPromptFor } from "../roles/prompts.js";
+import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
+import { runShell } from "../tools/registry.js";
+
+export interface OrchestratorControl extends LoopControl {
+  requestPhaseApproval: (title: string, detail: string, payload: unknown) => Promise<{ approved: boolean; note?: string }>;
+  requestContractApproval: (criteria: ContractCriterion[]) => Promise<{ approved: boolean; note?: string; criteria?: ContractCriterion[] }>;
+}
+
+const READ_TOOLS = ["read_file", "list_files", "search", "think", "git_status", "git_diff", "list_lessons", "read_lesson", "http_fetch"];
+const WRITE_TOOLS = ["write_file", "edit_file", "bash", "update_progress", "git_commit"];
+
+/**
+ * The pipeline: Plan -> Contract -> Build -> Evaluate (-> Build ...) -> Wrap up.
+ * Roles hand work to each other through files in .reins/, never shared context.
+ */
+export class Orchestrator {
+  private totalUsage: Usage = emptyUsage();
+  private totalCost = 0;
+  private features: FeatureItem[] = [];
+  private contract: ContractCriterion[] = [];
+  private baseSha: string | null = null;
+  private builderHistory: Anthropic.Beta.BetaMessageParam[] | undefined;
+  private startedAt = Date.now();
+
+  constructor(
+    private client: Anthropic,
+    private config: RunConfig,
+    private bus: RunBus,
+    private control: OrchestratorControl,
+  ) {}
+
+  get costUsd() {
+    return this.totalCost;
+  }
+
+  private handlers() {
+    return {
+      update_progress: (input: { features: FeatureItem[]; note: string }) => {
+        this.features = mergeFeatures(this.features, input.features);
+        const dir = reinsDir(this.config.workspace);
+        if (this.config.components.featureList) fs.writeFileSync(path.join(dir, "features.json"), JSON.stringify(this.features, null, 2));
+        if (this.config.components.progressFile) fs.appendFileSync(path.join(dir, "progress.md"), `\n## ${new Date().toISOString()}\n${input.note}\n`);
+        this.bus.emitEvent({ type: "progress.updated", features: this.features, note: input.note });
+        return `Recorded. ${this.features.filter((f) => f.status === "done").length}/${this.features.length} features done.`;
+      },
+    };
+  }
+
+  private async phase<T>(phase: Phase, round: number, body: () => Promise<{ result: LoopResult | null; summary: string; value: T }>): Promise<T> {
+    const started = Date.now();
+    this.bus.emitEvent({ type: "phase.started", phase, round });
+    const { result, summary, value } = await body();
+    const usage = result?.usage ?? emptyUsage();
+    const cost = result?.costUsd ?? 0;
+    this.totalUsage = addUsage(this.totalUsage, usage);
+    this.totalCost += cost;
+    this.bus.emitEvent({ type: "phase.finished", phase, round, summary, usage, costUsd: cost, durationMs: Date.now() - started });
+    await this.emitChangedFiles();
+    return value;
+  }
+
+  private async emitChangedFiles() {
+    try {
+      const files = await changedFiles(this.config.workspace, this.baseSha);
+      this.bus.emitEvent({ type: "files.changed", files });
+    } catch {
+      /* not a git repo */
+    }
+  }
+
+  private loop(role: "planner" | "builder" | "evaluator", promptRole: Parameters<typeof systemPromptFor>[0], tools: string[], terminal: string[], handlers: Record<string, any>, messages?: Anthropic.Beta.BetaMessageParam[]) {
+    return new AgentLoop(this.client, this.config, this.bus, this.control, {
+      role,
+      system: systemPromptFor(promptRole, this.config),
+      tools,
+      terminal,
+      handlers: { ...this.handlers(), ...handlers },
+      maxTurns: this.config.maxTurnsPerPhase,
+      messages,
+    });
+  }
+
+  private checkStop(r: LoopResult): boolean {
+    return r.reason === "aborted" || r.reason === "budget" || r.reason === "refusal" || r.reason === "error";
+  }
+
+  async run(): Promise<{ ok: boolean; summary: string }> {
+    const ws = this.config.workspace;
+    if (!fs.existsSync(ws)) throw new Error(`Workspace does not exist: ${ws}`);
+    reinsDir(ws);
+    const gitRepo = await isGitRepo(ws);
+    if (gitRepo) ensureReinsIgnored(ws);
+    this.baseSha = gitRepo ? await headSha(ws) : null;
+    this.bus.emitEvent({
+      type: "note",
+      level: "info",
+      text: `Environment: node ${process.version}, ${process.platform} ${process.arch}, git ${gitRepo ? `repo at ${this.baseSha?.slice(0, 7) ?? "no commits"}` : "not a repository"}.`,
+    });
+    const existing = readWorkspaceFile(ws, ".reins/features.json");
+    if (existing) {
+      try {
+        this.features = JSON.parse(existing);
+        this.bus.emitEvent({ type: "progress.updated", features: this.features, note: "Loaded feature list from a previous session." });
+      } catch {
+        /* ignore corrupt */
+      }
+    }
+
+    // ---- Plan ----
+    if (this.config.components.planner) {
+      const stop = await this.phase("plan", 0, async () => {
+        const r = await this.loop("planner", "planner", [...READ_TOOLS, "write_file", "update_progress"], ["finish"], {}).run(
+          firstMessage("plan", this.config, { Instructions: "Explore the workspace, write .reins/spec.md, record the feature list with update_progress, then call finish." }),
+        );
+        return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
+      });
+      if (stop) return this.finish(false, "Stopped during planning.");
+      if (this.config.pauses.afterPlan) {
+        const spec = readWorkspaceFile(ws, ".reins/spec.md") ?? "(no spec written)";
+        const a = await this.control.requestPhaseApproval("Review the plan", "The planner wrote a spec and feature list. Continue to the contract stage?", { spec, features: this.features });
+        if (!a.approved) return this.finish(false, `Plan rejected${a.note ? `: ${a.note}` : "."}`);
+      }
+    } else {
+      writeWorkspaceFile(ws, ".reins/spec.md", `# Spec\n\n${this.config.task}\n\n(Planner disabled for this run; the task is the spec.)\n`);
+    }
+
+    // ---- Contract ----
+    if (this.config.components.contracts) {
+      const stop = await this.phase("contract", 0, async () => {
+        let proposed: ContractCriterion[] = [];
+        let rationale = "";
+        const r1 = await this.loop("builder", "contract_builder", READ_TOOLS, ["propose_contract"], {
+          propose_contract: (input: any) => {
+            proposed = input.criteria;
+            rationale = input.rationale;
+            writeWorkspaceFile(ws, ".reins/contract.proposed.json", JSON.stringify(proposed, null, 2));
+            this.bus.emitEvent({ type: "contract.proposed", by: "builder", criteria: proposed, rationale });
+            return "Proposed.";
+          },
+        }).run(firstMessage("contract", this.config, { Instructions: "Read the spec and feature list, inspect the codebase, then call propose_contract." }));
+        if (this.checkStop(r1)) return { result: r1, summary: "Stopped.", value: true };
+        let usage = r1.usage;
+        let cost = r1.costUsd;
+        let final = proposed;
+        if (this.config.components.evaluator && proposed.length) {
+          const r2 = await this.loop("evaluator", "contract_evaluator", READ_TOOLS, ["review_contract"], {
+            review_contract: (input: any) => {
+              final = input.criteria?.length ? input.criteria : proposed;
+              this.bus.emitEvent({ type: "contract.proposed", by: "evaluator", criteria: final, rationale: input.feedback });
+              return "Reviewed.";
+            },
+          }).run(firstMessage("contract review", this.config, { "Proposed contract": renderContract(proposed), Instructions: "Review and call review_contract with the final criteria." }));
+          usage = addUsage(usage, r2.usage);
+          cost += r2.costUsd;
+          if (this.checkStop(r2)) return { result: { ...r2, usage, costUsd: cost }, summary: "Stopped.", value: true };
+        }
+        if (!final.length) final = [{ id: "C1", text: "The task as described is complete", verify: "Inspect the result", hard: true }];
+        if (this.config.pauses.afterContract) {
+          const a = await this.control.requestContractApproval(final);
+          if (!a.approved) return { result: { ...r1, usage, costUsd: cost }, summary: `Contract rejected${a.note ? `: ${a.note}` : "."}`, value: true };
+          if (a.criteria?.length) final = a.criteria;
+        }
+        this.contract = final;
+        writeWorkspaceFile(ws, ".reins/contract.json", JSON.stringify(final, null, 2));
+        this.bus.emitEvent({ type: "contract.agreed", criteria: final });
+        return { result: { ...r1, usage, costUsd: cost }, summary: `${final.length} criteria agreed (${final.filter((c) => c.hard).length} hard).`, value: false };
+      });
+      if (stop) return this.finish(false, "Stopped at the contract stage.");
+    } else {
+      this.contract = [{ id: "C1", text: "The task as described is complete and verified by running the result", verify: "Run the program / tests and inspect", hard: true }];
+      writeWorkspaceFile(ws, ".reins/contract.json", JSON.stringify(this.contract, null, 2));
+    }
+
+    // ---- Build / Evaluate rounds ----
+    let lastEval: { results: CriterionResult[]; verdict: "pass" | "fail"; summary: string } | null = null;
+    for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
+      const stop = await this.phase("build", round, async () => {
+        const extra: Record<string, string> = { Contract: renderContract(this.contract) };
+        if (lastEval) extra["Evaluation of the previous round"] = `${lastEval.summary}\n\n${lastEval.results.filter((r) => !r.pass).map((r) => `- ${r.id} FAILED: ${r.evidence}`).join("\n")}\n\nFix the failures, re-run the verification steps, update progress, then call finish.`;
+        else extra.Instructions = "Follow the session preamble, then implement the features. Call finish only when every hard criterion's verification step has been run and passed.";
+        if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";
+        const loop = this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}, this.shouldResetBuilder() ? undefined : this.builderHistory);
+        const r = await loop.run(firstMessage(lastEval ? `build (fix round ${round - 1})` : "build", this.config, extra));
+        this.builderHistory = r.messages;
+        return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
+      });
+      if (stop) return this.finish(false, "Stopped while building.");
+
+      if (this.config.components.gitCommits) await this.commit(`reins: ${lastEval ? `fix round ${round - 1}` : "build"} — ${this.config.title}`);
+
+      if (!this.config.components.evaluator) break;
+
+      const result = await this.phase("evaluate", round, async () => {
+        let ev: typeof lastEval = null;
+        const r = await this.loop("evaluator", "evaluator", [...READ_TOOLS, "bash"], ["report_evaluation"], {
+          report_evaluation: (input: any) => {
+            const results: CriterionResult[] = input.results;
+            const hardFail = this.contract.some((c) => c.hard && results.find((r) => r.id === c.id)?.pass !== true);
+            ev = { results, verdict: hardFail ? "fail" : "pass", summary: input.summary };
+            writeWorkspaceFile(ws, ".reins/evaluation.md", `# Evaluation round ${round}\n\n${input.summary}\n\n${results.map((x) => `- ${x.id}: ${x.pass ? "PASS" : "FAIL"} — ${x.evidence}`).join("\n")}\n`);
+            this.bus.emitEvent({ type: "evaluation.result", round, results, verdict: ev.verdict, summary: input.summary });
+            return `Recorded: ${ev.verdict}.`;
+          },
+        }).run(firstMessage("evaluate", this.config, { Contract: renderContract(this.contract), Instructions: "Verify every criterion yourself, then call report_evaluation." }));
+        const verdict = ev ? (ev as any).verdict : "fail";
+        return { result: r, summary: ev ? `${verdict.toUpperCase()}: ${(ev as any).summary}` : "Evaluator did not report.", value: { stop: this.checkStop(r), ev } };
+      });
+      if (result.stop) return this.finish(false, "Stopped while evaluating.");
+      lastEval = result.ev ?? { results: [], verdict: "fail", summary: "No evaluation report." };
+      if (this.config.pauses.afterEvaluation) {
+        const a = await this.control.requestPhaseApproval("Evaluation complete", `Verdict: ${lastEval.verdict}. Continue?`, lastEval);
+        if (!a.approved) return this.finish(false, "Stopped after evaluation.");
+      }
+      if (lastEval.verdict === "pass") break;
+      if (round === this.config.maxFixRounds + 1) return this.finish(false, `Evaluation still failing after ${this.config.maxFixRounds} fix rounds: ${lastEval.summary}`);
+    }
+
+    // ---- Wrap up ----
+    await this.phase("wrapup", 0, async () => {
+      const done = this.features.filter((f) => f.status === "done").length;
+      if (this.config.components.progressFile) {
+        fs.appendFileSync(path.join(reinsDir(ws), "progress.md"), `\n## ${new Date().toISOString()} — run ${this.config.id} finished\nVerdict: ${lastEval?.verdict ?? "n/a"}. ${done}/${this.features.length} features done.\n`);
+      }
+      return { result: null, summary: `${done}/${this.features.length} features done.`, value: null };
+    });
+    return this.finish(true, lastEval ? lastEval.summary : "Build finished.");
+  }
+
+  private shouldResetBuilder(): boolean {
+    if (!this.builderHistory) return true;
+    if (!this.config.components.resetWithHandoff) return false;
+    const est = JSON.stringify(this.builderHistory).length / 3.6;
+    if (est > this.config.context.resetAtTokens) {
+      const handoff = readWorkspaceFile(this.config.workspace, ".reins/progress.md") ?? "";
+      this.bus.emitEvent({ type: "context.reset", role: "builder", handoff: handoff.slice(-3000), beforeTokens: Math.round(est) });
+      return true;
+    }
+    return false;
+  }
+
+  private async commit(message: string) {
+    const ws = this.config.workspace;
+    if (!(await isGitRepo(ws))) return;
+    if (this.config.pauses.beforeCommit) {
+      const a = await this.control.requestPhaseApproval("Commit changes?", message, await changedFiles(ws, this.baseSha));
+      if (!a.approved) return;
+    }
+    const r = await runShell(`git add -A && git diff --cached --quiet && echo NOCHANGES || (git -c user.name="Reins" -c user.email="reins@localhost" commit -q -m ${JSON.stringify(message)} && git rev-parse --short HEAD && git show --stat --format= HEAD | tail -1)`, ws, this.control.signal, 30_000);
+    if (r.out.includes("NOCHANGES")) return;
+    const lines = r.out.trim().split("\n");
+    const sha = lines[0] ?? "";
+    const files = Number(lines[1]?.match(/(\d+) files? changed/)?.[1] ?? 0);
+    if (r.code === 0 && sha) this.bus.emitEvent({ type: "git.commit", sha, message, files });
+    else this.bus.emitEvent({ type: "note", level: "warn", text: `Commit failed: ${r.out.trim().slice(0, 300)}` });
+  }
+
+  private finish(ok: boolean, summary: string) {
+    this.bus.emitEvent({ type: "run.summary", summary, costUsd: this.totalCost, durationMs: Date.now() - this.startedAt });
+    return { ok, summary };
+  }
+}
+
+export function mergeFeatures(existing: FeatureItem[], incoming: FeatureItem[]): FeatureItem[] {
+  // Features are never deleted, only updated or added (the feature list lesson).
+  const byId = new Map(existing.map((f) => [f.id, f]));
+  for (const f of incoming) byId.set(f.id, { ...byId.get(f.id), ...f });
+  return [...byId.values()];
+}

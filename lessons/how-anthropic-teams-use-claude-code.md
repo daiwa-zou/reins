@@ -1,0 +1,31 @@
+---
+title: How Anthropic teams use Claude Code
+date: 2025-07-24
+url: https://www.anthropic.com/news/how-anthropic-teams-use-claude-code
+tags: coding-agents, harness, multi-agent
+takeaway: The most successful internal teams treat Claude Code as a thought partner rather than a code generator, spanning debugging, codebase navigation, testing, prototyping and automation, including non-engineers. Concrete artifacts such as stack traces and screenshots, pseudocode-first test-driven loops with periodic check-ins, and narrow specialized subagents drove the biggest gains. A harness should support both tight pairing and delegated work.
+---
+
+## Learnings
+- Overall takeaway: the most successful teams treat Claude Code as a thought partner rather than a code generator. Usage spans debugging, codebase navigation, testing, prototyping, documentation and automation, including non-engineering teams.
+- Infrastructure and data scientists: new hires point Claude at the whole codebase; it reads the CLAUDE.md files, explains pipeline dependencies and which upstream sources feed each dashboard, replacing traditional data-catalog tools. Plain-text descriptions of data workflows get fully automated execution.
+- Product Engineering: Claude Code is the first stop for any task. It identifies which files to examine for a bug, feature or analysis, removing manual context gathering, and lets engineers fix bugs in unfamiliar codebases without waiting on owning teams.
+- Product Design: Claude writes comprehensive tests, and GitHub Actions automate PR comments with Claude doing formatting and test refactoring. Figma files are fed to Claude Code followed by autonomous write-code/run-tests/iterate loops (it built Vim key bindings for itself with minimal review), and Claude maps error states, logic flows and system statuses during design to find edge cases early.
+- Security Engineering: the old loop "design doc, janky code, refactor, give up on tests" was replaced by asking for pseudocode first, guiding test-driven development, and checking in periodically.
+- During incidents, security engineers feed in stack traces and docs to trace control flow, so 10-15 minute manual scans resolve about 3x faster. Claude also ingests documentation to produce markdown runbooks and troubleshooting guides reused as debugging context.
+- Inference: team members describe tests in unfamiliar languages (Rust) and Claude writes them in the codebase's native language. Non-ML members ask Claude to explain model-specific functions, cutting an hour of research to 10-20 minutes (about an 80% reduction).
+- Data Infrastructure: when Kubernetes stopped scheduling pods, dashboard screenshots were shared and Claude walked the team menu by menu through the Google Cloud UI to find IP exhaustion and gave the commands to add an IP pool, saving about 20 minutes during an outage.
+- Data Science (RL visualization): people without TypeScript built React dashboards via one-shot prompts in a sandbox, tweaking lightly and never needing to read the generated code.
+- Growth Marketing: an agentic workflow reads CSVs of hundreds of ads, finds underperformers and generates variants under strict character limits using two specialized subagents, producing hundreds of ads in minutes instead of hours. A Figma plugin generates up to 100 variations per frame.
+- Legal built prototype "phone tree" tools to route employees to the right lawyer.
+- Implied practices: maintain CLAUDE.md and use MCP to consolidate scattered docs; pseudocode first, then TDD, with periodic check-ins instead of constant supervision; provide concrete artifacts during incidents (stack traces, screenshots).
+- More implied practices: hand over abstract problems, let Claude work autonomously and review before final refinement; use sandboxed one-shot prompting for low-stakes work and iterate only if needed; use specialized subagents for high-volume generation; share discoveries across technical and non-technical staff.
+
+## Harness implications
+- Support two supervision styles explicitly: tight pair-programming and "delegate, check in periodically", with the UI surfacing check-in points (pseudocode ready, tests failing as expected, tests green).
+- Make screenshots and pasted logs first-class inputs; incident workflows depend on them.
+- Codebase Q&A and onboarding is a major use; the harness should make read-only exploration cheap and safe, and allow a project-level knowledge layer (CLAUDE.md, runbooks) that the agent can both read and write.
+- Autonomous build/test/iterate loops against a design artifact (Figma, screenshot) should be a packaged workflow with visual diff evidence.
+- Non-engineers use the same harness: a sandboxed one-shot mode with sensible defaults and no need to read code.
+- Specialized subagents with narrow prompts are how teams scale repetitive generation; make them easy to define and reuse.
+- CI integration (PR-comment automation via Actions) is a common pattern; headless mode and event-triggered runs matter.
