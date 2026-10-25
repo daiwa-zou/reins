@@ -67,7 +67,7 @@ export function Settings() {
             </div>
           )}
           <div className="flex gap-2 mt-2">
-            <input className="input mono" type="password" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" />
+            <input className="input mono" type="password" placeholder="sk-ant-…" aria-label="Anthropic API key" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" />
             <button className="btn btn-primary" disabled={busy || !key.trim()} onClick={() => save(key.trim())}>
               Save
             </button>

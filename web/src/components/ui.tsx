@@ -186,3 +186,19 @@ export function Meter({ value, max, tone = "accent", height = 6 }: { value: numb
     </div>
   );
 }
+
+
+/** Arrow/Home/End navigation for a role=tablist whose tabs use a roving tabindex. */
+export function rovingTabs(e: React.KeyboardEvent, ids: string[], current: string, select: (id: string) => void) {
+  const i = ids.indexOf(current);
+  if (i < 0) return;
+  let next = -1;
+  if (e.key === "ArrowRight") next = (i + 1) % ids.length;
+  else if (e.key === "ArrowLeft") next = (i - 1 + ids.length) % ids.length;
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = ids.length - 1;
+  if (next < 0) return;
+  e.preventDefault();
+  select(ids[next]);
+  requestAnimationFrame(() => (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[role="tab"][aria-selected="true"]`)?.focus());
+}

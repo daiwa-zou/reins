@@ -112,7 +112,11 @@ export function ReliabilityPanel() {
                 <tbody>
                   {set.trials.map((t) => (
                     <tr key={t.runId} className="border-t line hover:bg-[var(--bg-sunk)] cursor-pointer" onClick={() => selectRun(t.runId, { view: "activity" })}>
-                      <td className="px-4 py-1.5 mono faint">{t.runId}</td>
+                      <td className="px-4 py-1.5 mono faint">
+                        <button className="underline" onClick={(e) => { e.stopPropagation(); selectRun(t.runId, { view: "activity" }); }} aria-label={`Open run ${t.runId}`}>
+                          {t.runId}
+                        </button>
+                      </td>
                       <td className="px-3 py-1.5">
                         <Badge tone={t.status === "completed" && t.verdict === "pass" ? "ok" : t.status === "failed" || t.verdict === "fail" ? "bad" : "neutral"}>{t.status === "completed" ? t.verdict : t.status}</Badge>
                       </td>

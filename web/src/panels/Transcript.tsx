@@ -61,7 +61,7 @@ export function Transcript({ model }: { model: RunModel }) {
               <RoleChip role={r} />
             </button>
           ))}
-          <input className="input ml-auto" style={{ maxWidth: 240, padding: "4px 8px", fontSize: 12 }} placeholder="Search events…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input ml-auto" style={{ maxWidth: 240, padding: "4px 8px", fontSize: 12 }} placeholder="Search events…" aria-label="Search events" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
       </div>
       <div className="flex-1 overflow-auto px-4 py-2">

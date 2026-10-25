@@ -276,7 +276,7 @@ export const useStore = create<State>((set, get) => ({
   },
   toastMsg: (text, kind = "info") => {
     set({ toast: { text, kind } });
-    setTimeout(() => set((s) => (s.toast?.text === text ? { toast: undefined } : {})), 3500);
+    setTimeout(() => set((s) => (s.toast?.text === text ? { toast: undefined } : {})), kind === "error" ? 9000 : 3500);
   },
   refreshInfo: async () => set({ info: await api.info() }),
 }));

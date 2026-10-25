@@ -37,7 +37,7 @@ export function Stage({ model, live }: { model: RunModel; live: RunModel }) {
   const jumpToApproval = () => {
     const el = document.getElementById(`approval-${pending[0]?.approvalId}`);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     el.querySelector<HTMLElement>("textarea, input, button")?.focus({ preventScroll: true });
   };
 

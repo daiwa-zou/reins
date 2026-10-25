@@ -97,7 +97,7 @@ function Row({ r }: { r: RunSummary }) {
       tabIndex={0}
       aria-current={selected ? "true" : undefined}
       onClick={() => selectRun(r.id)}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), selectRun(r.id))}
+      onKeyDown={(e) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), selectRun(r.id))}
       className="run-row group"
       title={tip}
     >

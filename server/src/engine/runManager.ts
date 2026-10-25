@@ -201,8 +201,8 @@ export class RunManager extends EventEmitter {
       return;
     }
     if (run.config.engine === "claude-code" && !this.hasClaudeCode) {
-      this.status(run, "failed", "The claude CLI was not found on this machine.");
-      run.bus.emitEvent({ type: "error", message: "The Claude Code engine needs the `claude` CLI installed and logged in.", recoverable: false });
+      this.status(run, "failed", "The Claude Code engine needs the claude CLI: install it (npm install -g @anthropic-ai/claude-code), run `claude login`, then start the run again.");
+      run.bus.emitEvent({ type: "error", message: "The Claude Code engine needs the `claude` CLI installed and logged in: npm install -g @anthropic-ai/claude-code, then `claude login`.", recoverable: false });
       this.active.delete(run.config.id);
       return;
     }
@@ -252,7 +252,7 @@ export class RunManager extends EventEmitter {
   approve(runId: string, approvalId: string, decision: "approve" | "reject", note?: string, criteria?: ContractCriterion[]) {
     const run = this.active.get(runId);
     const p = run?.pending.get(approvalId);
-    if (!run || !p) throw new Error("No such pending approval.");
+    if (!run || !p) throw new Error("That approval is no longer pending: it was already decided, the run finished, or the server restarted. Reload to see the current state.");
     run.pending.delete(approvalId);
     run.bus.emitEvent({ type: "approval.resolved", approvalId, decision, note });
     p.resolve({ approved: decision === "approve", note, criteria });
@@ -260,21 +260,21 @@ export class RunManager extends EventEmitter {
 
   steer(runId: string, text: string) {
     const run = this.active.get(runId);
-    if (!run) throw new Error("Run is not active.");
+    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
     run.steer.push(text);
     run.bus.emitEvent({ type: "steer.received", text, deliveredTo: "next" });
   }
 
   pause(runId: string) {
     const run = this.active.get(runId);
-    if (!run) throw new Error("Run is not active.");
+    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
     run.paused = true;
     this.status(run, "paused");
   }
 
   resume(runId: string) {
     const run = this.active.get(runId);
-    if (!run) throw new Error("Run is not active.");
+    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
     run.paused = false;
     run.pauseWaiters.splice(0).forEach((w) => w());
     this.status(run, run.pending.size ? "waiting_approval" : "running");
@@ -282,7 +282,7 @@ export class RunManager extends EventEmitter {
 
   cancel(runId: string) {
     const run = this.active.get(runId);
-    if (!run) throw new Error("Run is not active.");
+    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
     run.abort.abort();
     run.paused = false;
     run.pauseWaiters.splice(0).forEach((w) => w());

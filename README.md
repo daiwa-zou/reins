@@ -56,7 +56,9 @@ Decisions that are not switches (the append-only log, file handoff, owning the l
 - **New run**: a compose picker with exactly one care profile (Full, Minimal, Careful) and **domain chips** (web, cli, golang, python and any domain a lesson names); the workspace check suggests domains with a reason (go.mod → golang). An invalid composition shows inline. The run title chip reads like "Careful · Go · CLI" (older runs show their preset name, intake jobs "Lesson intake"). Saved presets still work from the select below the picker.
 - **Reliability**: runs of the same task group into trial sets with pass^k and pass@k; "Run 3 more" queues identical trials one after another.
 
-Keyboard: `n` new run, `d` demo, `space` pause/resume, `1`-`9` tabs, `?` help.
+Keyboard: `n` new run, `d` demo, `space` pause/resume, `r`/`t`/`h`/`l` sections, `1`-`4` run views, `?` help, `Esc` closes dialogs. Every shortcut is ignored while a text field or control has focus.
+
+Requirements: Node 22 or newer and npm. The Seatbelt sandbox is macOS-only (`sandbox-exec`); on Linux the osSandbox component is reported unavailable and shell commands run unsandboxed under the guardrails. Environment variables: `REINS_HOME` (state directory, default `~/.reins`), `REINS_PORT` (API port, default 5191), `REINS_WORKSPACE` (default folder in the New run dialog), `REINS_SERVE_STATIC=1` (serve the built UI from the API process; `npm start` then opens on port 5191).
 
 ## Layout
 

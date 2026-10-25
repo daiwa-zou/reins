@@ -216,8 +216,9 @@ export function NewRun() {
     <Modal title={prefill ? "New run from these settings" : "New run"} onClose={() => openModal(null)} width={760} dismissOnBackdrop={false}>
       <div className="flex flex-col gap-5">
         <div>
-          <label className="text-[12px] font-semibold">What should the agent do?</label>
+          <label className="text-[12px] font-semibold" htmlFor="newrun-task">What should the agent do?</label>
           <textarea
+            id="newrun-task"
             className="input mt-1"
             rows={4}
             autoFocus
@@ -229,8 +230,8 @@ export function NewRun() {
         </div>
 
         <div>
-          <label className="text-[12px] font-semibold">Workspace folder</label>
-          <input className="input mono mt-1" list="recent-ws" value={cfg.workspace} onChange={(e) => set({ workspace: e.target.value })} placeholder="/path/to/your/repo" />
+          <label className="text-[12px] font-semibold" htmlFor="newrun-workspace">Workspace folder</label>
+          <input id="newrun-workspace" className="input mono mt-1" list="recent-ws" value={cfg.workspace} onChange={(e) => set({ workspace: e.target.value })} placeholder="/path/to/your/repo" />
           <datalist id="recent-ws">
             {recent.map((r) => (
               <option key={r} value={r} />
@@ -252,7 +253,7 @@ export function NewRun() {
         </div>
 
         <div>
-          <label className="text-[12px] font-semibold">Engine</label>
+          <div className="text-[12px] font-semibold" id="newrun-engine-label">Engine</div>
           <div className="flex gap-2 mt-1">
             {(
               [

@@ -180,6 +180,7 @@ app.get("/api/runs", (c) => c.json(manager.listRuns()));
 app.get("/api/trials", (c) => c.json(allTrialSets(Number(c.req.query("k") ?? 3))));
 app.post("/api/runs/:id/repeat", (c) => {
   const k = Math.max(1, Math.min(10, Number(c.req.query("k") ?? 3)));
+  if (!manager.config(c.req.param("id"))) return c.json({ error: `No such run: ${c.req.param("id")}` }, 404);
   manager.repeat(c.req.param("id"), k).catch((e) => console.error("repeat failed", e));
   return c.json({ ok: true, k });
 });

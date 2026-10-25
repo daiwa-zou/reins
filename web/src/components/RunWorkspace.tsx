@@ -1,3 +1,4 @@
+import { rovingTabs } from "./ui";
 import React, { useState } from "react";
 import { History, PanelRightClose, PanelRightOpen, Radio } from "lucide-react";
 import type { RunModel } from "../state/derive";
@@ -28,9 +29,9 @@ export function RunWorkspace({ model, live }: { model: RunModel; live: RunModel 
       <div className="flex-1 min-w-0 flex flex-col">
         <RunHeader model={live} at={scrubSeq !== null ? model : undefined} />
         <div className="flex items-end gap-2 px-4 border-b line min-w-0">
-          <div role="tablist" aria-label="Run views" className="flex items-end min-w-0 overflow-x-auto">
+          <div role="tablist" aria-label="Run views" className="flex items-end min-w-0 overflow-x-auto" onKeyDown={(e) => rovingTabs(e, RUN_VIEWS.map((t) => t.id), view, (id) => navigate({ section: "runs", view: id as typeof view }))}>
             {RUN_VIEWS.map((t) => (
-              <button key={t.id} role="tab" aria-selected={view === t.id} className="view-tab" onClick={() => navigate({ section: "runs", view: t.id })} title={`${t.label} (${keyForView(t.id)})`}>
+              <button key={t.id} role="tab" aria-selected={view === t.id} tabIndex={view === t.id ? 0 : -1} id={`tab-${t.id}`} aria-controls={`panel-${t.id}`} className="view-tab" onClick={() => navigate({ section: "runs", view: t.id })} title={`${t.label} (${keyForView(t.id)})`}>
                 {t.label}
                 {t.id === "activity" && live.pending.length > 0 && (
                   <span className="badge badge-warn" title="Waiting for you">

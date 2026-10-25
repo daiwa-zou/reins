@@ -21,22 +21,23 @@
   --bg-sunk: #eeece7;
   --fg: #1c1b19;
   --fg-muted: #6b6762;
-  --fg-faint: #a39e97;
+  --fg-faint: #6f6a64;
   --line: #e4e1db;
-  --line-strong: #cfcac2;
-  --accent: #c2600a;
+  --line-strong: #8d877f;
+  --accent: #b35609;
+  --on-accent: #ffffff;
   --accent-soft: #fbe9d7;
-  --ok: #2f8f5b;
+  --ok: #1f7a4a;
   --ok-soft: #dff3e7;
-  --warn: #b7791f;
+  --warn: #8a5a0c;
   --warn-soft: #fbf0d6;
-  --bad: #c43d3d;
+  --bad: #b83535;
   --bad-soft: #fbe1e1;
   --planner: #6d5bd0;
-  --builder: #1e7fb8;
+  --builder: #17699a;
   --evaluator: #c23f6e;
-  --classifier: #b7791f;
-  --scout: #2a8f8a;
+  --classifier: #8a5a0c;
+  --scout: #1f7a76;
   --shadow: 0 1px 2px rgba(20, 18, 14, 0.06), 0 8px 24px -16px rgba(20, 18, 14, 0.25);
 }
 
@@ -47,10 +48,11 @@
   --bg-sunk: #101114;
   --fg: #ecebe6;
   --fg-muted: #a6a39c;
-  --fg-faint: #6c6963;
+  --fg-faint: #8f8c85;
   --line: #2a2d34;
-  --line-strong: #3a3e47;
+  --line-strong: #6b707b;
   --accent: #f0963c;
+  --on-accent: #15161a;
   --accent-soft: #3a2a1a;
   --ok: #4cc27f;
   --ok-soft: #173426;
@@ -79,7 +81,12 @@ body {
 
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+/* Controls inside clipped containers (tab strips, call rows) keep the ring inside the box. */
+button:focus-visible, [role="button"]:focus-visible, [role="tab"]:focus-visible, .menu-item:focus-visible { outline-offset: -2px; }
+.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (prefers-reduced-motion: reduce) {
+  .animate-spin { animation: none; }
   .pulse, .fade-in { animation: none; }
   * { transition: none !important; }
 }
@@ -102,7 +109,7 @@ pre { white-space: pre-wrap; word-break: break-word; }
 .btn:hover { background: var(--bg-sunk); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn-primary:hover { filter: brightness(1.08); background: var(--accent); }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-ghost:hover { background: var(--bg-sunk); }
@@ -153,7 +160,8 @@ pre { white-space: pre-wrap; word-break: break-word; }
 /* Dropdown menu */
 .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 220px; z-index: 40; padding: 4px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
 .menu-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 9px; border-radius: 6px; text-align: left; cursor: pointer; color: var(--fg); }
-.menu-item:hover, .menu-item:focus-visible { background: var(--bg-sunk); outline: none; }
+.menu-item:hover { background: var(--bg-sunk); }
+.menu-item:focus-visible { background: var(--bg-sunk); outline: 2px solid var(--accent); outline-offset: -2px; }
 .menu-item[aria-checked="true"] { color: var(--accent); }
 .menu-sep { height: 1px; margin: 4px 2px; background: var(--line); }
 

@@ -123,8 +123,8 @@ export function App() {
         <main className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 min-h-0 overflow-hidden">{content}</div>
           {bootError && (
-            <div className="px-4 py-2 text-small flex items-center gap-3" style={{ background: "var(--bad-soft)", color: "var(--bad)" }}>
-              Could not reach the Reins server ({bootError}). Is `npm run dev` running?
+            <div className="px-4 py-2 text-small flex items-center gap-3" style={{ background: "var(--bad-soft)", color: "var(--bad)" }} role="alert">
+              Could not reach the Reins server ({bootError}). Is the Reins server running (`npm run dev` or `npm start`, port 5191)?
               <button className="btn btn-sm" onClick={() => useStore.getState().boot()}>
                 Retry
               </button>
@@ -135,9 +135,19 @@ export function App() {
       {modal === "newRun" && <NewRun />}
       {modal === "settings" && <Settings />}
       {modal === "help" && <Help />}
+      {/* Always-mounted live regions: a region created together with its content is often not announced. */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {liveModel.pending.length ? `Needs you: ${liveModel.pending[0].title}` : ""}
+      </div>
+      <div className="sr-only" role="alert">
+        {toast?.kind === "error" ? toast.text : ""}
+      </div>
       {toast && (
-        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 card px-4 py-2 fade-in z-50 ${toast.kind === "error" ? "text-[var(--bad)]" : ""}`} style={{ boxShadow: "var(--shadow)" }} role="status">
-          {toast.text}
+        <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 card px-4 py-2 fade-in z-50 flex items-center gap-3 ${toast.kind === "error" ? "text-[var(--bad)]" : ""}`} style={{ boxShadow: "var(--shadow)" }} role="status" aria-live="polite">
+          <span>{toast.text}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => useStore.setState({ toast: undefined })} aria-label="Dismiss">
+            ✕
+          </button>
         </div>
       )}
     </div>
