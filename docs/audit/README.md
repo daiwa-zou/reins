@@ -1,8 +1,8 @@
 # Lesson audit
 
-Every learning is traced to code (`path:line`), a component or a foundation, with statuses implemented (code or UI does it), partial (something adjacent exists) and gap, plus the smallest change that would close each gap. Ten files (the first ten alphabetically, a-postmortem… through claude-code-best-practices) were written by an independent audit pass that re-fetched each post; the other twenty are a self-audit by the authoring session against the distilled lesson files and are marked as such in their header. An independent re-check of those twenty is queued.
+Every learning is traced to code (`path:line`), a component or a foundation, with statuses implemented (code or UI does it), partial (something adjacent exists) and gap, plus the smallest change that would close each gap. All 30 files were written by independent audit passes that re-fetched each post and checked the lesson file against it.
 
-**Totals across 30 lessons:** 112 implemented · 148 partial · 46 gaps
+**Totals across 30 lessons:** 177 implemented · 209 partial · 61 gaps
 
 | Lesson | implemented | partial | gap |
 |---|---|---|---|
@@ -16,26 +16,26 @@ Every learning is traced to code (`path:line`), a component or a foundation, wit
 | [Building effective agents](building-effective-agents.md) | 9 | 6 | 0 |
 | [How we built Claude Code auto mode: a safer way to skip permissions](claude-code-auto-mode.md) | 7 | 6 | 3 |
 | [Claude Code: Best practices for agentic coding](claude-code-best-practices.md) | 6 | 15 | 0 |
-| [Claude Code on the web](claude-code-on-the-web.md) | 2 | 5 | 0 |
-| [Beyond permission prompts: making Claude Code more secure and autonomous](claude-code-sandboxing.md) | 3 | 4 | 1 |
-| [The "think" tool](claude-think-tool.md) | 3 | 3 | 1 |
-| [Code execution with MCP: Building more efficient agents](code-execution-with-mcp.md) | 2 | 4 | 1 |
-| [Confidential Inference via Trusted Virtual Machines](confidential-inference-trusted-vms.md) | 4 | 4 | 0 |
-| [Demystifying evals for AI agents](demystifying-evals-for-ai-agents.md) | 2 | 3 | 3 |
-| [Desktop Extensions: One-click MCP server installation for Claude Desktop](desktop-extensions.md) | 1 | 5 | 1 |
-| [Effective context engineering for AI agents](effective-context-engineering-for-ai-agents.md) | 5 | 3 | 0 |
-| [Effective harnesses for long-running agents](effective-harnesses-for-long-running-agents.md) | 3 | 4 | 1 |
-| [Enabling Claude Code to work more autonomously](enabling-claude-code-to-work-more-autonomously.md) | 1 | 4 | 2 |
-| [Eval awareness in Claude Opus 4.6's BrowseComp performance](eval-awareness-browsecomp.md) | 4 | 3 | 0 |
-| [Harness design for long-running application development](harness-design-long-running-apps.md) | 5 | 2 | 0 |
-| [How Anthropic teams use Claude Code](how-anthropic-teams-use-claude-code.md) | 3 | 1 | 3 |
-| [How we contain Claude across products](how-we-contain-claude.md) | 3 | 5 | 1 |
-| [Infrastructure noise in agentic coding evals](infrastructure-noise.md) | 0 | 5 | 2 |
-| [Scaling Managed Agents: Decoupling the brain from the hands](managed-agents.md) | 5 | 3 | 0 |
-| [How we built our multi-agent research system](multi-agent-research-system.md) | 4 | 4 | 0 |
-| [Redesigning source control at Anthropic](redesigning-source-control.md) | 1 | 4 | 3 |
-| [Raising the bar on SWE-bench Verified with Claude 3.5 Sonnet](swe-bench-sonnet.md) | 4 | 3 | 1 |
-| [Writing effective tools for AI agents, with agents](writing-tools-for-agents.md) | 4 | 3 | 1 |
+| [Claude Code on the web](claude-code-on-the-web.md) | 5 | 7 | 1 |
+| [Beyond permission prompts: making Claude Code more secure and autonomous](claude-code-sandboxing.md) | 4 | 11 | 0 |
+| [The "think" tool: Enabling Claude to stop and think in complex tool use situations](claude-think-tool.md) | 5 | 7 | 1 |
+| [Code execution with MCP: Building more efficient agents](code-execution-with-mcp.md) | 4 | 7 | 2 |
+| [Confidential Inference via Trusted Virtual Machines](confidential-inference-trusted-vms.md) | 3 | 8 | 2 |
+| [Demystifying evals for AI agents](demystifying-evals-for-ai-agents.md) | 9 | 4 | 6 |
+| [Desktop Extensions: One-click MCP server installation for Claude Desktop](desktop-extensions.md) | 6 | 7 | 0 |
+| [Effective context engineering for AI agents](effective-context-engineering-for-ai-agents.md) | 9 | 6 | 0 |
+| [Effective harnesses for long-running agents](effective-harnesses-for-long-running-agents.md) | 9 | 7 | 1 |
+| [Enabling Claude Code to work more autonomously](enabling-claude-code-to-work-more-autonomously.md) | 4 | 7 | 4 |
+| [Eval awareness in Claude Opus 4.6's BrowseComp performance](eval-awareness-browsecomp.md) | 3 | 6 | 4 |
+| [Harness design for long-running application development](harness-design-long-running-apps.md) | 13 | 5 | 1 |
+| [How Anthropic teams use Claude Code](how-anthropic-teams-use-claude-code.md) | 5 | 6 | 2 |
+| [How we contain Claude across products](how-we-contain-claude.md) | 7 | 8 | 1 |
+| [Infrastructure noise in agentic coding evals](infrastructure-noise.md) | 2 | 8 | 3 |
+| [Scaling Managed Agents: Decoupling the brain from the hands](managed-agents.md) | 5 | 6 | 2 |
+| [How we built our multi-agent research system](multi-agent-research-system.md) | 6 | 8 | 1 |
+| [Redesigning source control at Anthropic](redesigning-source-control.md) | 5 | 6 | 2 |
+| [Raising the bar on SWE-bench Verified with Claude 3.5 Sonnet](swe-bench-sonnet.md) | 9 | 5 | 1 |
+| [Writing effective tools for AI agents, with agents](writing-tools-for-agents.md) | 11 | 4 | 2 |
 
 ## Open gaps
 
@@ -130,47 +130,141 @@ Every learning is traced to code (`path:line`), a component or a foundation, wit
 - **claude-code-best-practices**: Fix rounds keep the polluted history: after a failed round, start the builder from a fresh conversation with the evaluation summary as the handoff (reuse `shouldResetBuilder`) when `maxFixRounds` is reached once.
 - **claude-code-best-practices**: Tests are editable by the builder: in the contract stage, record the test files named in `verify` commands and have the evaluator fail a round when `git diff` shows them modified.
 - **claude-code-best-practices**: No interview step: add an optional "Interview me" pre-phase that uses `approval.requested` prompts to ask 3-5 questions and writes the answers into the spec.
-- **claude-code-on-the-web**: Add a domain allowlist to GuardrailPolicy and pass it to the Seatbelt profile and the SDK sandbox `network.allowedDomains`.
-- **claude-code-on-the-web**: Add an optional 'open a PR' wrap-up step (gh pr create) gated by an approval, so the deliverable is a PR plus the summary.
-- **claude-code-on-the-web**: A remote execution target (SSH or container) for the same orchestrator is out of scope today; the engine interface (`LoopOptions`/`LoopResult` in `loop.ts`) is where it would plug in.
-- **claude-code-sandboxing**: Add a domain allowlist and raise an approval on first contact with a new domain; a local proxy would be the clean implementation.
-- **claude-code-sandboxing**: Emit a dedicated `sandbox.violation` event (path or host, tool) so the Stage can show boundary events apart from permission prompts.
-- **claude-code-sandboxing**: Let the run config add writable paths for the sandbox (monorepo caches, build dirs).
-- **claude-think-tool**: Expose role prompts (and their checklists) as editable templates in the Harness tab, versioned by the prompt hash already logged in the request-shape note.
-- **claude-think-tool**: After a failed evaluation round, prepend a 'list three candidate causes before editing' instruction to the fix-round message in `orchestrator.ts:228`.
-- **code-execution-with-mcp**: Generate a `servers/<name>/<tool>.ts` style shim for MCP servers once MCP integration lands (see advanced-tool-use gaps); the registry already carries schemas.
-- **code-execution-with-mcp**: Let the builder save a skill (`.reins/skills/<slug>/SKILL.md`) via a `save_skill` tool after a fix round, and list workspace skills in the Harness tab.
-- **confidential-inference-trusted-vms**: Add `GET /api/runs/:id/export` producing the JSONL with a SHA-256 chain per line so a reviewer can verify it was not edited.
-- **confidential-inference-trusted-vms**: A 'production' guardrail mode that disables trust mode and allow patterns and shows a badge in the TopBar.
-- **demystifying-evals-for-ai-agents**: Add an `unknown` outcome to `CriterionResult` and treat it as neither pass nor fail in `orchestrator.ts:250`.
-- **demystifying-evals-for-ai-agents**: Add a 'grader wrong' flag per criterion result (stored as a `note` event) so disputed verdicts are visible in the Reliability set.
-- **demystifying-evals-for-ai-agents**: Offer 'fresh worktree per trial' in the repeat endpoint (git worktree add) for isolated trials.
-- **desktop-extensions**: List installed skills (name, source, description, files) in the Harness tab with an enable switch per run.
-- **desktop-extensions**: Once MCP servers are configurable, validate their manifests and show tools and required config before the first run.
-- **effective-context-engineering-for-ai-agents**: Add `context.preserve` (free text) to RunConfig and append it to the compaction request and the reset handoff.
-- **effective-context-engineering-for-ai-agents**: A registry lint test that flags two tools whose descriptions share most words, and parameter names like `path` vs `file`.
-- **effective-harnesses-for-long-running-agents**: Add `.reins/init.sh`: written by the planner, run by the harness at the start of every build phase with its output logged.
-- **effective-harnesses-for-long-running-agents**: Refuse `finish` while `git status` is dirty when gitCommits is on, returning the dirty list to the builder.
-- **effective-harnesses-for-long-running-agents**: A deferred `screenshot` tool (Playwright) for web contracts.
-- **enabling-claude-code-to-work-more-autonomously**: Support `.reins/hooks.json` with afterEdit and beforeFinish commands run by the orchestrator, surfaced as note events.
-- **enabling-claude-code-to-work-more-autonomously**: Keep the last 20 operator notes in localStorage and offer them with the up arrow in the steer box.
-- **eval-awareness-browsecomp**: Add `constraints: string[]` to RunConfig, rendered in every role's first message as 'Do not'.
-- **eval-awareness-browsecomp**: Warn when a run's token use passes 3x the median of its trial set.
-- **harness-design-long-running-apps**: Expose role prompts as editable, versioned text in the Harness tab so evaluator calibration is a product action.
-- **harness-design-long-running-apps**: A Playwright-backed screenshot tool for the evaluator when the contract names a URL.
-- **how-anthropic-teams-use-claude-code**: Accept image attachments on the task (stored under the run dir, passed as image blocks in the first message).
-- **how-anthropic-teams-use-claude-code**: A `reins run` CLI over the same RunManager that streams events as JSONL, for CI and scripts.
-- **how-we-contain-claude**: Realpath the resolved target in confinePath when it exists, so a symlink inside the workspace cannot point outside.
-- **how-we-contain-claude**: Ask once per workspace before indexing `.reins/skills` and `.claude/skills` (approval kind `skill`).
-- **how-we-contain-claude**: Run flagged tool output through a one-shot classifier call before deciding to wrap it.
-- **infrastructure-noise**: Record per-run `process.resourceUsage()` deltas and the shell timeout in the Environment note.
-- **infrastructure-noise**: Show a Wilson interval next to the pass rate when n is small, and a config diff when two trials in a set differ in model, engine or version.
-- **managed-agents**: Persist the builder's conversation (direct engine) or session id (SDK) after each phase so an interrupted run can resume at the phase boundary.
-- **multi-agent-research-system**: Let the builder dispatch several scouts in one turn (they are read-only) and collect answers as they finish.
-- **multi-agent-research-system**: A fixed evaluator rubric (completeness, correctness, evidence quality) alongside the per-criterion results.
-- **redesigning-source-control**: Add `constraints` (globs the builder may not touch, commands it may not run) to RunConfig, enforced in confinePath and classifyBash.
-- **redesigning-source-control**: A `git_bisect` deferred tool for fix rounds when a regression is detected.
-- **swe-bench-sonnet**: Make write_file refuse to overwrite an existing file unless `overwrite: true` is passed.
-- **swe-bench-sonnet**: Add a `view_image` tool returning an image block for PNG/JPEG files in the workspace.
-- **writing-tools-for-agents**: Derive per-tool call count, error count and total result size in `derive.ts` and show a small tool-health table on the Guardrails tab.
-- **writing-tools-for-agents**: Add a registry lint test that fails on duplicate parameter semantics and descriptions under 40 characters.
+- **claude-code-on-the-web**: No domain allowlist: add `allowedDomains: string[]` to `GuardrailPolicy`, feed it to the SDK sandbox `network.allowedDomains` in `claudeCodeLoop.ts:215` and to a local egress proxy for the Seatbelt path; until a proxy exists, at least show the field and warn that the direct engine enforces it only via the command rules.
+- **claude-code-on-the-web**: No PR deliverable: add an optional wrap-up step (branch per run, `gh pr create` behind a `phase` approval) and surface the PR URL in the EndCard.
+- **claude-code-on-the-web**: Git credentials are reachable from the sandbox: deny reads of `~/.ssh` and `~/.git-credentials` in `seatbeltProfile`, and route `git push` through a helper that attaches credentials outside the sandbox.
+- **claude-code-on-the-web**: Two runs can target one workspace at once and share `.reins/`: refuse `createRun` while another live run owns the same workspace, or run each trial in a fresh worktree.
+- **claude-code-on-the-web**: No remote execution target: the `LoopOptions`/`ToolContext` seam (`loop.ts:29-40`, `registry.ts:15-24`) is where an SSH or container executor would plug in; document it as out of scope or add it.
+- **claude-code-on-the-web**: Unified budget: add a Reliability or sidebar tile that sums cost across runs for the day and, on the Claude Code engine, says that usage is counted against the subscription shared with the CLI.
+- **claude-code-sandboxing**: No egress proxy or domain allowlist: add `allowedDomains` to `GuardrailPolicy`, pass it to the SDK sandbox in `claudeCodeLoop.ts:215` (today the `network` block is dropped entirely when network is on), and for the direct engine run a local HTTP(S) proxy outside the sandbox with `HTTP_PROXY`/`HTTPS_PROXY` set in `runShell`'s env, raising an `approval.requested` on the first contact with a new domain.
+- **claude-code-sandboxing**: Sandbox violations are invisible: when `runShell` output under the sandbox matches "operation not permitted", emit a `guardrail.decision` (or a new `sandbox.violation` event) naming the path or host, render it on the Stage with its own badge, and offer "allow this path for the run".
+- **claude-code-sandboxing**: Reads of secrets are open: add `(deny file-read* (subpath "~/.ssh") (subpath "~/.aws") (literal "~/.git-credentials") (subpath "~/.config/gh"))` to `seatbeltProfile`, keeping reads of the rest of the disk open for builds.
+- **claude-code-sandboxing**: `confinePath` (`policy.ts:120-127`) should `realpathSync` the deepest existing ancestor of the target and re-check it against the workspace, so a symlink inside the workspace cannot write outside it.
+- **claude-code-sandboxing**: The API key re-enters the SDK subprocess environment (`claudeCodeLoop.ts:184`): use the SDK's `CLAUDE_CONFIG_DIR` login only and drop `ANTHROPIC_API_KEY` from the env unless no login exists, or document that on the Claude Code engine the agent's shell can read it.
+- **claude-code-sandboxing**: Linux has no sandbox: add a bubblewrap backend to `sandboxArgs` (`bwrap --ro-bind / / --bind <ws> <ws> --unshare-net`) and show `sandboxAvailable` as a badge in New run and Guardrails so a user on Linux knows the switch is inert.
+- **claude-code-sandboxing**: Prompt-reduction is unmeasured across runs: add "asked you per 100 tool calls" to `Trial` and the Reliability table so a policy change can be compared between trial sets.
+- **claude-think-tool**: Default contradicts the post's 2025-12-15 update: set `thinkTool.defaultOn` to false in `shared/components.ts:153` (or make the Careful profile the only one that turns it on) and record in `assumption` that current models with extended thinking rarely need it.
+- **claude-think-tool**: Think rows are not distinct: in `feedGroups.ts` treat `think` as flagged (never grouped) and give it its own collapsible "reasoning" row in `Stage.tsx`, like native thinking.
+- **claude-think-tool**: No brainstorm nudge on failure: when `lastEval` exists in `orchestrator.ts:234`, prepend "Before editing, use think to list at least two candidate causes for each failed criterion and pick one."
+- **claude-think-tool**: No harness-level "assess before acting": in `loop.ts:402-405`, when a result is truncated or `ok === false` and the next turn's first tool is side-effecting (bash, write_file, edit_file), add a one-line user message asking for a `think` call first.
+- **claude-think-tool**: Think usage is unmeasured: count `think` calls per role in `derive.ts` and show "N think calls · M output tokens" on the Context tab so the cost trade-off is visible per run.
+- **code-execution-with-mcp**: No data-stays-in-runtime mode: add a `run_script` tool that executes a script under the sandbox and returns only its stdout (capped) while writing the full result to `.reins/out/<id>`, and prompt the builder to use it for large or chained data instead of reading files into context.
+- **code-execution-with-mcp**: No PII tokenization: add a pass in `loop.ts:402-405` that replaces e-mail, phone and card patterns in tool results with `[EMAIL_n]` placeholders kept in a per-run map, restoring them when a placeholder appears in a later tool input; make it a `components` switch so it can be ablated.
+- **code-execution-with-mcp**: Skills are not written by the agent: add a `save_skill(name, description, body)` tool confined to `.reins/skills/<name>/SKILL.md` and mention it in the BUILDER prompt after a fix round; the Harness Skills list already shows workspace skills.
+- **code-execution-with-mcp**: No live logs for long commands: stream `child.stdout` chunks as `tool.progress` events (bounded) so the Stage row can show the tail of a 10-minute test run while it runs.
+- **code-execution-with-mcp**: `tool_search_tool_regex` has no detail level: once external MCP servers are allowed (see advanced-tool-use), expose them via the deferred-tool path and record `bytesIn`/`bytesOut` on `tool.result`.
+- **code-execution-with-mcp**: The SDK engine drops text beyond 24,000 chars (`claudeCodeLoop.ts:340`) instead of saving it: call `saveFullOutput` there too so the "full output" link works on both engines.
+- **confidential-inference-trusted-vms**: Decisions are not all logged: make `gate()` emit a `guardrail.decision` for read-only and in-workspace allows too (`loop.ts:477-480`), so the Guardrails tab is a complete record, and collapse the two gate implementations into one function both engines call.
+- **confidential-inference-trusted-vms**: No tamper evidence: add `prevHash`/`hash` (sha256 of the previous line and this one) to every event in `RunBus.emitEvent`, a `GET /api/runs/:id/export` that bundles `events.jsonl`, `config.json`, tool outputs and the prompt texts, and a verifier in `lessons:check` style (`npm run runs:verify`).
+- **confidential-inference-trusted-vms**: The key re-enters the agent's environment on the SDK engine (`claudeCodeLoop.ts:184`): prefer the CLI login (`CLAUDE_CONFIG_DIR`) and drop `ANTHROPIC_API_KEY` from `env` when a login exists.
+- **confidential-inference-trusted-vms**: No production mode: add `guardrail.mode: "production"` that rejects `trust`, custom allow patterns and `allowNetwork` on the direct engine, shows a badge in `RunHeader`, and is the default for saved presets marked `shared`.
+- **confidential-inference-trusted-vms**: Trace lacks tool and skill provenance: hash each tool schema and each skill body read, and record `toolsHash`, `skillsHash`, `stageLessonsHash` in the request-shape note so a run can be checked against what should have been running.
+- **confidential-inference-trusted-vms**: Egress is unmeasured: when a local proxy exists (see the sandboxing audit) log destination and bytes per run as `note` events and show totals on the Guardrails tab.
+- **confidential-inference-trusted-vms**: Name the trust boundary: add a `trustedCore` foundation to `shared/components.ts` listing the modules it covers (policy, classifier, bus, scrubbedEnv, confinePath) and keep those files free of tool execution so a reviewer knows what to read.
+- **demystifying-evals-for-ai-agents**: Trials are not isolated: give `repeat()` a `fresh: true` option that runs each trial in `git worktree add` of the base commit with an empty `.reins/`, and label trial sets as "shared workspace" vs "fresh" so the two are not mixed.
+- **demystifying-evals-for-ai-agents**: No deterministic grading: when a criterion's `verify` is a shell command, have the orchestrator run it itself after `report_evaluation` and record `observedExit`/`observedOutput` next to the evaluator's `pass`; disagreement becomes a visible "grader vs harness" row.
+- **demystifying-evals-for-ai-agents**: No "unknown" or "grader wrong": extend `CriterionResult` with `outcome: "pass" | "fail" | "unknown"` and `disputed?: string`, let the evaluator mark unknown, and let the user flag a result on the Contract tab (stored as a `note` event) so the Reliability set can show disputed trials.
+- **demystifying-evals-for-ai-agents**: No broken-task signal: in `groupTrials`, when `n ≥ 3` and `passes === 0`, add `flag: "probably-broken"` and render "0 of n passed: check the task and criteria before blaming the agent" on the Reliability card.
+- **demystifying-evals-for-ai-agents**: No suites or graduation: add `$REINS_HOME/suites/<name>.json` (task, workspace, expected pass rate) with a "Run suite" action and a `regression` badge once a set's pass rate stays above a threshold for N trials.
+- **demystifying-evals-for-ai-agents**: No task bank from failures: add "Save as eval task" on a failed run's EndCard that writes the task, workspace and contract to a suite file.
+- **demystifying-evals-for-ai-agents**: Trial metrics are thin: add `turns`, `toolCalls` and `firstTurnMs` to `trialFromEvents` and the Reliability table.
+- **desktop-extensions**: Workspace skills are trusted silently: ask once per workspace before indexing `.reins/skills` and `.claude/skills` (approval kind `skill`), and let `$REINS_HOME/settings.json` carry `skills.block: string[]` and `skills.allowWorkspace: boolean`.
+- **desktop-extensions**: No skill manifest or lint: add `version:` and `requires:` (tools it expects, e.g. `bash`) to `SKILL.md` frontmatter, show them on the Skills card, and extend `lessons:check` to a `skills:check` that fails on a missing description or an unknown required tool.
+- **desktop-extensions**: Secrets in a plain file: store the API key with the macOS `security` CLI (or `keytar`) when available and keep `settings.json` as the fallback, saying which is in use in Settings.
+- **desktop-extensions**: Sandbox availability is invisible: render `info.sandboxAvailable` in New run next to the OS sandbox switch ("inert on this platform") and in the Guardrails tile.
+- **desktop-extensions**: Formats are unversioned: add `schemaVersion` to `events.jsonl` lines (or the first event), `config.json` and `presets.json`, and document them in `docs/configuring.md`.
+- **effective-context-engineering-for-ai-agents**: Compaction is not tunable: add `context.preserve: string` (free text) to `RunConfig`, pass it as the compaction instruction when the API accepts one, and include it in the reset handoff; show the compaction summary in an editable textarea on the Context tab when the run is paused.
+- **effective-context-engineering-for-ai-agents**: Reset threshold uses a string-length estimate: keep the last measured `promptTokens` per role from `context.snapshot` and compare that in `shouldResetBuilder` (`orchestrator.ts:289`).
+- **effective-context-engineering-for-ai-agents**: The SDK engine's composition is fabricated (`claudeCodeLoop.ts:278`): either omit `composition` (make it optional) and show only the measured total, or estimate from the recorded tool results like the direct engine does.
+- **effective-context-engineering-for-ai-agents**: No per-call context cost: add `estimateTokens(output)` to `tool.result` and show it on the CallRow so a 20k-token `cat` is visible as such.
+- **effective-context-engineering-for-ai-agents**: Tool overlap is unlinted: add a registry test that fails when two tool descriptions share more than N content words or two tools accept the same parameter under different names (`path` vs `file`).
+- **effective-context-engineering-for-ai-agents**: No strategy selection: in `checkRunConfig`, warn when compaction, reset and scouts are all on for a short task (budget < $3 or Minimal), and add a one-line "context strategy" readout to the Context tab naming which of the three is active.
+- **effective-harnesses-for-long-running-agents**: Titles of existing features are editable: in `mergeFeatures`, keep the stored `title` for a known id and only accept `status` and `note` changes, emitting a warn note when the agent tried to rename or drop one.
+- **effective-harnesses-for-long-running-agents**: No `init.sh`: have the planner write `.reins/init.sh` (how to install, run and smoke-test), run it in `Orchestrator.run` before each build phase with a timeout, and log its output as a `note`; the builder's preamble then starts from a known-good state.
+- **effective-harnesses-for-long-running-agents**: One build phase does all features: add `buildMode: "one-feature-per-session"` that ends the build loop after each feature flips to done (fresh conversation, commit, progress note) and loops until the list is done or the budget is spent.
+- **effective-harnesses-for-long-running-agents**: `finish` accepts a dirty tree: when `gitCommits` is on, run `git status --porcelain` in the `finish` handler and return the dirty list instead of finishing.
+- **effective-harnesses-for-long-running-agents**: No browser verification: add a deferred `screenshot(url)` / `browse(url, steps)` tool (Playwright) for the builder and evaluator when a contract names a URL, and let the `verify-like-a-user` skill say what it cannot see (native dialogs, downloads).
+- **effective-harnesses-for-long-running-agents**: Startup routine is advisory: inject the last 40 lines of `progress.md` and `git log --oneline -20` into the build phase's first message (`projectContext()`), so the routine does not depend on the model remembering to read them.
+- **enabling-claude-code-to-work-more-autonomously**: No checkpoints: before each `write_file`/`edit_file` (and in `canUseTool` for Write/Edit on the SDK engine) copy the previous content to `$REINS_HOME/runs/<id>/checkpoints/<seq>/<path>` and emit `file.checkpoint`; add a "Restore files to here" action on the scrubber that writes them back, leaving the conversation untouched, and say on the card that shell side effects are not restored.
+- **enabling-claude-code-to-work-more-autonomously**: No managed background processes: add `start_process(command)` / `stop_process(id)` tools that keep a child alive for the phase, stream its tail into `tool.progress` events, and kill it at phase end; the Stage shows a "running processes" strip.
+- **enabling-claude-code-to-work-more-autonomously**: No user hooks: support `.reins/hooks.json` (`afterEdit`, `beforeCommit`, `beforeFinish` commands with timeouts) executed by the orchestrator, each result logged as a `note` and a failing `beforeFinish` returned to the builder instead of finishing.
+- **enabling-claude-code-to-work-more-autonomously**: Scouts are not available on the SDK engine: implement `delegate_scout` there with a nested `query()` using read-only tools, returning only the final text, so both engines share the component.
+- **enabling-claude-code-to-work-more-autonomously**: No steer history: keep the last 20 operator notes per browser in `localStorage` and cycle them with the up arrow in the steer box; show the feed's past notes as suggestions.
+- **enabling-claude-code-to-work-more-autonomously**: Diffs are per phase: emit `files.changed` after every write tool call (cheap `git diff --numstat` on the touched path) so the Changes tab updates per edit.
+- **eval-awareness-browsecomp**: No budget-anomaly signal: compute the median `costUsd` per trial set in `allTrialSets` and have the Stage emit a warn note when a live run of that task passes 3x it (the Overview meter already knows the budget fraction).
+- **eval-awareness-browsecomp**: No strategy-drift detection: check `search`/`WebSearch`/`http_fetch` inputs for off-task terms ("benchmark", "evaluation", "decrypt", "answer key") and emit a warn note that badges the call.
+- **eval-awareness-browsecomp**: Deliverable type unchecked: add an optional `deliverable` (file path, HTTP response or text answer) to the contract and have the evaluator fail the round when `finish` produced something else.
+- **eval-awareness-browsecomp**: Content filter is injection-only and the SDK engine does not wrap: add `guardrail.contentDenyPatterns` applied to every tool result in both engines, wrapping in `<untrusted_tool_output>` at `claudeCodeLoop.ts:338` as the direct engine does.
+- **eval-awareness-browsecomp**: Denial escalation is missing on the SDK engine: add the consecutive/total counter from `noteDenial` to `canUseTool`.
+- **eval-awareness-browsecomp**: Scout dispatch is never gated or capped: classify the scout question in auto mode, cap scouts per turn and per phase in `AgentLoop.scout`, and map SDK `parent_tool_use_id` messages to a scout role instead of dropping them.
+- **eval-awareness-browsecomp**: Trials share `.reins/` state: offer "fresh `.reins/` per trial" (or a git worktree per trial) in `repeat()` so repeated trials are independent.
+- **eval-awareness-browsecomp**: No flagged-run concept: a `flag` note (reason + seq) settable from the Stage, filterable in Reliability, with a "re-run flagged" button.
+- **eval-awareness-browsecomp**: No content blocklist: covered by `contentDenyPatterns` above; version it in the run config so a re-run records which list it used.
+- **harness-design-long-running-apps**: Reset fires only at round boundaries: compare `promptTokens` from each `context.snapshot` with `resetAtTokens` inside `AgentLoop.run`, end the phase with a `reset` reason and let the orchestrator restart the builder from `progress.md` mid-build.
+- **harness-design-long-running-apps**: Cost per phase is hidden: render `PhaseStat.costUsd` next to the elapsed time in `PhaseStepper` and on the phase FeedRow's finished line.
+- **harness-design-long-running-apps**: No browser evidence: a deferred Playwright `screenshot`/`browse` tool for the evaluator when a criterion's verify step names a URL, with the image shown in the Stage.
+- **harness-design-long-running-apps**: No evaluator calibration: let `report_evaluation` take an optional 0-1 score per criterion and ship two `input_examples` (a specific FAIL with quoted output, a PASS) so the rubric stays stable across rounds.
+- **harness-design-long-running-apps**: Prompts are not tunable: expose `systemPromptFor` templates as editable, hash-versioned text (`$REINS_HOME/prompts/<role>.md` overrides shown in the Harness tab) so evaluator calibration is a product action.
+- **harness-design-long-running-apps**: Evaluator cost is invisible: render `costByRole` on the EndCard and hint when the evaluator cost more than the build and passed in round 1.
+- **how-anthropic-teams-use-claude-code**: No attachments: accept `attachments: {name, mime, base64}[]` on `POST /api/runs`, store them under the run dir, pass images as image blocks and text as an "# Attachments" section in `firstMessage`.
+- **how-anthropic-teams-use-claude-code**: Knowledge layer is read-only in practice: at wrapup instruct the builder (or offer an `update_project_notes` tool) to append conventions it learned to CLAUDE.md/AGENTS.md, gated by the commit pause.
+- **how-anthropic-teams-use-claude-code**: No visual evidence: a Playwright `screenshot` tool for the builder and evaluator (shared with the harness-design gap).
+- **how-anthropic-teams-use-claude-code**: One-shot mode still needs setup: a "Quick task" entry that creates a temporary workspace and starts from Minimal.
+- **how-anthropic-teams-use-claude-code**: Subagents cannot be defined: let `.reins/agents/<name>.md` (prompt plus allowed read-only tools) register as a deferred `delegate_<name>` tool reusing `AgentLoop.scout`.
+- **how-anthropic-teams-use-claude-code**: No CLI or CI entry: `reins run --task --workspace --json` over `RunManager` streaming events as JSONL, plus a sample GitHub Action.
+- **how-anthropic-teams-use-claude-code**: No codebase Q&A outside a run: an "Ask the codebase" box that runs one scout with the direct client and shows the answer.
+- **how-anthropic-teams-use-claude-code**: No PR automation: an optional wrapup step `gh pr create` behind a phase approval.
+- **how-we-contain-claude**: Domain allowlist: `guardrail.allowedDomains: string[]` passed to the SDK `network.allowedDomains` and checked by `http_fetch` and the intake fetch; since Seatbelt cannot filter by host, keep shell network off whenever a list is set or route it through a local proxy.
+- **how-we-contain-claude**: Credentials readable from the sandbox: add `(deny file-read* (subpath "~/.aws") (subpath "~/.ssh") (literal "~/.netrc") ...)` to the Seatbelt profile and a read-deny list in `confinePath`.
+- **how-we-contain-claude**: No trust prompt: ask once per new workspace (approval kind `workspace`) before CLAUDE.md, `.claude/skills` and `.reins/*` are read, and record the decision in `settings.json`.
+- **how-we-contain-claude**: `confinePath` is lexical: `realpathSync` the deepest existing ancestor of `abs` and re-check it under `realpathSync(workspace)`; fix the comment.
+- **how-we-contain-claude**: No filesystem modes: `guardrail.fs: "rw" | "ro" | "rw-no-delete"` honoured by `write_file`/`edit_file` and a DENY on `rm` in `classifyBash`.
+- **how-we-contain-claude**: Output inspection is regex-only and the SDK engine does not wrap: on a sniff hit run a one-shot classifier call over the output and wrap it in both engines.
+- **how-we-contain-claude**: No egress record: log the host of every `http_fetch`/`WebFetch` and of `curl`/`wget` commands into a `network.access` note shown on the Guardrails tab.
+- **how-we-contain-claude**: Persistent-state provenance: run `sniffInjection` over CLAUDE.md, AGENTS.md and `progress.md` at load and label the "Project notes" section with its source path.
+- **how-we-contain-claude**: Local server is unauthenticated: bind to 127.0.0.1 and require a per-start token (printed at startup, held by the web app) on every mutating route.
+- **infrastructure-noise**: Environment note lacks infra facts: add `os.cpus().length`, `os.totalmem()`, the shell timeout, concurrency (always 1 today) and `process.resourceUsage()` at the end of the run, and copy them onto `Trial`.
+- **infrastructure-noise**: No infra bucket: add `Trial.failureKind: "agent" | "infra" | "none"` derived from the last `error` (API or connection error, shell timeout, interrupted) and show an infra error rate next to the pass rate.
+- **infrastructure-noise**: No resource limits: run `bash` under `ulimit -v`/`-t` (or `prlimit` on Linux) from `guardrail.limits {memMb, cpuSec}` with a separate soft warning threshold, and warn in `checkRunConfig` when soft equals hard.
+- **infrastructure-noise**: No interval: show a Wilson 95% interval next to the pass rate when n < 30 and grey out pass^k when the interval is wider than 0.3.
+- **infrastructure-noise**: No config match: split or badge trial sets when model, engine, harness version or effort differ, and add a "diff configs" link between two trials using `diffFromDefaults`.
+- **infrastructure-noise**: No time view: plot trial outcome against the hour of `createdAt` and mean turn latency (`turn.started` to `turn.finished`) in Reliability.
+- **infrastructure-noise**: No resource trace: record per-tool `durationMs` sums and the shell child's peak RSS (`/usr/bin/time -l`) on `tool.result`.
+- **infrastructure-noise**: Timeouts are untyped: set a `timedOut` field on `tool.result` (or a warn note) so they can be counted as infra.
+- **managed-agents**: The harness holds state: persist `builderHistory` (direct) or `builderSession` (SDK), `features` and `contract` to the run dir after each phase so an `Orchestrator` can be rebuilt from disk and the log is the only state.
+- **managed-agents**: No resume: add `RunManager.resume(runId)` that rebuilds the orchestrator from the saved phase state and continues at the last `phase.started`, instead of `markInterrupted` failing the run.
+- **managed-agents**: The agent cannot reread the session: a deferred `read_log(from, to)` tool returning narrated events from the run's JSONL, filtered to the caller's role.
+- **managed-agents**: Credentials in the SDK hand: pass `ANTHROPIC_API_KEY` to the subprocess only when no Claude Code login exists, point `CLAUDE_CONFIG_DIR` at a scoped copy, and document that the SDK Bash tool inherits the user's files.
+- **managed-agents**: No failure taxonomy: add `kind: "model" | "tool" | "transport" | "harness"` to the `error` event and set it at each emit site; filter by it in the Transcript.
+- **managed-agents**: Which hand is invisible: add `sandboxed: boolean` to `tool.result` from `ToolContext.sandbox` and badge it in `CallRow`.
+- **managed-agents**: One brain per process: allow parallel repeats when each trial gets its own `git worktree`, with a per-workspace lock otherwise.
+- **multi-agent-research-system**: Brief schema: extend `delegate_scout` input to `{objective, output_format, sources, boundaries}` (keep `question` as a shorthand) and render the fields in the Stage narration.
+- **multi-agent-research-system**: Scout fan-out is unbounded: cap scouts per turn (3) and per phase (8) in `AgentLoop.scout` and show a scout count on the phase row.
+- **multi-agent-research-system**: No artifact references: let a scout write its full findings to `.reins/scouts/<id>.md` and return the path plus a five-line summary, linked from the CallRow.
+- **multi-agent-research-system**: No mid-run resume: persist phase state and add `RunManager.resume(runId)` (see the managed-agents audit).
+- **multi-agent-research-system**: Batch join: run scouts with `Promise.allSettled` and attach late answers as a user block on the next turn (an inbox) instead of blocking the turn.
+- **multi-agent-research-system**: No rubric or task library: add a fixed evaluator rubric (correctness, completeness, evidence quality, source quality, efficiency) scored 0-1 alongside per-criterion pass/fail in `report_evaluation`, and `~/.reins/tasks/*.md` for repeat trials.
+- **multi-agent-research-system**: Tool descriptions are untested: a `registry.test.ts` case per tool (description length, examples for array-of-object inputs) and a `tool-eval` script that feeds a trial set's transcripts back to the model for description edits.
+- **multi-agent-research-system**: No privacy view: `GET /api/runs/:id/events?shape=1` that strips `text`, `thinking`, `input` and `output` to types, names and durations.
+- **multi-agent-research-system**: Steer during a scout goes to the scout: give the scout its own `LoopControl` with an empty `drainSteer` so operator notes reach the builder.
+- **redesigning-source-control**: No bisect or revert: a deferred `git_revert_to_base` (reset to the run's `baseSha` behind an approval) and a `git_bisect` helper the fix round can call when the same hard criterion fails twice.
+- **redesigning-source-control**: No post-merge signal: an optional wrapup step that reruns the contract's hard `verify` commands after the final commit and records a `postmerge.result` event.
+- **redesigning-source-control**: No semantic change classes: classify `files.changed` by extension and diff shape (docs-only, tests-only, logic) and show the class on the Files tab and the EndCard.
+- **redesigning-source-control**: Findings cannot be dismissed with a reason: in the after-evaluation approval allow "accept despite FAIL", recording the note and marking the round `overruled`.
+- **redesigning-source-control**: No path constraints: `guardrail.protectedPaths: string[]` (globs) enforced in `confinePath` for writes and in `classifyBash` as an ask when mentioned.
+- **redesigning-source-control**: No monitoring agent: a scheduled read-only scout over the last N runs' logs that posts a `note` on anomalies (error rate or cost drift) to the Reliability tab.
+- **redesigning-source-control**: Artifacts are not content-addressed: name saved tool outputs by the sha256 of their content and add a per-line hash chain to the JSONL export.
+- **swe-bench-sonnet**: `write_file` overwrites: require `overwrite: true` to replace an existing file and return "exists; pass overwrite:true or use edit_file".
+- **swe-bench-sonnet**: No reproduction evidence: add a build-stage line "write a script that reproduces the failure, run it, fix, rerun" and have the evaluator's `evidence` carry before/after output, shown as a pair on the Contract tab.
+- **swe-bench-sonnet**: Failure kinds are not separated: `Trial.failureKind` as in the infrastructure-noise audit.
+- **swe-bench-sonnet**: No image viewing on the direct engine: a `view_image` tool returning an image content block for PNG/JPEG files under the workspace, size-capped.
+- **swe-bench-sonnet**: Tests are editable: record the test files named in contract `verify` commands at `contract.agreed` and have the evaluator fail the round when `git diff --name-only <baseSha>` includes them without a criterion allowing it.
+- **swe-bench-sonnet**: Shell state does not persist and the description is silent: say so in the `bash` description ("each call starts a fresh shell in the workspace; chain with && or cd inside the command").
+- **swe-bench-sonnet**: SDK truncation has no hint: reuse `truncate()` from `registry.ts` at `claudeCodeLoop.ts:340`.
+- **writing-tools-for-agents**: No tool eval loop: a `scripts/tool-eval.ts` that folds a trial set's `tool.called`/`tool.result` events into per-tool count, error rate, mean duration and result size, and a "Tools" table in the Harness tab from the same fold in `derive.ts`.
+- **writing-tools-for-agents**: No registry lint: a `registry.test.ts` case that fails on descriptions under 40 characters, tools with array-of-object inputs and no example, and two tools whose descriptions share most of their words.
+- **writing-tools-for-agents**: No annotations: add `destructive` and `openWorld` to `ToolDef` (`write_file`, `edit_file`, `bash`, `git_commit` destructive; `http_fetch` open-world), pass them as MCP annotations in `mcpServer()`, badge them in `CallRow` and gate open-world tools on `allowNetwork`.
+- **writing-tools-for-agents**: Two names per tool: prefix direct-engine tool names consistently (or strip `mcp__reins__` in `narrateToolCall` and the Guardrails table) so the Stage shows one name on both engines.
+- **writing-tools-for-agents**: No per-tool metrics: covered by the tool eval fold above.
+- **writing-tools-for-agents**: No `response_format`: add `format: "concise" | "detailed"` to `git_status`, `list_files` and `search` (concise is paths only).
+- **writing-tools-for-agents**: SDK truncation has no hint: reuse `truncate()` at `claudeCodeLoop.ts:340`.

@@ -148,9 +148,9 @@ export const COMPONENTS: HarnessComponent[] = [
     short: "A no-op tool that gives the model a place to stop and reason between tool calls.",
     whenOff: "The think tool is not offered and the prompt does not ask for explicit pauses between tool calls.",
     engines: ["anthropic", "claude-code"],
-    assumption: "Long tool-call chains with policy constraints benefit from explicit pauses.",
+    assumption: "Long tool-call chains with policy constraints benefit from explicit pauses. The post's Dec 2025 update prefers native extended thinking on current models, so this is off by default.",
     lessons: [],
-    defaultOn: true,
+    defaultOn: false,
     group: "tools",
   },
   {

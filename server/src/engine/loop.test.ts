@@ -137,7 +137,8 @@ describe("AgentLoop", () => {
     expect(r.reason).toBe("terminal");
     expect(asked).toHaveLength(1);
     const decisions = events.filter((e): e is Extract<RunEvent, { type: "guardrail.decision" }> => e.type === "guardrail.decision");
-    expect(decisions.map((d) => d.verdict)).toEqual(["ask", "deny", "deny"]);
+    // Every gate decision is logged, including the allow for the in-workspace finish tool.
+    expect(decisions.map((d) => d.verdict)).toEqual(["ask", "deny", "deny", "allow"]);
     expect(decisions[1].source).toBe("user");
     fs.rmSync(ws, { recursive: true, force: true });
   });

@@ -1,18 +1,32 @@
 # How we built our multi-agent research system
 Source: https://www.anthropic.com/engineering/multi-agent-research-system
-Lesson file checked against the original: no (self-audit by the author session against the distilled lesson file; the independent re-fetch pass was rate-limited and is queued)
+Lesson file checked against the original: yes (nothing missing)
 
 | Learning or implication | Where in Reins | Status |
 |---|---|---|
-| Orchestrator-worker primitive with structured briefs and durable plan | Orchestrator (`orchestrator.ts`) over planner/builder/evaluator; scouts take a question brief (`registry.ts:341`); plan persisted in `.reins/spec.md` | implemented |
-| Effort budget by task class, visible token meter, runaway guardrails | Budget, max turns per phase, max fix rounds (`RunConfig`); scouts capped at 12 turns; budget meter in the Inspector | implemented |
-| Isolated worker context returning references, not full content | Scouts return only their final text (`loop.ts` scout); roles hand off files | implemented |
-| Checkpoint and resume; tool failures as data | Tool errors returned to the model (`loop.ts` execute); no mid-run resume | partial |
-| Full traces with a trace viewer | JSONL log and Transcript tab (`Transcript.tsx:24`) | implemented |
-| Parallel tool calls and parallel workers; async results inbox | Read-only tools run in parallel (`loop.ts` execute); scouts run inline, one at a time | partial |
-| Eval loop with an LLM judge, rubric and end-state grading | Evaluator judges against the contract with evidence (`registry.ts:392`); no fixed rubric or human calibration view | partial |
-| Tool descriptions as testable code; agents can rewrite them | Descriptions and examples in `registry.ts`; tested indirectly (`registry.test.ts`); no agent-driven rewriting | partial |
+| Orchestrator-worker primitive: the lead plans, saves the plan, spawns workers with structured briefs (objective, output format, tools, boundaries) and synthesizes; the brief schema is first-class in the UI | Planner writes `spec.md` and the feature list (`server/src/engine/orchestrator.ts:164-179`); the builder delegates to scouts (`server/src/engine/loop.ts:453-468`) with one free-text `question` (`server/src/tools/registry.ts:360-367`); the Stage narrates the question (`shared/narrate.ts`). No objective/format/tools/boundaries fields | partial |
+| Budget effort by task class; cap subagent count and tool calls; visible token meter | Each scout is capped at 12 turns (`loop.ts:462`) but scouts per phase are unbounded; per-phase `maxTurns` (`orchestrator.ts:118`) and a visible task budget (`loop.ts:342-346`); budget meter (`web/src/components/Overview.tsx:83-85`) and ContextGauge; no complexity tiers | partial |
+| Every worker gets an isolated context and returns references to filesystem artifacts, not full content | A scout is a fresh `AgentLoop` whose transcript never enters the parent (`loop.ts:456-467`); it returns a short answer, not a file; roles hand off through `.reins/` files (`shared/components.ts:257-262`) but scouts write nothing | partial |
+| Checkpoint and resume by default; tool failures as data; rainbow deploys | `progress.md`/`features.json` reloaded next session (`orchestrator.ts:153-161`); tool errors returned to the model (`loop.ts:436-438`; `server/src/roles/prompts.ts:15`); no mid-run resume after a crash (`server/src/engine/runManager.ts:70-81`); single local process, version recorded only (`shared/components.ts:3`) | partial |
+| Record full traces of decisions, tool calls and interaction structure; expose a trace viewer | Every event in JSONL (`server/src/engine/bus.ts:30-31`), thinking included (`loop.ts:253-255`); Transcript with group, role and text filters plus a scrubber (`web/src/panels/Transcript.tsx:24-79`) | implemented |
+| Parallel tool calls and parallel worker spawns; async completion with a results inbox | Read-only tools run concurrently per turn (`loop.ts:297-301`) and `delegate_scout` is `readOnly` (`registry.ts:367`) so several scouts in one turn run together; the prompt asks for parallel calls (`prompts.ts:14`). Results are batch-joined per turn (`loop.ts:300-309`); no inbox | partial |
+| Eval loop: about 20 real queries, one LLM judge with a 5-criterion rubric and pass/fail, end-state grading, periodic human review | The evaluator is an LLM judge giving pass/fail plus evidence per contract criterion (`orchestrator.ts:250-259`) with end-state checks over `bash`; trial sets (`server/src/engine/trials.ts`); no fixed rubric (accuracy, citations, completeness, source quality, efficiency), no task library | partial |
+| Tool descriptions are code the harness tests and agents rewrite; distinct purposes; interleaved thinking after each result | Descriptions and `input_examples` (`registry.ts:183,260,390-400`), strict schemas (`registry.ts:47-48`), adaptive thinking (`loop.ts:328`) and a think tool (`registry.ts:263-270`); `registry.test.ts` covers truncation and env scrubbing only (`server/src/tools/registry.test.ts:5-27`); no tool-testing agent | partial |
+| Multi-agent fits parallelizable high-value work and is a poor fit for coding that needs shared context | One builder with read-only scouts by design (`shared/components.ts:45-55`); roles exchange files, never context | implemented |
+| Tokens dominate quality and cost (about 15x chat): show them | Usage and cost per turn, role and phase (`web/src/state/derive.ts:157-168`); run cost in the header (`web/src/components/RunHeader.tsx:69-72`); Context tab | implemented |
+| Start wide then narrow; heuristics over rigid rules; explicit guardrails against spiralling | COMMON: `list_files` and `search` before `read_file` (`prompts.ts:13`); denial escalation (`loop.ts:441-451`); per-phase turn cap | implemented |
+| Tell the agent when a tool fails so it adapts; deterministic retries | Errors as `is_error` tool results (`loop.ts:436-438`); API retry after 5 s (`loop.ts:350-355`); truncated tool call retry (`loop.ts:268-272`) | implemented |
+| Long horizon: summarize phases, store essentials externally, fresh subagents with careful handoffs | `progress.md` plus the wrapup note (`orchestrator.ts:278-280`); `resetWithHandoff` (`orchestrator.ts:286-296`); compaction (`loop.ts:121-122`) | implemented |
+| Monitor decision patterns and interaction structure, not conversation contents | The log stores full text, thinking, inputs and outputs; there is no structure-only or redacted view | gap |
+| Synchronous execution blocks steering while workers run | Steer notes are delivered before the next model call (`loop.ts:168-182,198`); during a scout the builder waits (`loop.ts:464`) and the scout shares the parent's `control`, so an operator note typed then is drained by the scout (`loop.ts:456`), not the builder | partial |
 
 ## Gaps
-- Let the builder dispatch several scouts in one turn (they are read-only) and collect answers as they finish.
-- A fixed evaluator rubric (completeness, correctness, evidence quality) alongside the per-criterion results.
+- Brief schema: extend `delegate_scout` input to `{objective, output_format, sources, boundaries}` (keep `question` as a shorthand) and render the fields in the Stage narration.
+- Scout fan-out is unbounded: cap scouts per turn (3) and per phase (8) in `AgentLoop.scout` and show a scout count on the phase row.
+- No artifact references: let a scout write its full findings to `.reins/scouts/<id>.md` and return the path plus a five-line summary, linked from the CallRow.
+- No mid-run resume: persist phase state and add `RunManager.resume(runId)` (see the managed-agents audit).
+- Batch join: run scouts with `Promise.allSettled` and attach late answers as a user block on the next turn (an inbox) instead of blocking the turn.
+- No rubric or task library: add a fixed evaluator rubric (correctness, completeness, evidence quality, source quality, efficiency) scored 0-1 alongside per-criterion pass/fail in `report_evaluation`, and `~/.reins/tasks/*.md` for repeat trials.
+- Tool descriptions are untested: a `registry.test.ts` case per tool (description length, examples for array-of-object inputs) and a `tool-eval` script that feeds a trial set's transcripts back to the model for description edits.
+- No privacy view: `GET /api/runs/:id/events?shape=1` that strips `text`, `thinking`, `input` and `output` to types, names and durations.
+- Steer during a scout goes to the scout: give the scout its own `LoopControl` with an empty `drainSteer` so operator notes reach the builder.

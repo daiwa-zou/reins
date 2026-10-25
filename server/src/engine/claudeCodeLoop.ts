@@ -4,9 +4,9 @@ import type { RoleId, RunConfig, Usage } from "../../../shared/types.js";
 import { CONTEXT_LIMIT_TOKENS } from "../../../shared/components.js";
 import { narrateToolCall } from "../../../shared/narrate.js";
 import { RunBus } from "./bus.js";
-import type { LoopControl, LoopOptions, LoopResult } from "./loop.js";
+import { saveFullOutput, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
 import { addUsage, costUsd, emptyUsage } from "./pricing.js";
-import { ALL_TOOLS, scrubbedEnv } from "../tools/registry.js";
+import { ALL_TOOLS, scrubbedEnv, truncate } from "../tools/registry.js";
 import { classifyBash, confinePath, mentionsOutsidePaths } from "../guardrails/policy.js";
 import { sniffInjection } from "../guardrails/classifier.js";
 import path from "node:path";
@@ -29,6 +29,21 @@ export class ClaudeCodeLoop {
   /** tool_use ids of Reins MCP calls seen in assistant blocks, by tool name, consumed by the handler. */
   private mcpIds = new Map<string, string[]>();
   private pending = new Map<string, { name: string; input: unknown; started: number; gated?: boolean }>();
+  /** Running totals of what this session has put into its context (for the composition estimate). */
+  private seen = { toolResultChars: 0, historyChars: 0, thinkingChars: 0 };
+  private denials = { consecutive: 0, total: 0 };
+
+  /** Deny-and-continue with escalation, as in the direct engine: 3 in a row or 20 total pause for a human. */
+  private async noteDenial(): Promise<void> {
+    this.denials.consecutive++;
+    this.denials.total++;
+    if (this.denials.consecutive === 3 || this.denials.total === 20) {
+      this.bus.emitEvent({ type: "note", level: "warn", text: `${this.denials.consecutive} denials in a row (${this.denials.total} total) for the ${this.opts.role}; pausing for you.` });
+      const { approved } = await this.control.requestApproval("action", "The agent keeps hitting denials. Continue?", `The ${this.opts.role} has had ${this.denials.consecutive} actions denied in a row (${this.denials.total} in this phase). Approve to let it keep trying, reject to stop the phase.`, { denials: this.denials });
+      if (!approved) this.control.signal.dispatchEvent(new Event("abort"));
+      this.denials.consecutive = 0;
+    }
+  }
 
   constructor(
     private config: RunConfig,
@@ -141,6 +156,7 @@ export class ClaudeCodeLoop {
       const outside = mentionsOutsidePaths(cmd, ws);
       if (rule.verdict === "deny") {
         emit("deny", "rule", rule.rule, rule.rationale);
+        await this.noteDenial();
         return { behavior: "deny", message: `Denied by guardrails: ${rule.rationale}` };
       }
       if (outside && rule.verdict === "allow" && !trust) {
@@ -159,8 +175,11 @@ export class ClaudeCodeLoop {
         emit("ask", "rule", rule.rule, rule.rationale);
         const { approved, note } = await this.control.requestApproval("action", narrateToolCall("Bash", input), rule.rationale, { tool: "bash", input });
         emit(approved ? "allow" : "deny", "user", "approval", note || (approved ? "Approved by you." : "Rejected by you."));
+        if (!approved) await this.noteDenial();
+        else this.denials.consecutive = 0;
         return approved ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: `The operator declined this action${note ? `: ${note}` : "."}` };
       }
+      this.denials.consecutive = 0;
       emit("allow", "rule", rule.rule, rule.rationale);
       return { behavior: "allow", updatedInput: input };
     }
@@ -181,7 +200,10 @@ export class ClaudeCodeLoop {
     // The subprocess gets a scrubbed environment plus what the SDK itself needs to authenticate.
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(scrubbedEnv())) if (v !== undefined) env[k] = v;
-    for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
+    // The Claude Code login (CLAUDE_CONFIG_DIR) is the credential here. The API
+    // key is deliberately NOT passed: the SDK's Bash tool inherits this env, so
+    // the agent could read it.
+    for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
 
     const canWrite = this.opts.tools.includes("write_file");
     const canShell = this.opts.tools.includes("bash");
@@ -275,8 +297,17 @@ export class ClaudeCodeLoop {
     if (prompt > 0)
       this.bus.emitEvent({
         type: "context.snapshot",
-        snapshot: { role, promptTokens: prompt, limit: CONTEXT_LIMIT_TOKENS, composition: { system: Math.round(prompt * 0.12), tools: Math.round(prompt * 0.1), history: Math.round(prompt * 0.4), toolResults: Math.round(prompt * 0.33), thinking: Math.round(prompt * 0.05) }, turn: this.turn },
+        snapshot: { role, promptTokens: prompt, limit: CONTEXT_LIMIT_TOKENS, composition: this.composition(prompt), turn: this.turn },
       });
+  }
+
+  /** Apportion the measured prompt over what this session has actually seen (system prompt, tool schemas, text, results, thinking). */
+  private composition(prompt: number) {
+    const est = (chars: number) => Math.ceil(chars / 3.6);
+    const parts = { system: est(this.opts.system.length), tools: 2_500, history: est(this.seen.historyChars), toolResults: est(this.seen.toolResultChars), thinking: est(this.seen.thinkingChars) };
+    const total = Object.values(parts).reduce((a, b) => a + b, 0) || 1;
+    const scale = prompt / total;
+    return { system: Math.round(parts.system * scale), tools: Math.round(parts.tools * scale), history: Math.round(parts.history * scale), toolResults: Math.round(parts.toolResults * scale), thinking: Math.round(parts.thinking * scale) };
   }
 
   private handle(msg: SDKMessage, setFinal: (t: string) => void) {
@@ -311,9 +342,13 @@ export class ClaudeCodeLoop {
         for (const b of m?.content ?? []) {
           if (b.type === "text" && b.text?.trim()) {
             setFinal(b.text);
+            this.seen.historyChars += b.text.length;
             this.bus.emitEvent({ type: "text", role, text: b.text });
-          } else if (b.type === "thinking" && b.thinking?.trim()) this.bus.emitEvent({ type: "thinking", role, text: b.thinking });
-          else if (b.type === "tool_use") {
+          } else if (b.type === "thinking" && b.thinking?.trim()) {
+            this.seen.thinkingChars += b.thinking.length;
+            this.bus.emitEvent({ type: "thinking", role, text: b.thinking });
+          } else if (b.type === "tool_use") {
+            this.seen.historyChars += JSON.stringify(b.input ?? "").length;
             if (String(b.name).startsWith("mcp__reins__")) {
               const short = String(b.name).replace(/^mcp__reins__/, "");
               this.mcpIds.set(short, [...(this.mcpIds.get(short) ?? []), b.id]);
@@ -334,10 +369,13 @@ export class ClaudeCodeLoop {
           const p = this.pending.get(b.tool_use_id);
           if (!p) continue;
           this.pending.delete(b.tool_use_id);
-          const text = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((x: any) => (x.type === "text" ? x.text : `[${x.type}]`)).join("\n") : "";
-          const sniff = sniffInjection(text);
-          if (sniff) this.bus.emitEvent({ type: "note", level: "warn", text: `Tool output from ${p.name} contains instruction-shaped text (${sniff}).` });
-          this.bus.emitEvent({ type: "tool.result", role, toolUseId: b.tool_use_id, name: p.name, ok: !b.is_error, output: text.slice(0, 24_000), truncated: text.length > 24_000, durationMs: Date.now() - p.started });
+          const raw = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((x: any) => (x.type === "text" ? x.text : `[${x.type}]`)).join("\n") : "";
+          const sniff = sniffInjection(raw);
+          if (sniff) this.bus.emitEvent({ type: "note", level: "warn", text: `Tool output from ${p.name} contains instruction-shaped text (${sniff}). The SDK has already handed it to the model; it is flagged here so you can read that call with care.` });
+          const text = truncate(raw).text;
+          this.seen.toolResultChars += text.length;
+          if (raw.length > text.length) saveFullOutput(this.bus.runId, b.tool_use_id, raw);
+          this.bus.emitEvent({ type: "tool.result", role, toolUseId: b.tool_use_id, name: p.name, ok: !b.is_error, output: text, truncated: raw.length > text.length, durationMs: Date.now() - p.started });
         }
         break;
       }
@@ -364,7 +402,7 @@ export async function classifyViaClaudeCode(config: RunConfig, command: string, 
   const prompt = `You are the action classifier inside an agent harness. An autonomous coding agent is working on this task:\n\n${config.task}\n\nIt wants to run this shell command inside the project workspace ${config.workspace}:\n\n${command.slice(0, 3000)}\n\nA rule flagged it: ${ruleHint}\n\nDecide whether a reasonable developer who gave that task would consent to this command. Allow ordinary builds, tests, scratch files under /tmp, edits inside the project. Deny anything that exfiltrates data, reaches unrelated hosts, touches credentials, modifies the system outside the project, or is irreversible and unrelated to the task. If genuinely unsure, answer ask.\n\nReply with exactly one line of JSON: {"verdict":"allow"|"ask"|"deny","rationale":"<one sentence>"}`;
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(scrubbedEnv())) if (v !== undefined) env[k] = v;
-  for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
+  for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
   const ac = new AbortController();
   const onAbort = () => ac.abort();
   signal.addEventListener("abort", onAbort, { once: true });

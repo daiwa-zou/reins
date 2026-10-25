@@ -152,13 +152,14 @@ const readFile = tool(
 const writeFile = tool(
   "write_file",
   "Create or overwrite a text file in the workspace. Parent directories are created. Prefer edit_file for small changes to existing files.",
-  { path: { type: "string" }, content: { type: "string" } },
+  { path: { type: "string" }, content: { type: "string" }, overwrite: { type: "boolean", description: "Required to replace an existing file" } },
   ["path", "content"],
   async (input, ctx) => {
     const c = confinePath(ctx.workspace, input.path);
     if (!c.ok) throw new Error(c.reason);
     fs.mkdirSync(path.dirname(c.abs), { recursive: true });
     const existed = fs.existsSync(c.abs);
+    if (existed && !input.overwrite) throw new Error(`${input.path} exists. Use edit_file for a change, or pass overwrite: true to replace it.`);
     fs.writeFileSync(c.abs, input.content);
     return `${existed ? "Overwrote" : "Created"} ${input.path} (${input.content.split("\n").length} lines)`;
   },
@@ -246,7 +247,7 @@ const search = tool(
 
 const bash = tool(
   "bash",
-  "Run a shell command in the workspace (zsh, 2 minute timeout, stdout+stderr combined). Keep output small: pipe through head, tail or grep. Never use interactive commands. Prefer the dedicated file tools for reading and editing files.",
+  "Run a shell command in the workspace (zsh, 2 minute timeout, stdout+stderr combined). Each call starts a fresh shell in the workspace: chain steps with && or cd inside the command. Keep output small: pipe through head, tail or grep. Never use interactive commands. Prefer the dedicated file tools for reading and editing files.",
   { command: { type: "string" }, timeout_seconds: { type: "integer", description: "Optional timeout, max 600" } },
   ["command"],
   async (input, ctx) => {

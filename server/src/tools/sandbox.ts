@@ -40,6 +40,8 @@ export function seatbeltProfile(workspace: string, allowNetwork: boolean): strin
   const rules = [
     "(version 1)",
     "(allow default)",
+    // Reads stay open for builds, except the places credentials live.
+    `(deny file-read* ${[".ssh", ".aws", ".git-credentials", ".config/gh", ".netrc", ".npmrc", ".reins/settings.json"].map((p) => `(subpath ${lit(path.join(home, p))})`).join(" ")})`,
     allowNetwork ? "" : "(deny network*)",
     "(deny file-write*)",
     `(allow file-write* ${[...new Set(writable)].map((p) => `(subpath ${lit(p)})`).join(" ")})`,

@@ -453,7 +453,8 @@ export class AgentLoop {
   /** A scout: a fresh, short, read-only conversation whose transcript never enters the parent's context. */
   private async scout(question: string): Promise<string> {
     if (!this.config.components.scouts) return "Scouts are disabled for this run.";
-    const sub = new AgentLoop(this.client, this.config, this.bus, this.control, {
+    const scoutControl: LoopControl = { ...this.control, drainSteer: () => [] };
+    const sub = new AgentLoop(this.client, this.config, this.bus, scoutControl, {
       role: "scout",
       system: `You are a scout inside Reins, an agent harness. Another agent asked you a question about the codebase in ${this.config.workspace}. Explore with list_files, search and read_file (never write), then answer in under 300 words: the files involved (paths), how the relevant pieces fit, and anything surprising. Quote short snippets only when they matter. End your turn with the answer as plain text.`,
       tools: ["list_files", "search", "read_file", "think"],
@@ -474,9 +475,9 @@ export class AgentLoop {
       this.bus.emitEvent({ type: "guardrail.decision", role, toolUseId: t.id, tool: t.name, verdict, source, rule, rationale });
       return { verdict, rationale };
     };
-    if (def.readOnly) return { verdict: "allow", rationale: "read-only" };
+    if (def.readOnly) return emit("allow", "policy", "read-only", "Read-only tool; runs without asking.");
     if (t.name === "write_file" || t.name === "edit_file" || t.name === "update_progress" || t.name === "git_commit" || t.name === "propose_contract" || t.name === "review_contract" || t.name === "report_evaluation" || t.name === "finish") {
-      return { verdict: "allow", rationale: "in-workspace edit" };
+      return emit("allow", "policy", "in-workspace", "Writes are confined to the workspace.");
     }
     if (t.name === "bash") {
       const cmd = String((t.input as any)?.command ?? "");

@@ -325,7 +325,8 @@ if (process.env.REINS_SERVE_STATIC) {
   app.get("*", (c) => c.html(fs.readFileSync(path.join(dist, "index.html"), "utf8")));
 }
 
-const server = serve({ fetch: app.fetch, port: PORT }, () => {
+// Loopback only: the API has no auth and can start agents on this machine.
+const server = serve({ fetch: app.fetch, port: PORT, hostname: process.env.REINS_HOST ?? "127.0.0.1" }, () => {
   console.log(`reins server on http://localhost:${PORT}  (home ${REINS_HOME}, api key ${manager.hasApiKey ? "present" : "missing"})`);
 });
 

@@ -320,6 +320,10 @@ export class Orchestrator {
 export function mergeFeatures(existing: FeatureItem[], incoming: FeatureItem[]): FeatureItem[] {
   // Features are never deleted, only updated or added (the feature list lesson).
   const byId = new Map(existing.map((f) => [f.id, f]));
-  for (const f of incoming) byId.set(f.id, { ...byId.get(f.id), ...f });
+  for (const f of incoming) {
+    const prev = byId.get(f.id);
+    // Only status and note may change on a known feature; a renamed feature is a rewritten plan.
+    byId.set(f.id, prev ? { ...prev, status: f.status, note: f.note ?? prev.note } : f);
+  }
   return [...byId.values()];
 }

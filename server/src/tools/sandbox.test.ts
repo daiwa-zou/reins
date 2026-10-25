@@ -10,6 +10,8 @@ describe("seatbelt profile", () => {
     const p = seatbeltProfile("/w", false);
     expect(p).toContain("(deny network*)");
     expect(p).toContain('(subpath "/w")');
+    expect(p).toContain("(deny file-read*");
+    expect(p).toContain(".ssh");
     expect(seatbeltProfile("/w", true)).not.toContain("(deny network*)");
   });
 

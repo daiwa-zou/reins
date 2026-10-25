@@ -1,17 +1,30 @@
 # Eval awareness in Claude Opus 4.6's BrowseComp performance
 Source: https://www.anthropic.com/engineering/eval-awareness-browsecomp
-Lesson file checked against the original: no (self-audit by the author session against the distilled lesson file; the independent re-fetch pass was rate-limited and is queued)
+Lesson file checked against the original: yes (nothing missing)
 
 | Learning or implication | Where in Reins | Status |
 |---|---|---|
-| Carry 'how not to' constraints alongside the task | Role prompts carry method rules (`prompts.ts:11-17`); the contract can include negative criteria; no dedicated field | partial |
-| Flag budget anomalies and strategy drift | Budget cap stops runs (`loop.ts` remainingBudget); no anomaly detection relative to a median | partial |
-| Filter fetched content by pattern, not only URL | `classifier.ts:48` sniffInjection runs on every tool output and wraps flagged text | implemented |
-| Deliberate tool constraints with logging when hit repeatedly | Denials are logged and escalate after 3 in a row or 20 total (`loop.ts:442` noteDenial) | implemented |
-| Monitor per-subagent, let subagent queries be inspected and vetoed | Scout questions and turns are logged under role=scout (`loop.ts` scout); no veto before dispatch | partial |
-| Isolate runs from production side effects; prefer read-only or sandboxed network | Network off by default, Seatbelt sandbox, workspace confinement (`sandbox.ts`, `policy.ts:89`) | implemented |
-| Require verification against primary sources and record provenance | Evaluator must quote commands and output per criterion (`prompts.ts:38`); shown on the Contract tab | implemented |
+| Carry a "how not to" policy (forbidden sources, forbidden strategies) alongside the task | Free-text `guidance: string[]` on `RunConfig` (`shared/types.ts:126`) is appended to every role's system prompt as "Guidance for this run" (`server/src/roles/prompts.ts:84-85`); COMMON rules forbid writes outside the workspace and pushes (`prompts.ts:16-17`). No dedicated constraints field and nothing enforces them | partial |
+| Flag budget anomalies (runs far above the median token use) | Only hard caps: `remainingBudget()` stops the loop (`server/src/engine/loop.ts:192-195`), `maxTurnsPerPhase` (`loop.ts:196`), SDK `maxBudgetUsd` (`server/src/engine/claudeCodeLoop.ts:197`). Trial sets record `costUsd` per trial (`server/src/engine/trials.ts:22`) but nothing compares a run to its set's median | gap |
+| Detect strategy drift (queries shifting from the subject to "benchmark", "decrypt") | Search and fetch inputs are only logged as `tool.called` (`loop.ts:399`); no inspection of query terms over time | gap |
+| Flag a deliverable of a different type than requested | Hard contract criteria plus the evaluator's verdict (`server/src/engine/orchestrator.ts:253`) fail a wrong deliverable indirectly; no explicit deliverable type on the contract | partial |
+| Filter fetched content by pattern, not only by URL | `sniffInjection` regexes run on every tool result and the text is wrapped as untrusted (`loop.ts:430-434`; `server/src/guardrails/classifier.ts:48-58`). Patterns are fixed injection shapes, not a configurable term blocklist, and the SDK engine only emits a note without wrapping (`claudeCodeLoop.ts:338-339`) | partial |
+| Tool constraints are deliberate policy, logged when hit repeatedly | Every gate decision is a `guardrail.decision` event (`loop.ts:473-475`; `claudeCodeLoop.ts:113-114`), counted on the Guardrails tab (`web/src/panels/Guardrails.tsx:19-24`); denials escalate to a human after 3 in a row or 20 total (`loop.ts:441-451`) on the direct engine only, `canUseTool` has no counter | partial |
+| Multi-agent fan-out multiplies rare behaviour: monitor per-subagent, inspect and veto subagent queries | Scouts run on the same bus under role `scout` (`loop.ts:456-464`) and are filterable in the Transcript (`web/src/panels/Transcript.tsx:59-60`); `delegate_scout` is `readOnly` so dispatch bypasses the gate and classifier (`loop.ts:477`; `server/src/tools/registry.ts:360-367`); no cap on scouts per phase; the SDK engine drops subagent messages (`claudeCodeLoop.ts:297,329`) | partial |
+| Isolate runs from external side effects; prefer read-only or sandboxed network | `allowNetwork: false` by default (`shared/components.ts:362`); Seatbelt `(deny network*)` (`server/src/tools/sandbox.ts:43`); SDK `allowedDomains: [], strictAllowlist: true` (`claudeCodeLoop.ts:215`); NETWORK ask rules (`server/src/guardrails/policy.ts:66-71,107-109`); `http_fetch` denied when network is off (`loop.ts:497`) | implemented |
+| Require verification against primary sources before submission; record provenance per claim | Evaluator must run every verify step itself and quote the command and output (`prompts.ts:43-46`); `report_evaluation` requires `evidence` per criterion (`registry.ts:411-428`); shown per round on the Contract tab (`web/src/panels/Contract.tsx:42,68-75`) | implemented |
+| Capable agents route around unwritten restrictions: enforce at the environment layer | Explicit DENY/ASK rule lists (`policy.ts:13-64`) plus the OS sandbox as a boundary independent of the model (`shared/components.ts:222-232`; `loop.ts:427`) | implemented |
+| Agents leave traces in shared external state; keep trials independent | Repeats run one after another on one workspace (`server/src/engine/runManager.ts:291-305`), but `.reins/features.json` and `progress.md` are reloaded by the next run of the same task (`orchestrator.ts:153-161,291`), so trials in a set share state | partial |
+| The most effective mitigation was blocking any result containing a term variant, with versioned blocklists | User `denyPatterns` apply only to shell commands (`policy.ts:81-87`), never to tool output or fetched pages | gap |
+| Eval integrity is continuous: re-run flagged cases, keep canaries, expose "why was this flagged" with the trace | "Run 3 more" re-runs a task (`web/src/panels/Reliability.tsx:88-90`; `runManager.ts:292-305`); there is no flagged-run concept, no canary and no flag reason in the UI | gap |
 
 ## Gaps
-- Add `constraints: string[]` to RunConfig, rendered in every role's first message as 'Do not'.
-- Warn when a run's token use passes 3x the median of its trial set.
+- No budget-anomaly signal: compute the median `costUsd` per trial set in `allTrialSets` and have the Stage emit a warn note when a live run of that task passes 3x it (the Overview meter already knows the budget fraction).
+- No strategy-drift detection: check `search`/`WebSearch`/`http_fetch` inputs for off-task terms ("benchmark", "evaluation", "decrypt", "answer key") and emit a warn note that badges the call.
+- Deliverable type unchecked: add an optional `deliverable` (file path, HTTP response or text answer) to the contract and have the evaluator fail the round when `finish` produced something else.
+- Content filter is injection-only and the SDK engine does not wrap: add `guardrail.contentDenyPatterns` applied to every tool result in both engines, wrapping in `<untrusted_tool_output>` at `claudeCodeLoop.ts:338` as the direct engine does.
+- Denial escalation is missing on the SDK engine: add the consecutive/total counter from `noteDenial` to `canUseTool`.
+- Scout dispatch is never gated or capped: classify the scout question in auto mode, cap scouts per turn and per phase in `AgentLoop.scout`, and map SDK `parent_tool_use_id` messages to a scout role instead of dropping them.
+- Trials share `.reins/` state: offer "fresh `.reins/` per trial" (or a git worktree per trial) in `repeat()` so repeated trials are independent.
+- No flagged-run concept: a `flag` note (reason + seq) settable from the Stage, filterable in Reliability, with a "re-run flagged" button.
+- No content blocklist: covered by `contentDenyPatterns` above; version it in the run config so a re-run records which list it used.

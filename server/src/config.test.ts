@@ -80,7 +80,8 @@ describe("presets", () => {
     const cfg = applyPreset(base(), preset("Minimal"));
     expect(Object.entries(cfg.components).filter(([, v]) => v).map(([k]) => k).sort()).toEqual(["actionClassifier", "narration", "osSandbox"]);
     const diff = diffFromDefaults(cfg);
-    for (const id of ["planner", "contracts", "evaluator", "scouts", "featureList", "progressFile", "projectMemory", "gitCommits", "compaction", "contextEditing", "taskBudget", "thinkTool", "toolSearch", "toolExamples", "skills", "selfVerification"]) {
+    // thinkTool is off by default (the post's Dec 2025 update), so Minimal does not list it.
+    for (const id of ["planner", "contracts", "evaluator", "scouts", "featureList", "progressFile", "projectMemory", "gitCommits", "compaction", "contextEditing", "taskBudget", "toolSearch", "toolExamples", "skills", "selfVerification"]) {
       const d = diff.find((x) => x.path === `components.${id}`);
       expect(d, id).toBeDefined();
       expect(d!.text).toMatch(/: off \(default on\)$/);

@@ -27,6 +27,7 @@ standing: bundled
 - A browser-based DAW test took about 4 hours and $124.70: planner 4.7 min for $0.46; build rounds of 2h07 for $71, 1h02 for $37 and 11 min for $6; and QA rounds of about 7-10 min and roughly $3-4 each. QA still caught gaps.
 - Limitation: the model cannot hear audio, so QA is weak on musical taste.
 - Recommendations: experiment with the target model, read traces on realistic problems and tune against them; decompose tasks and assign specialized agents. Re-examine the harness when a new model ships, removing non-load-bearing pieces and adding pieces that enable new capabilities. The design space shifts, it does not shrink.
+- The evaluator is conditional: it is worth its cost when a task sits beyond what the model does reliably solo, and for tasks within the model's reach it is overhead. The V1 full-stack evaluator graded on product depth, functionality, visual design and code quality, and the planner was also asked to look for places to add AI features and to aim ambitiously at scope.
 
 ## Harness implications
 - [component:evaluator] Use a separate evaluator: it is easier to make skeptical than the builder is to make self-critical.
