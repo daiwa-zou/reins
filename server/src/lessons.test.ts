@@ -100,6 +100,14 @@ describe("lesson library", () => {
     const d = catalogueProblems([]);
     expect(d.length).toBeGreaterThan(0);
     expect(d[0]).toMatchObject({ file: "catalogue", level: "warn" });
+    // The bundled library targets every component and foundation; dropping the only lessons
+    // that target the evaluator flags exactly that component by id.
+    const lib = loadLessonLibrary().lessons;
+    expect(catalogueProblems(lib)).toEqual([]);
+    const without = lib.map((l) => ({ ...l, items: (l.items ?? []).filter((i) => !(i.kind === "component" && i.target === "evaluator")) }));
+    const msgs = catalogueProblems(without).map((p) => p.message);
+    expect(msgs.some((m) => m.includes('component "evaluator"'))).toBe(true);
+    expect(msgs.some((m) => m.includes('component "thinkTool"'))).toBe(false);
   });
 });
 

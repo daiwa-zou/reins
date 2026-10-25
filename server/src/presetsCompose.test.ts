@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Lesson, Preset } from "../../shared/types.js";
 import { defaultRunConfig } from "../../shared/components.js";
 import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, presetFromConfig, validatePresetConfig } from "../../shared/config.js";
-import { adaptPreset, composePreset, composeRun, PresetCompositionError, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
+import { adaptPreset, composePreset, composeRun, type PresetRecipe, PresetCompositionError, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
 import { parseLesson } from "../../shared/lessons.js";
 import { systemPromptFor } from "./roles/prompts.js";
 
@@ -165,5 +165,72 @@ describe("composeRun refuses invalid compositions", () => {
     expect(() => composeRun(["golang"], [])).toThrow(PresetCompositionError);
     expect(() => composeRun(["careful", "nosuchdomain"], [])).toThrow(PresetCompositionError);
     expect(composeRun(["careful", "golang", "cli"], []).presets).toEqual(["careful", "golang", "cli"]);
+  });
+});
+
+describe("composeRun merges roles, context and guardrail later-wins per key; the profile owns the engine", () => {
+  const recipes: PresetRecipe[] = [
+    ...PRESET_RECIPES,
+    {
+      id: "aa",
+      name: "AA",
+      description: "test domain aa",
+      guidance: [],
+      config: {
+        roles: { builder: { model: "model-aa" }, evaluator: { effort: "low" } },
+        context: { compactAtTokens: 1111, resetAtTokens: 5555 },
+        guardrail: { allowNetwork: true, askPatterns: ["^aa-only"] },
+      },
+    },
+    {
+      id: "bb",
+      name: "BB",
+      description: "test domain bb",
+      guidance: [],
+      config: {
+        roles: { builder: { model: "model-bb" } },
+        context: { compactAtTokens: 2222 },
+        guardrail: { allowNetwork: false },
+      },
+    },
+    { id: "eng", name: "Eng", description: "a domain that tries to pick the engine", guidance: [], config: { engine: "claude-code", context: { compactAtTokens: 3333 } } },
+  ];
+
+  it("(a) the later domain wins per key, keys only the earlier domain set are kept", () => {
+    const careful = BUILT_IN_PRESETS.find((p) => p.id === "careful")!.config;
+    const c = composeRun(["careful", "aa", "bb"], [], recipes).config;
+    // overridden by the later domain (bb)
+    expect(c.roles?.builder?.model).toBe("model-bb");
+    expect(c.context?.compactAtTokens).toBe(2222);
+    expect(c.guardrail?.allowNetwork).toBe(false);
+    // set only by the earlier domain (aa): kept
+    expect(c.roles?.evaluator?.effort).toBe("low");
+    expect(c.context?.resetAtTokens).toBe(5555);
+    expect(c.guardrail?.askPatterns).toEqual(["^aa-only"]);
+    // set by neither domain: the profile's value stays
+    expect(c.guardrail?.mode).toBe("ask");
+    expect(c.roles?.builder?.effort).toBe(careful.roles?.builder?.effort);
+    expect(c.context?.clearToolResultsAfterTurns).toBe(careful.context?.clearToolResultsAfterTurns);
+
+    // reversed order: aa is now later and wins
+    const r = composeRun(["careful", "bb", "aa"], [], recipes).config;
+    expect(r.roles?.builder?.model).toBe("model-aa");
+    expect(r.context?.compactAtTokens).toBe(1111);
+    expect(r.guardrail?.allowNetwork).toBe(true);
+  });
+
+  it("(b) a domain recipe that sets engine does not change the profile's engine", () => {
+    for (const profile of ["full", "minimal", "careful"]) {
+      const profileEngine = BUILT_IN_PRESETS.find((p) => p.id === profile)!.config.engine;
+      const c = composeRun([profile, "eng"], [], recipes).config;
+      expect(c.engine).toBe(profileEngine);
+      if (profileEngine === undefined) expect("engine" in c).toBe(false);
+      expect(c.context?.compactAtTokens).toBe(3333); // the rest of the recipe still applies
+    }
+  });
+
+  it("defaults to PRESET_RECIPES, so two-argument callers are unchanged", () => {
+    expect(composeRun(["careful", "golang", "cli"], [])).toEqual(composeRun(["careful", "golang", "cli"], [], PRESET_RECIPES));
+    expect(() => composeRun(["careful", "aa"], [])).toThrow(PresetCompositionError);
   });
 });

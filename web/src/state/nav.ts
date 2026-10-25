@@ -7,7 +7,7 @@
  */
 
 import { COMPONENT_IDS, FOUNDATIONS } from "@shared/components";
-import { LESSON_SLUG } from "@shared/lessons";
+import { LESSON_SLUG, SKILL_NAME } from "@shared/lessons";
 
 export type Section = "runs" | "reliability" | "harness" | "lessons";
 export type RunView = "activity" | "contract" | "changes" | "details";
@@ -23,6 +23,8 @@ export interface NavState {
   lesson?: string | null;
   /** Lessons section: component/foundation filter. Harness section: the card to focus. */
   component?: string | null;
+  /** Harness section: the installed skill row to focus (a lesson's skill implication links here). */
+  skill?: string | null;
 }
 
 export const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
@@ -67,7 +69,8 @@ export function normalizeNav(s: Partial<NavState>): NavState {
   // Lesson and component only mean something in their sections; garbage is dropped, never thrown.
   const lesson = section === "lessons" && typeof s.lesson === "string" && LESSON_SLUG.test(s.lesson) ? s.lesson : undefined;
   const component = (section === "lessons" || section === "harness") && typeof s.component === "string" && COMPONENT_OR_FOUNDATION.has(s.component) ? s.component : undefined;
-  return { section, run, view, sub, ...(lesson ? { lesson } : {}), ...(component ? { component } : {}) };
+  const skill = section === "harness" && typeof s.skill === "string" && SKILL_NAME.test(s.skill) ? s.skill : undefined;
+  return { section, run, view, sub, ...(lesson ? { lesson } : {}), ...(component ? { component } : {}), ...(skill ? { skill } : {}) };
 }
 
 /** Query string for a nav state ("" for the defaults). Default values are omitted. */
@@ -80,6 +83,7 @@ export function encodeNav(state: Partial<NavState>): string {
   if (s.sub !== DEFAULT_NAV.sub) p.set("sub", s.sub);
   if (s.lesson) p.set("lesson", s.lesson);
   if (s.component) p.set("component", s.component);
+  if (s.skill) p.set("skill", s.skill);
   const q = p.toString();
   return q ? `?${q}` : "";
 }
@@ -112,11 +116,12 @@ export function decodeNav(search: string | null | undefined, opts: { runExists?:
     sub: (p.get("sub") ?? undefined) as DetailsSub,
     lesson: p.get("lesson"),
     component: p.get("component"),
+    skill: p.get("skill"),
   });
 }
 
 export function sameNav(a: NavState, b: NavState): boolean {
-  return a.section === b.section && a.run === b.run && a.view === b.view && a.sub === b.sub && (a.lesson ?? null) === (b.lesson ?? null) && (a.component ?? null) === (b.component ?? null);
+  return a.section === b.section && a.run === b.run && a.view === b.view && a.sub === b.sub && (a.lesson ?? null) === (b.lesson ?? null) && (a.component ?? null) === (b.component ?? null) && (a.skill ?? null) === (b.skill ?? null);
 }
 
 // ---- Keyboard shortcuts ---------------------------------------------------

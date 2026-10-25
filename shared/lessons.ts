@@ -37,7 +37,7 @@ export const PHASES: Phase[] = ["plan", "contract", "build", "evaluate", "wrapup
 export const STANDINGS: Standing[] = ["bundled", "reviewed", "unreviewed"];
 export const PROVENANCES: LessonProvenance[] = ["post", "article", "paper", "postmortem", "note"];
 const DOMAIN = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export interface ParseOptions {
   /** Known skill names; when given, a [skill:x] target that is not in it is an error. */

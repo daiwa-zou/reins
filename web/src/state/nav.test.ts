@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_NAV, DETAILS_SUBS, RUN_VIEWS, SECTIONS, SHORTCUTS, applyNavAction, decodeNav, encodeNav, keyForSection, normalizeNav, shortcutFor, type NavState } from "./nav";
+import { DEFAULT_NAV, DETAILS_SUBS, RUN_VIEWS, SECTIONS, SHORTCUTS, applyNavAction, decodeNav, encodeNav, keyForSection, normalizeNav, sameNav, shortcutFor, type NavState } from "./nav";
 
 describe("nav URL round-trip", () => {
   it("round-trips every section × view × sub combination with a run", () => {
@@ -164,5 +164,24 @@ describe("nav: lessons and harness deep links", () => {
   it("drops lesson and component outside their sections", () => {
     expect(decodeNav("?section=runs&lesson=agent-skills&component=thinkTool")).toEqual({ section: "runs", run: null, view: "activity", sub: "transcript" });
     expect(decodeNav("?section=harness&lesson=agent-skills")).toEqual({ section: "harness", run: null, view: "activity", sub: "transcript" });
+  });
+
+  it("round-trips a focused Harness skill row (lesson skill links) and keeps it Harness-only", () => {
+    const state: NavState = { section: "harness", run: null, view: "activity", sub: "transcript", skill: "writing-a-contract" };
+    expect(encodeNav(state)).toBe("?section=harness&skill=writing-a-contract");
+    expect(decodeNav(encodeNav(state))).toEqual(state);
+    expect(sameNav(state, { ...state, skill: "verify-like-a-user" })).toBe(false);
+    expect(sameNav(state, { ...state })).toBe(true);
+    // Outside Harness, or garbage, the skill param is dropped.
+    expect(decodeNav("?section=lessons&skill=writing-a-contract")).toEqual({ section: "lessons", run: null, view: "activity", sub: "transcript" });
+    for (const q of ["?section=harness&skill=..%2Fetc", "?section=harness&skill=", `?section=harness&skill=${"a".repeat(200)}`, "?section=harness&skill=%00"]) {
+      expect(() => decodeNav(q)).not.toThrow();
+      expect(decodeNav(q)).toEqual({ section: "harness", run: null, view: "activity", sub: "transcript" });
+    }
+  });
+
+  it("a stage target focuses the stageLessons component card", () => {
+    const state: NavState = { section: "harness", run: null, view: "activity", sub: "transcript", component: "stageLessons" };
+    expect(decodeNav(encodeNav(state))).toEqual(state);
   });
 });

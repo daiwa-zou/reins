@@ -15,12 +15,23 @@ export function ImplicationsByKind({ lesson }: { lesson: Lesson }) {
   const target = (i: Implication) => {
     if (!i.target) return null;
     const label = i.kind === "component" ? (components.find((c) => c.id === i.target)?.label ?? i.target) : i.target;
+    // Where each kind lives on Harness: components and foundations have cards (#component-<id>),
+    // skills have a row in the installed skills list (#skill-<name>), and a stage's lessons
+    // reach its prompt through the "Lessons for this stage" component (#component-stageLessons).
+    const go = () => {
+      const t = i.target!;
+      if (i.kind === "skill") navigate({ section: "harness", skill: t, component: null });
+      else if (i.kind === "stage") navigate({ section: "harness", component: "stageLessons", skill: null });
+      else navigate({ section: "harness", component: t, skill: null });
+    };
+    const title =
+      i.kind === "stage"
+        ? `Goes into the ${i.target} phase's first message via "Lessons for this stage"; open that component in Harness`
+        : i.kind === "skill"
+          ? `Open the ${i.target} skill in Harness › Skills`
+          : `Open ${i.kind} ${i.target} in Harness`;
     return (
-      <button
-        className={`badge ${i.kind === "component" ? "badge-accent" : "badge-neutral"} hover:brightness-95 mr-1.5`}
-        onClick={() => navigate({ section: "harness", component: i.target! })}
-        title={`Open ${i.kind} ${i.target} in Harness`}
-      >
+      <button className={`badge ${i.kind === "component" ? "badge-accent" : "badge-neutral"} hover:brightness-95 mr-1.5`} onClick={go} title={title} data-target-kind={i.kind} data-target={i.target}>
         {i.kind === "stage" ? `stage: ${label}` : i.kind === "skill" ? `skill: ${label}` : label}
       </button>
     );

@@ -36,6 +36,8 @@ interface State {
   lesson: string | null;
   /** Lessons: component filter; Harness: focused card. Mirrored in the URL as ?component=. */
   component: string | null;
+  /** Harness: focused skill row. Mirrored in the URL as ?skill=. */
+  skill: string | null;
   presets: PresetEntry[];
   defaultPreset: string | null;
   refreshPresets: () => Promise<void>;
@@ -173,6 +175,7 @@ export const useStore = create<State>((set, get) => ({
   scrubSeq: null,
   lesson: null,
   component: null,
+  skill: null,
   presets: [],
   defaultPreset: null,
   booting: true,
@@ -206,13 +209,13 @@ export const useStore = create<State>((set, get) => ({
   },
   nav: () => {
     const s = get();
-    return { section: s.section, run: s.selectedRunId, view: s.view, sub: s.sub, lesson: s.lesson, component: s.component };
+    return { section: s.section, run: s.selectedRunId, view: s.view, sub: s.sub, lesson: s.lesson, component: s.component, skill: s.skill };
   },
   navigate: (patch, opts) => {
     const prev = get().nav();
     const next = normalizeNav({ ...prev, ...patch });
     if (!sameNav(prev, next)) {
-      set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, lesson: next.lesson ?? null, component: next.component ?? null, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
+      set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, lesson: next.lesson ?? null, component: next.component ?? null, skill: next.skill ?? null, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
       if (next.run && next.run !== prev.run) subscribe(next.run, get().events[next.run]?.length ?? 0);
     }
     writeUrl(next, !!opts?.replace);
@@ -224,7 +227,7 @@ export const useStore = create<State>((set, get) => ({
     const next = decodeNav(location.search, { runExists: known });
     const prev = s.nav();
     if (sameNav(prev, next)) return;
-    set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, lesson: next.lesson ?? null, component: next.component ?? null, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
+    set({ section: next.section, selectedRunId: next.run, view: next.view, sub: next.sub, lesson: next.lesson ?? null, component: next.component ?? null, skill: next.skill ?? null, ...(next.run !== prev.run ? { scrubSeq: null } : {}) });
     if (next.run && next.run !== prev.run) subscribe(next.run, get().events[next.run]?.length ?? 0);
   },
   selectRun: (id, opts) => get().navigate({ run: id, section: "runs", ...(opts?.view ? { view: opts.view } : {}) }, { replace: opts?.replace }),

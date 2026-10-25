@@ -25,6 +25,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const navigate = useStore((s) => s.navigate);
   const focus = useStore((s) => s.component);
+  const focusSkill = useStore((s) => s.skill);
   const openModal = useStore((s) => s.openModal);
   const runs = useStore((s) => s.runs);
   const info = useStore((s) => s.info);
@@ -242,7 +243,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
 
         <IdeasList lessons={lessons} onOpen={setLessonFilter} />
 
-        <SkillsList workspace={cfg && cfg.engine !== "replay" ? cfg.workspace : info?.defaultWorkspace} />
+        <SkillsList workspace={cfg && cfg.engine !== "replay" ? cfg.workspace : info?.defaultWorkspace} focus={focusSkill} />
       </div>
     </div>
   );
@@ -301,7 +302,7 @@ function EffectiveConfig({ cfg }: { cfg: RunConfig }) {
   );
 }
 
-function SkillsList({ workspace }: { workspace?: string }) {
+function SkillsList({ workspace, focus }: { workspace?: string; focus?: string | null }) {
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -315,6 +316,12 @@ function SkillsList({ workspace }: { workspace?: string }) {
       live = false;
     };
   }, [workspace]);
+  // A lesson's skill link focuses the row once the list has loaded.
+  useEffect(() => {
+    if (!focus || !skills) return;
+    const t = setTimeout(() => document.getElementById(`skill-${focus}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+    return () => clearTimeout(t);
+  }, [focus, skills]);
   return (
     <div className="card p-4">
       <div className="font-semibold">Skills</div>
@@ -324,10 +331,17 @@ function SkillsList({ workspace }: { workspace?: string }) {
       </p>
       {error && <div className="text-[var(--bad)] text-small mt-2">Could not list skills: {error}</div>}
       {skills && !skills.length && <div className="muted text-small mt-2">No skills installed.</div>}
+      {focus && skills && !skills.some((s) => s.name === focus) && <div className="text-small mt-2 muted">The skill “{focus}” a lesson names is not installed for this workspace.</div>}
       {skills && skills.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1.5">
-          {skills.map((s) => (
-            <li key={`${s.source}-${s.name}`} className="flex gap-2 items-start text-small">
+          {skills.map((s, i) => (
+            <li
+              key={`${s.source}-${s.name}`}
+              // The first row with a name owns the anchor (a workspace skill overrides a bundled one of the same name).
+              id={skills.findIndex((x) => x.name === s.name) === i ? `skill-${s.name}` : undefined}
+              className="flex gap-2 items-start text-small rounded"
+              style={focus === s.name ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}
+            >
               <Badge tone={s.source === "bundled" ? "neutral" : "accent"}>{s.source}</Badge>
               <div className="min-w-0">
                 <div className="font-medium">{s.name}</div>

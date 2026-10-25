@@ -19,8 +19,11 @@ export interface PresetRecipe {
   guidance: string[];
   /** Chip label in a run title, e.g. "Go". */
   short?: string;
-  /** Roles, context and guardrail keys this domain sets (later domains win per key; never the engine). */
-  config?: Pick<PresetConfig, "roles" | "context" | "guardrail">;
+  /**
+   * Roles, context and guardrail keys this domain sets (later domains win per key).
+   * An `engine` here is ignored by composeRun: the care profile owns the engine.
+   */
+  config?: Pick<PresetConfig, "roles" | "context" | "guardrail" | "engine">;
 }
 
 export const PRESET_RECIPES: PresetRecipe[] = [
@@ -99,8 +102,8 @@ const byAge = (a: Lesson, b: Lesson) => (a.date < b.date ? -1 : a.date > b.date 
 const titleCase = (d: string) => d.split("-").map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
 
 /** The recipe for a domain: a built-in one, or a generic recipe for a domain only lessons name. */
-export function recipeFor(domain: string): PresetRecipe {
-  return PRESET_RECIPES.find((r) => r.id === domain) ?? { id: domain, name: titleCase(domain), description: `Full, shaped by the lessons for the "${domain}" domain.`, guidance: [] };
+export function recipeFor(domain: string, recipes: PresetRecipe[] = PRESET_RECIPES): PresetRecipe {
+  return recipes.find((r) => r.id === domain) ?? { id: domain, name: titleCase(domain), description: `Full, shaped by the lessons for the "${domain}" domain.`, guidance: [] };
 }
 
 /**
@@ -145,8 +148,8 @@ export function composePreset(recipe: PresetRecipe, lessons: Lesson[], opts: { m
 }
 
 /** Domains named by the lessons, plus the built-in recipes, in a stable order. */
-export function presetDomains(lessons: Lesson[]): string[] {
-  const out = PRESET_RECIPES.map((r) => r.id);
+export function presetDomains(lessons: Lesson[], recipes: PresetRecipe[] = PRESET_RECIPES): string[] {
+  const out = recipes.map((r) => r.id);
   for (const d of namedDomains(lessons.filter((l) => l.standing !== "unreviewed"))) if (isDomain(d) && !out.includes(d)) out.push(d);
   return out;
 }
@@ -207,15 +210,16 @@ export class PresetCompositionError extends Error {}
  * - stage lessons: trusted stage implications tagged with a picked domain (or untagged), deduplicated and capped per stage;
  * - roles / context / guardrail: later wins per key;
  * - engine: owned by the profile, never by a domain.
+ * `recipes` defaults to PRESET_RECIPES; tests pass their own to exercise the merge rules.
  */
-export function composeRun(ids: string[], lessons: Lesson[]): ComposedRun {
+export function composeRun(ids: string[], lessons: Lesson[], recipes: PresetRecipe[] = PRESET_RECIPES): ComposedRun {
   const clean = [...new Set((ids ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))];
   const profiles = clean.filter((x) => (PROFILE_IDS as readonly string[]).includes(x));
   if (profiles.length > 1) throw new PresetCompositionError(`pick exactly one care profile, not ${profiles.join(" and ")}`);
   if (!profiles.length) throw new PresetCompositionError(`pick exactly one care profile (${PROFILE_IDS.join(", ")}) alongside any domains`);
   const profileId = profiles[0];
   const profile = profilePreset(profileId)!;
-  const known = presetDomains(lessons);
+  const known = presetDomains(lessons, recipes);
   const domains = clean.filter((x) => !(PROFILE_IDS as readonly string[]).includes(x));
   for (const d of domains) if (!known.includes(d)) throw new PresetCompositionError(`unknown preset "${d}" (care profiles: ${PROFILE_IDS.join(", ")}; domains: ${known.join(", ")})`);
 
@@ -229,7 +233,7 @@ export function composeRun(ids: string[], lessons: Lesson[]): ComposedRun {
   const basis: PresetBasis[] = [];
   const trusted = lessons.filter((l) => l.standing !== "unreviewed");
   for (const d of domains) {
-    const recipe = recipeFor(d);
+    const recipe = recipeFor(d, recipes);
     guidance.push(...recipe.guidance);
     for (const [r, v] of Object.entries(recipe.config?.roles ?? {})) (roles as any)[r] = { ...((roles as any)[r] ?? {}), ...v };
     Object.assign(context, recipe.config?.context ?? {});
