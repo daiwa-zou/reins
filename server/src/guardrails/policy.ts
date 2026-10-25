@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import type { GuardrailPolicy, GuardrailVerdict } from "../../../shared/types.js";
 
@@ -18,8 +19,36 @@ const DENY: [RegExp, string][] = [
   [/\bgit\s+push\b.*(--force|-f)\b/, "force push"],
   [/:\(\)\s*\{\s*:\|:&\s*\};:/, "fork bomb"],
   [/\bchmod\s+(-R\s+)?777\s+\//, "world-writable root"],
-  [/\bshutdown\b|\breboot\b|\bkillall\b|\bpkill\b|\bkill\s+-9\s+-1\b/, "system control (a stray kill once took out an agent's own harness)"],
+  [/\bshutdown\b|\breboot\b/, "system control"],
+  // Signalling every process (`kill -1`, `kill -9 -1`, `kill -- -1`) takes the harness down with it.
+  [/\bkill\s+(-\S+\s+)*-1\b/, "signals every process"],
 ];
+
+// Process names a kill-by-pattern must not be aimed at bare: the harness, its
+// dev servers and the agent's own runtime run under these, and a stray
+// `pkill -f node` once took out an agent's own harness. A pattern that also
+// names a port, a path, an env assignment or a PID is specific enough and
+// only needs an approval in auto mode; `kill <pid>` is always ordinary.
+const HARNESS_PROCESS_NAMES = /^(node|nodejs|tsx|ts-node|vite|npm|npx|pnpm|yarn|bun|deno|concurrently|claude|python3?|perl|ruby|java|go|sh|bash|zsh)$/;
+
+/**
+ * Returns the offending pattern when the command kills processes by a broad
+ * name (`killall node`, `pkill -f tsx`, `pkill -9 node`), null otherwise.
+ */
+export function broadKillPattern(command: string): string | null {
+  const re = /\b(pkill|killall)\b([^|;&\n]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(command))) {
+    // The pattern is the quoted argument if there is one, else the last bare word.
+    const rest = m[2];
+    const quoted = rest.match(/["']([^"']+)["']/);
+    const bare = quoted ? quoted[1].trim() : (rest.trim().split(/\s+/).filter((a) => a && !a.startsWith("-")).pop() ?? "");
+    if (!bare) return m[1]; // nothing named at all
+    const specific = /[\d/=:]/.test(bare);
+    if (!specific || HARNESS_PROCESS_NAMES.test(bare)) return bare;
+  }
+  return null;
+}
 
 // Needs a human (or the classifier) in auto mode.
 const ASK: [RegExp, string][] = [
@@ -32,6 +61,7 @@ const ASK: [RegExp, string][] = [
   [/\b(psql|mysql)\b.*\b(drop|truncate|delete)\b/i, "destructive SQL"],
   [/(^|[;&|]\s*|\$\(\s*)(open|xdg-open)\s/, "opens an application"],
   [/\bosascript\b|\bautomator\b/, "scripts the desktop"],
+  [/\b(pkill|killall)\b/, "kills processes by pattern"],
 ];
 
 const NETWORK: [RegExp, string][] = [
@@ -47,6 +77,8 @@ const SAFE_PREFIX =
 
 export function classifyBash(command: string, policy: GuardrailPolicy): RuleDecision {
   for (const [re, why] of DENY) if (re.test(command)) return { verdict: "deny", rule: `deny:${why}`, rationale: `Blocked: ${why}.` };
+  const broad = broadKillPattern(command);
+  if (broad) return { verdict: "deny", rule: "deny:broad kill", rationale: `Blocked: killing processes by the broad name "${broad}" can take out the harness itself. Kill the PID you started (kill $PID, or lsof -ti:PORT | xargs kill), or name the port, path or env assignment in the pattern.` };
   for (const src of policy.denyPatterns) {
     try {
       if (new RegExp(src).test(command)) return { verdict: "deny", rule: `deny:custom`, rationale: `Blocked by your deny pattern /${src}/.` };
@@ -88,9 +120,21 @@ export function classifyBash(command: string, policy: GuardrailPolicy): RuleDeci
 /** Confine a model-supplied path to the workspace. Lexical check plus realpath of the parent. */
 export function confinePath(workspace: string, p: string): { ok: true; abs: string } | { ok: false; reason: string } {
   const abs = path.resolve(workspace, p);
-  const rel = path.relative(workspace, abs);
-  if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) {
-    return { ok: false, reason: `path escapes the workspace: ${p}` };
+  const inside = (candidate: string, root: string) => {
+    const rel = path.relative(root, candidate);
+    return !(rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel));
+  };
+  if (!inside(abs, workspace)) return { ok: false, reason: `path escapes the workspace: ${p}` };
+  // A symlink inside the workspace can point outside it: resolve the deepest
+  // existing ancestor and check again against the real workspace.
+  try {
+    const realRoot = fs.realpathSync(workspace);
+    let probe = abs;
+    while (!fs.existsSync(probe)) probe = path.dirname(probe);
+    const realProbe = fs.realpathSync(probe);
+    if (!inside(realProbe, realRoot)) return { ok: false, reason: `path resolves outside the workspace through a symlink: ${p}` };
+  } catch {
+    /* unreadable path: the lexical check stands */
   }
   return { ok: true, abs };
 }

@@ -368,6 +368,7 @@ export function NewRun() {
               </span>
             )}
           </summary>
+          {customizeOpen && (
           <div className="flex flex-col gap-4 px-3 pb-3 pt-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="muted text-[11.5px]">Changes here apply on top of {describeStart(start)}.</span>
@@ -591,6 +592,7 @@ export function NewRun() {
               </details>
             )}
           </div>
+          )}
         </details>
 
         {warnings.length > 0 && (

@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { adaptPreset, composePreset, recipeFor } from "@shared/presets";
-import { applyPreset } from "@shared/config";
-import { defaultRunConfig } from "@shared/components";
+import { presetChip, presetDomains } from "@shared/presets";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
 import { api, type LessonAudit } from "../lib/api";
@@ -13,7 +11,9 @@ import type { LessonProblem } from "@shared/types";
  * The library the harness is built from: bundled lessons plus the user's own
  * ($REINS_HOME/lessons). The open lesson and the component filter live in the
  * URL (?section=lessons&lesson=<slug>&component=<id>), so a lesson can be
- * reloaded and shared. Each lesson links back to the Harness cards it informs.
+ * reloaded and shared. It is a reading library: a lesson reaches runs through
+ * the components it informs and the domains it shapes ("Used by"), never as a
+ * preset of its own.
  */
 export function LessonsPanel() {
   const lessons = useStore((s) => s.lessons);
@@ -27,19 +27,11 @@ export function LessonsPanel() {
   const [audits, setAudits] = useState<LessonAudit[]>([]);
   const [problems, setProblems] = useState<{ problems: LessonProblem[]; userDir: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [picked, setPicked] = useState<string[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
   const openModal = useStore((s) => s.openModal);
-  const availableEngine = useStore((s) => s.availableEngine);
-  const info = useStore((s) => s.info);
-  const presets = useStore((s) => s.presets);
-  // Compose a preset from the selected lessons (or the current filter) and open New run prefilled with it.
-  const buildPreset = (from: typeof lessons) => {
-    const domain = [...new Set(from.flatMap((l) => l.domains ?? []))];
-    const p = composePreset({ ...recipeFor(domain.length === 1 ? domain[0] : "custom"), name: "From lessons" }, from, { matchAll: true, name: "From lessons" });
-    const engine = availableEngine();
-    const cfg = applyPreset(defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine }), adaptPreset(p, engine));
-    openModal("newRun", { ...cfg, preset: undefined, id: undefined, createdAt: undefined, title: "", __basis: p.basis, __notice: `Prefilled from ${from.length} lesson${from.length === 1 ? "" : "s"}. Use "Save as preset…" to keep it.` } as any);
-  };
+  // Domains New run can pick (unreviewed lessons do not shape runs yet).
+  const knownDomains = useMemo(() => presetDomains(lessons), [lessons]);
+  const startWithDomain = (d: string) => openModal("newRun", { __compose: ["full", d] } as any);
 
   const reload = async () => {
     await refreshLessons();
@@ -104,47 +96,36 @@ export function LessonsPanel() {
             </optgroup>
           </select>
         </label>
-        <div className="flex flex-wrap gap-1">
-          <button className={`badge ${tag === null ? "badge-accent" : "badge-neutral"}`} onClick={() => setTag(null)}>
-            all tags
-          </button>
-          {tags.map((t) => (
-            <button key={t} className={`badge ${tag === t ? "badge-accent" : "badge-neutral"}`} onClick={() => setTag(tag === t ? null : t)}>
-              {t}
+        <details className="text-small" open={!!tag}>
+          <summary className="cursor-pointer faint">Tags{tag ? `: ${tag}` : ` · ${tags.length}`}</summary>
+          <div className="flex flex-wrap gap-1 mt-1">
+            <button className={`badge ${tag === null ? "badge-accent" : "badge-neutral"}`} onClick={() => setTag(null)}>
+              all tags
             </button>
-          ))}
-        </div>
+            {tags.map((t) => (
+              <button key={t} className={`badge ${tag === t ? "badge-accent" : "badge-neutral"}`} onClick={() => setTag(tag === t ? null : t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </details>
         <div className="faint text-[11px]">
           {shown.length} of {lessons.length} lessons{userCount ? ` · ${userCount} yours` : ""}
         </div>
-        <div className="flex flex-col gap-1 text-[11.5px]">
-          <button
-            className="btn btn-sm"
-            disabled={!picked.length && !shown.length}
-            onClick={() => buildPreset(picked.length ? lessons.filter((l) => picked.includes(l.slug)) : shown)}
-            title="Fold these lessons' enables/disables/guidance over the Full preset and open New run with the result"
-          >
-            Build a preset from these ({picked.length ? `${picked.length} selected` : `${shown.length} shown`})
-          </button>
-          {picked.length > 0 && (
-            <button className="underline faint self-start" onClick={() => setPicked([])}>
-              clear selection
-            </button>
-          )}
-        </div>
         <div className="flex flex-col gap-0.5">
           {shown.map((l) => (
-            <div key={l.slug} className="flex items-start gap-1">
-            <input type="checkbox" className="mt-2 shrink-0" checked={picked.includes(l.slug)} onChange={(e) => setPicked(e.target.checked ? [...picked, l.slug] : picked.filter((s) => s !== l.slug))} aria-label={`Select ${l.title} for a preset`} />
-            <button className={`flex-1 text-left rounded-md px-2 py-1.5 text-[12.5px] leading-snug ${open === l.slug ? "sunk font-medium" : "hover:bg-[var(--bg-sunk)]"}`} onClick={() => select(l.slug)} aria-current={open === l.slug ? "page" : undefined}>
+            <button key={l.slug} className={`text-left rounded-md px-2 py-1.5 text-[12.5px] leading-snug ${open === l.slug ? "sunk font-medium" : "hover:bg-[var(--bg-sunk)]"}`} onClick={() => select(l.slug)} aria-current={open === l.slug ? "page" : undefined}>
               {l.title}
               <div className="faint text-[10.5px] mt-0.5 flex items-center gap-1.5">
                 {l.date}
-                {l.source === "user" && <Badge tone="accent">user</Badge>}
-                {l.domains?.length ? <Badge title="Shapes these preset domains">{l.domains.join(", ")}</Badge> : null}
+                {l.source === "user" && <Badge tone="accent">yours</Badge>}
+                {(l.domains ?? []).map((d) => (
+                  <Badge key={d} title="A domain this lesson shapes">
+                    {presetChip(d)}
+                  </Badge>
+                ))}
               </div>
             </button>
-            </div>
           ))}
           {!shown.length && <div className="muted text-small px-2">No lessons match these filters.</div>}
         </div>
@@ -154,33 +135,35 @@ export function LessonsPanel() {
           {open && <IntakeNotice />}
           {!open && (
             <>
-              <div className="card p-4 text-small leading-relaxed">
-                <div className="flex items-center gap-2">
-                  <div className="font-semibold flex-1">Add your own lesson</div>
-                  <button className="btn btn-sm" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
+              <IntakeJobs />
+              <details className="card p-4 text-small leading-relaxed" data-add-lesson open={addOpen} onToggle={(e) => setAddOpen((e.target as HTMLDetailsElement).open)}>
+                <summary className="cursor-pointer font-semibold">Add a lesson</summary>
+                {addOpen && (
+                <>
+                <div className="flex items-center gap-2 mt-2">
+                  <p className="muted flex-1">
+                    Drop a markdown file in <code className="mono">{problems?.userDir ?? "$REINS_HOME/lessons"}</code>. It appears here without a restart, and a file with the same name as a bundled lesson replaces it. Start from{" "}
+                    <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
+                      docs/lesson-template.md
+                    </a>{" "}
+                    and run <code className="mono">npm run lessons:check</code> to lint it. Or let an agent draft one from a post:
+                  </p>
+                  <button className="btn btn-sm self-start" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
                     Reload
                   </button>
                 </div>
-                <p className="muted mt-1">
-                  Drop a markdown file in <code className="mono">{problems?.userDir ?? "$REINS_HOME/lessons"}</code>. It appears here without a restart, and a file with the same name as a bundled lesson replaces it. Start from{" "}
-                  <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
-                    docs/lesson-template.md
-                  </a>{" "}
-                  and run <code className="mono">npm run lessons:check</code> to lint it.{" "}
-                  <a className="underline" href="/api/docs/configuring.md" target="_blank" rel="noreferrer">
-                    More in docs/configuring.md
-                  </a>
-                  .
-                </p>
+                <div className="mt-2">
+                  <IntakeForm inline />
+                </div>
                 {audits.length > 0 && (
                   <p className="muted mt-2" title="From docs/audit, written by an independent audit pass that re-read each post and looked for the matching code">
                     Independent audit of {audits.length} lessons: <span className="text-[var(--ok)] font-semibold">{totals.implemented}</span> implemented · <span className="text-[var(--warn)] font-semibold">{totals.partial}</span> partial ·{" "}
                     <span className="text-[var(--bad)] font-semibold">{totals.gap}</span> gaps
                   </p>
                 )}
-              </div>
-              <IntakeForm />
-              <IntakeJobs />
+                </>
+                )}
+              </details>
               {userProblems.length > 0 && (
                 <div className="card p-4 text-small" style={{ borderColor: "var(--warn)" }} role="status">
                   <div className="font-semibold text-[var(--warn)]">
@@ -201,7 +184,10 @@ export function LessonsPanel() {
                 <button key={l.slug} className="card p-4 text-left hover:brightness-[0.98]" onClick={() => select(l.slug)}>
                   <div className="flex items-center gap-2">
                     <div className="font-semibold flex-1">{l.title}</div>
-                    {l.source === "user" && <Badge tone="accent">user</Badge>}
+                    {l.source === "user" && <Badge tone="accent">yours</Badge>}
+                    {(l.domains ?? []).map((d) => (
+                      <Badge key={d}>{presetChip(d)}</Badge>
+                    ))}
                     <span className="faint text-[11px]">{l.date}</span>
                   </div>
                   <p className="muted text-small mt-1 leading-relaxed line-clamp-2">{l.takeaway}</p>
@@ -216,6 +202,8 @@ export function LessonsPanel() {
                 const informs = components.filter((c) => l.components.includes(c.id));
                 const founds = FOUNDATIONS.filter((f) => l.foundations.includes(f.id));
                 const audit = audits.find((a) => a.slug === l.slug);
+                const usedDomains = l.standing === "unreviewed" ? [] : (l.domains ?? []).filter((d) => knownDomains.includes(d));
+                const fx = [l.enables?.length ? `on: ${l.enables.join(", ")}` : "", l.disables?.length ? `off: ${l.disables.join(", ")}` : "", l.guidance ? "guidance" : ""].filter(Boolean).join("; ");
                 return (
                   <article key={l.slug} id={`lesson-${l.slug}`} className="card p-5 fade-in">
                     <div className="flex items-start justify-between gap-3">
@@ -232,7 +220,7 @@ export function LessonsPanel() {
                       <StandingControl lesson={l} />
                       {l.source === "user" && (
                         <Badge tone="accent" title={`From ${problems?.userDir ?? "$REINS_HOME/lessons"}`}>
-                          user
+                          yours
                         </Badge>
                       )}
                       {l.tags.map((t) => (
@@ -240,37 +228,46 @@ export function LessonsPanel() {
                       ))}
                     </div>
                     <p className="mt-3 leading-relaxed text-[14px]">{l.takeaway}</p>
-                    {l.domains?.length ? (
-                      <div className="mt-2 text-[12px]" data-shapes-presets>
-                        <span className="faint">Shapes presets: </span>
-                        {l.domains.map((d, i) => {
-                          const name = presets.find((p) => p.generated && p.domain === d)?.name ?? recipeFor(d).name;
-                          const fx = [l.enables?.length ? `on: ${l.enables.join(", ")}` : "", l.disables?.length ? `off: ${l.disables.join(", ")}` : "", l.guidance ? "guidance" : ""].filter(Boolean).join("; ");
-                          return (
-                            <span key={d}>
-                              {i > 0 && ", "}
-                              <span className="font-medium">{name}</span> <span className="muted">({fx || "context"})</span>
-                            </span>
-                          );
-                        })}
-                        {l.guidance && <div className="muted mt-0.5">Guidance: {l.guidance}</div>}
-                      </div>
-                    ) : null}
-                    {(informs.length > 0 || founds.length > 0) && (
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
-                        <span className="faint">informs:</span>
-                        {informs.map((c) => (
-                          <button key={c.id} className="badge badge-accent hover:brightness-95" onClick={() => navigate({ section: "harness", component: c.id })} title={`Open the ${c.label} card in Harness`}>
-                            {c.label} →
-                          </button>
-                        ))}
-                        {founds.map((f) => (
-                          <button key={f.id} className="badge badge-neutral hover:brightness-95" onClick={() => navigate({ section: "harness", component: f.id })} title={`Open the ${f.label} foundation in Harness`}>
-                            {f.label} →
-                          </button>
-                        ))}
+                    {(informs.length > 0 || founds.length > 0 || usedDomains.length > 0) && (
+                      <div className="mt-4 rounded-lg border line p-3 flex flex-col gap-2 text-[12px]" data-used-by>
+                        <h3 className="text-[13px] font-semibold">Used by</h3>
+                        {(informs.length > 0 || founds.length > 0) && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="faint">Components:</span>
+                            {informs.map((c) => (
+                              <button key={c.id} className="badge badge-accent hover:brightness-95" onClick={() => navigate({ section: "harness", component: c.id })} title={`Open the ${c.label} card in Harness`}>
+                                {c.label} →
+                              </button>
+                            ))}
+                            {founds.map((f) => (
+                              <button key={f.id} className="badge badge-neutral hover:brightness-95" onClick={() => navigate({ section: "harness", component: f.id })} title={`Open the ${f.label} foundation in Harness`}>
+                                {f.label} →
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {usedDomains.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="faint">Domains:</span>
+                            {usedDomains.map((d) => (
+                              <button key={d} className="btn btn-sm" onClick={() => startWithDomain(d)} data-start-domain={d} title={`Open New run with the ${presetChip(d)} domain on`}>
+                                Start a run with {presetChip(d)}
+                              </button>
+                            ))}
+                            {fx && <span className="muted">this lesson adds {fx}</span>}
+                          </div>
+                        )}
+                        {l.guidance && <div className="muted">Guidance: {l.guidance}</div>}
                       </div>
                     )}
+                    <h3 className="text-[13px] font-semibold mt-5 mb-2">Learnings</h3>
+                    <ul className="flex flex-col gap-1.5 text-[12.5px] leading-relaxed list-disc pl-5">
+                      {l.learnings.map((x, i) => (
+                        <li key={i}>{x}</li>
+                      ))}
+                    </ul>
+                    <h3 className="text-[13px] font-semibold mt-5 mb-2">Harness implications</h3>
+                    <ImplicationsByKind lesson={l} />
                     {audit && (
                       <details className="mt-4 rounded-lg border line p-3">
                         <summary className="cursor-pointer text-[12.5px]">
@@ -301,14 +298,6 @@ export function LessonsPanel() {
                         )}
                       </details>
                     )}
-                    <h3 className="section-label mt-5 mb-2">Learnings</h3>
-                    <ul className="flex flex-col gap-1.5 text-[12.5px] leading-relaxed list-disc pl-5">
-                      {l.learnings.map((x, i) => (
-                        <li key={i}>{x}</li>
-                      ))}
-                    </ul>
-                    <h3 className="section-label mt-5 mb-2">Harness implications</h3>
-                    <ImplicationsByKind lesson={l} />
                   </article>
                 );
               })}

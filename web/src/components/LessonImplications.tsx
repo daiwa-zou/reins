@@ -95,7 +95,8 @@ export function StandingControl({ lesson }: { lesson: Lesson }) {
 }
 
 /** Start a lesson intake job from a URL or pasted text; its events open on the Stage like a run. */
-export function IntakeForm() {
+/** `inline`: shown already open, e.g. inside the Lessons "Add a lesson" card. */
+export function IntakeForm({ inline = false }: { inline?: boolean } = {}) {
   const selectRun = useStore((s) => s.selectRun);
   const refreshIntake = useStore((s) => s.refreshIntake);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
@@ -120,7 +121,7 @@ export function IntakeForm() {
     }
   };
   return (
-    <details className="card p-3 text-[12.5px]" data-intake-form>
+    <details className={`${inline ? "" : "card p-3"} text-[12.5px]`} data-intake-form open={inline || undefined}>
       <summary className="cursor-pointer font-semibold">Add a lesson from a source…</summary>
       <p className="muted mt-1.5">A librarian distils the source into a lesson with typed implications, each quoting the source. You review the draft before it lands in your library.</p>
       <input className="input w-full mt-2" placeholder="https://… (the source URL)" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Source URL" />

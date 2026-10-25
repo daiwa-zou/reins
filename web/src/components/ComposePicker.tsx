@@ -1,7 +1,7 @@
 import React from "react";
 import type { Lesson } from "@shared/types";
-import { domainPresets, PROFILE_IDS, presetChip, presetsLabel } from "@shared/presets";
-import { Badge } from "./ui";
+import { BUILT_IN_PRESETS } from "@shared/config";
+import { domainPresets, PROFILE_IDS, presetChip } from "@shared/presets";
 import { compositionError } from "../state/runChip";
 
 export interface DomainSuggestion {
@@ -10,11 +10,10 @@ export interface DomainSuggestion {
 }
 
 /**
- * Composable presets: exactly one care profile plus any number of domain
- * presets, layered in the order picked (see shared/presets.ts composeRun).
- * `value` is the run's `presets` list, profile first. An invalid composition
- * (two profiles, none, an unknown domain) is a PresetCompositionError from
- * composeRun; compositionError() turns it into the inline message below.
+ * Profile + Domains: exactly one profile and any number of domains, layered
+ * in the order picked (shared/presets.ts composeRun). `value` is the run's
+ * `presets` list, profile first; an empty list means nothing is picked here
+ * (a saved preset or custom settings are active), so nothing shows pressed.
  */
 export function ComposePicker({ lessons, value, suggestions, onChange }: { lessons: Lesson[]; value: string[]; suggestions: DomainSuggestion[]; onChange: (ids: string[]) => void }) {
   const profile = value.find((x) => (PROFILE_IDS as readonly string[]).includes(x));
@@ -29,28 +28,36 @@ export function ComposePicker({ lessons, value, suggestions, onChange }: { lesso
     onChange([profile ?? "full", ...next]);
   };
   return (
-    <div className="flex flex-col gap-1.5 text-[12.5px]" data-compose-picker>
-      <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Care profile">
-        <span className="font-semibold">Care profile</span>
-        {PROFILE_IDS.map((p) => (
-          <label key={p} className="inline-flex items-center gap-1 cursor-pointer">
-            <input type="radio" name="care-profile" value={p} checked={profile === p} onChange={() => setProfile(p)} />
-            {presetChip(p)}
-          </label>
-        ))}
-        {value.length > 0 && (
-          <>
-            <Badge tone="accent" title="The run title chip">
-              {presetsLabel(value)}
-            </Badge>
-            <button className="btn btn-ghost btn-sm" onClick={() => onChange([])} title="Stop composing; keep the settings below as they are">
-              clear
-            </button>
-          </>
-        )}
+    <div className="flex flex-col gap-2 text-[12.5px]" data-compose-picker>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold w-[64px]" id="profile-label">
+          Profile
+        </span>
+        <div className="inline-flex rounded-lg border line overflow-hidden" role="radiogroup" aria-labelledby="profile-label">
+          {PROFILE_IDS.map((p) => {
+            const on = profile === p;
+            return (
+              <button
+                key={p}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                data-profile={p}
+                className={`px-3 py-1 text-[12.5px] ${on ? "bg-[var(--accent)] text-white" : "hover:brightness-95"}`}
+                title={BUILT_IN_PRESETS.find((x) => x.id === p)?.description}
+                onClick={() => setProfile(p)}
+              >
+                {presetChip(p)}
+              </button>
+            );
+          })}
+        </div>
+        <span className="faint text-[11.5px]">how careful the run is</span>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5" aria-label="Domain presets">
-        <span className="font-semibold">Domains</span>
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-labelledby="domains-label">
+        <span className="font-semibold w-[64px]" id="domains-label">
+          Domains
+        </span>
         {ids.map((d) => {
           const on = picked.includes(d);
           const why = reason(d);
@@ -68,17 +75,17 @@ export function ComposePicker({ lessons, value, suggestions, onChange }: { lesso
             >
               {on ? "✓ " : ""}
               {presetChip(d)}
-              {why && <span className="muted"> · suggested: {why}</span>}
+              {why && <span className="muted"> · suggested</span>}
             </button>
           );
         })}
+        <span className="faint text-[11.5px]">what kind of project; pick any</span>
       </div>
       {error && (
         <div className="text-[11.5px] leading-snug text-[var(--bad)]" role="alert" data-compose-error>
           {error}
         </div>
       )}
-      <div className="muted text-[11.5px]">Domains layer over the profile in the order picked: later switches win, guidance and stage lessons are merged and capped. The engine stays the profile's.</div>
     </div>
   );
 }
