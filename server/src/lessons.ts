@@ -57,6 +57,53 @@ function signature(dir: string): string {
 
 let cache: { key: string; lib: LessonLibrary } | null = null;
 
+/**
+ * Intake sources for adopted user lessons: lesson slug -> source.md path. An intake job lives in
+ * $REINS_HOME/lessons/<job-slug>/ and its job.json names the lesson file it wrote, whose slug may differ.
+ */
+function intakeSources(dir: string, realDir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    if (!LESSON_SLUG.test(n)) continue;
+    const src = path.join(dir, n, "source.md");
+    try {
+      const job = JSON.parse(fs.readFileSync(path.join(dir, n, "job.json"), "utf8")) as { status?: string; lessonSlug?: string; lessonFile?: string };
+      const slug = job.lessonSlug ?? (job.lessonFile ? path.basename(job.lessonFile).replace(/\.md$/, "") : undefined);
+      if (job.status === "adopted" && slug && fs.existsSync(src)) out.set(slug, src);
+    } catch {
+      /* not an intake job dir */
+    }
+    if (!out.has(n) && fs.existsSync(src)) out.set(n, src);
+  }
+  for (const [slug, src] of out) {
+    try {
+      const real = fs.realpathSync(src);
+      if (!real.startsWith(realDir + path.sep)) out.delete(slug);
+    } catch {
+      out.delete(slug);
+    }
+  }
+  return out;
+}
+
+/** The intake source.md text for a user lesson, size-capped, or undefined. */
+function readIntakeSource(file: string | undefined): string | undefined {
+  if (!file) return undefined;
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > 400_000) return undefined;
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 function readDir(dir: string, source: Lesson["source"], problems: LessonProblem[], skills: string[]): Lesson[] {
   let entries: string[];
   try {
@@ -71,6 +118,7 @@ function readDir(dir: string, source: Lesson["source"], problems: LessonProblem[
     return [];
   }
   const out: Lesson[] = [];
+  const sources = source === "user" ? intakeSources(dir, realDir) : new Map<string, string>();
   for (const f of entries) {
     const slug = f.replace(/\.md$/, "");
     const problem = (level: LessonProblem["level"], message: string) => problems.push({ file: f, source, level, message });
@@ -100,7 +148,10 @@ function readDir(dir: string, source: Lesson["source"], problems: LessonProblem[
       problem("error", `is ${st.size} bytes, over the ${MAX_LESSON_BYTES}-byte limit; skipped`);
       continue;
     }
-    const { lesson, problems: ps } = parseLesson(slug, fs.readFileSync(real, "utf8"), source, { skills });
+    // A lesson adopted from intake keeps its source next to it ($REINS_HOME/lessons/<slug>/source.md);
+    // its quotes come from there, so check them against it as well as the Learnings.
+    const sourceText = readIntakeSource(sources.get(slug));
+    const { lesson, problems: ps } = parseLesson(slug, fs.readFileSync(real, "utf8"), source, { skills, ...(sourceText ? { sourceText } : {}) });
     for (const p of ps) problem(p.level, p.message);
     if (lesson) out.push(lesson);
   }

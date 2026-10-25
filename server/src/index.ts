@@ -48,6 +48,11 @@ if (!manager.hasApiKey && settings.apiKey) manager.setApiKey(settings.apiKey);
 
 // Lesson intake jobs: their own manager and storage ($REINS_HOME/lessons/<slug>/), never in the Runs list.
 const intake = new IntakeManager({ client: () => manager.client, hasClaudeCode: () => manager.hasClaudeCode });
+// A draft left waiting for approval by a previous server process gets its approval card back.
+{
+  const r = intake.recover();
+  if (r.resumed.length || r.interrupted.length) console.log(`intake: resumed ${r.resumed.length} waiting draft(s), marked ${r.interrupted.length} interrupted job(s)`);
+}
 const eventsFor = (id: string, from = 0) => (isIntakeId(id) ? intake.events(id, from) : manager.events(id, from));
 
 const app = new Hono();
@@ -96,7 +101,8 @@ app.post("/api/intake", async (c) => {
   try {
     return c.json(intake.start({ url: body?.url, text: body?.text, title: body?.title, engine: body?.engine === "claude-code" || body?.engine === "anthropic" ? body.engine : undefined }), 201);
   } catch (e) {
-    return c.json({ error: (e as Error).message }, e instanceof IntakeRefused ? 409 : 400);
+    if (e instanceof IntakeRefused) return c.json({ error: e.message, duplicate: e.duplicate }, 409);
+    return c.json({ error: (e as Error).message }, 400);
   }
 });
 app.get("/api/lessons/:slug", (c) => {
@@ -332,6 +338,7 @@ wss.on("connection", (ws) => {
   subs.set(ws, new Set());
   send(ws, { type: "hello", info: info() });
   send(ws, { type: "runs", runs: manager.listRuns() });
+  send(ws, { type: "intake", jobs: intake.list() });
   ws.on("message", (raw) => {
     try {
       const msg = JSON.parse(raw.toString()) as ClientMessage;
@@ -350,6 +357,12 @@ const fanOut = (ev: RunEvent) => {
 };
 manager.on("event", fanOut);
 intake.on("event", fanOut);
+// The Lessons section lists intake jobs; push the list when a job changes status.
+intake.on("event", (ev: RunEvent) => {
+  if (ev.type !== "run.status" && ev.type !== "run.created") return;
+  const jobs = intake.list();
+  for (const ws of subs.keys()) send(ws, { type: "intake", jobs });
+});
 let runsTimer: NodeJS.Timeout | null = null;
 manager.on("runs", () => {
   if (runsTimer) return;

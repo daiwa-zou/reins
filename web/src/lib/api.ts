@@ -1,4 +1,4 @@
-import type { EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet } from "@shared/types";
+import type { IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet } from "@shared/types";
 
 export type PresetEntry = Preset & { isDefault: boolean; compatibility?: Record<EngineId, PresetCompatibility> };
 export interface PresetList {
@@ -13,6 +13,16 @@ export interface LessonAudit {
   rows: { learning: string; where: string; status: "implemented" | "partial" | "gap" }[];
   gaps: string[];
   counts: { implemented: number; partial: number; gap: number };
+}
+
+/** POST /api/intake refused the source: it matches a lesson in the library, or an intake job still in progress. */
+export class IntakeRefusedError extends Error {
+  constructor(
+    message: string,
+    public readonly duplicate: { kind: "lesson" | "job"; slug: string; jobId?: string; status?: string } | null,
+  ) {
+    super(message);
+  }
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -49,7 +59,15 @@ export const api = {
   approve: (id: string, approvalId: string, decision: "approve" | "reject", note?: string, criteria?: ContractCriterion[], lesson?: unknown) =>
     post(`/api/runs/${id}/approve`, { approvalId, decision, note, criteria, lesson }).then((r) => j<{ ok: true }>(r)),
   setStanding: (slug: string, standing: "reviewed" | "unreviewed") => post(`/api/lessons/${encodeURIComponent(slug)}/standing`, { standing }).then((r) => j<Lesson>(r)),
-  startIntake: (body: { url?: string; text?: string }) => post("/api/intake", body).then((r) => j<{ id: string; slug: string }>(r)),
+  startIntake: async (body: { url?: string; text?: string }) => {
+    const r = await post("/api/intake", body);
+    if (r.status === 409) {
+      const b = await r.json().catch(() => ({}));
+      throw new IntakeRefusedError(b.error ?? "This source is already taken in.", b.duplicate ?? null);
+    }
+    return j<{ id: string; slug: string }>(r);
+  },
+  intakeJobs: () => fetch("/api/intake").then((r) => j<IntakeJobSummary[]>(r)),
   composablePresets: () => fetch("/api/presets/composable").then((r) => j<{ profiles: Preset[]; domains: Preset[] }>(r)),
   steer: (id: string, text: string) => post(`/api/runs/${id}/steer`, { text }).then((r) => j<{ ok: true }>(r)),
   pause: (id: string) => post(`/api/runs/${id}/pause`).then((r) => j<{ ok: true }>(r)),

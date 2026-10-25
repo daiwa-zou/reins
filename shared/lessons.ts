@@ -42,7 +42,7 @@ export const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export interface ParseOptions {
   /** Known skill names; when given, a [skill:x] target that is not in it is an error. */
   skills?: string[];
-  /** The source text quotes must come from (intake). Defaults to the lesson's own Learnings. */
+  /** The source text quotes may come from (intake: source.md). A quote found in the lesson's own Learnings is always accepted. */
   sourceText?: string;
 }
 
@@ -194,7 +194,7 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
     else if (source === "user") standing = st;
   }
   const learningsText = learnings.join("\n");
-  const quoteSource = opts.sourceText ? opts.sourceText : learningsText;
+  const quoteFound = (q: string) => quoteInSource(q, learningsText) || (!!opts.sourceText && quoteInSource(q, opts.sourceText));
 
   const items: Implication[] = [];
   const untyped: number[] = [];
@@ -230,7 +230,7 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
       else err(`${where}: invalid domain "${d}" (use lowercase letters, digits and -)`);
     }
     if (h.typed && !b.quote) problems.push({ level: "warn", message: `${where} has no "> quote" line with evidence from the source` });
-    else if (b.quote && !quoteInSource(b.quote, quoteSource)) problems.push({ level: "warn", message: `${where}: the quote is not found verbatim in the ${opts.sourceText ? "source" : "Learnings"}: "${b.quote.slice(0, 60)}"` });
+    else if (b.quote && !quoteFound(b.quote)) problems.push({ level: "warn", message: `${where}: the quote is not found verbatim in the ${opts.sourceText ? "source or the Learnings" : "Learnings"}: "${b.quote.slice(0, 60)}"` });
     items.push({ id: `${slug}#${n + 1}`, lesson: slug, date: meta.date ?? "", kind, ...(target && kind !== "gap" ? { target } : {}), claim: h.claim || b.head, quote: b.quote, domains: [...new Set([...own, ...domains])], standing });
   });
   if (untyped.length)

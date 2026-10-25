@@ -183,9 +183,11 @@ On the Lessons section, "Add a lesson" starts an **intake job** from a URL or pa
 
 1. The **librarian** role reads the source (for a URL, the harness fetches it with `http_fetch`; network is allowed for this job only), distils it into the lesson format with typed implications that each cite a quote, and ends with the `propose_lesson` tool. A quote that is not found verbatim in the source is rejected and the librarian must fix it.
 2. A lesson **approval card** on the Stage shows the draft: each implication with its kind, target, claim, quote and domains. Edit a claim, target or domains, drop an implication (and keep it again), and pick the standing (`unreviewed` or `reviewed`). Adopt sends only the kept implications.
-3. Approval adopts the lesson: it is written to `$REINS_HOME/lessons/<slug>.md` with a `hash:` line.
+3. Approval adopts the lesson: it is written to `$REINS_HOME/lessons/<slug>.md` with a `hash:` line. Its quotes come from the job's `source.md`, so `lessons:check` checks them against that file as well as the Learnings.
 
-A source whose content hash (or URL) matches an existing lesson is refused. A later **checker** role can be added at the hook `IntakeOrchestrator.check()` in `server/src/intake/intake.ts`: it runs between the proposal and the approval card and may annotate or reject implications.
+**Intake jobs list.** The Lessons section lists every intake job with its status (distilling, needs your review, adopted, rejected, cancelled, failed, interrupted). *Review* or *Open* shows the job on the Stage, and the URL (`?run=intake-<slug>`) reopens it after a reload. *Cancel* stops a live job, and the Lessons link in the sidebar counts the drafts waiting for review. While a lesson is open, a notice links to the waiting draft. If the server restarts while a draft waits for approval, the approval card comes back from `draft.json`; a job whose librarian was cut off is marked *interrupted*, and its source can be taken in again.
+
+A source whose content hash (or URL) matches a lesson in the library is refused with "This source matches <slug>; it is already in the library." A source that matches an intake job still in progress is refused with a message naming that job, and the form offers to open it; cancel the job to start over. A later **checker** role can be added at the hook `IntakeOrchestrator.check()` in `server/src/intake/intake.ts`: it runs between the proposal and the approval card and may annotate or reject implications.
 
 ### `npm run lessons:check`
 

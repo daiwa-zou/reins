@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { HarnessComponent, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
+import type { HarnessComponent, IntakeJobSummary, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
 import { api, type PresetEntry } from "../lib/api";
-import { decodeNav, encodeNav, normalizeNav, sameNav, type DetailsSub, type NavState, type RunView, type Section } from "./nav";
+import { decodeNav, encodeNav, isKnownRun, normalizeNav, sameNav, type DetailsSub, type NavState, type RunView, type Section } from "./nav";
 
 export type { Section, RunView, DetailsSub, NavState } from "./nav";
 /** The run views, in tab order. App sections (Runs, Reliability, Harness, Lessons) live in nav.ts SECTIONS. */
@@ -13,6 +13,9 @@ interface State {
   info?: ServerInfo;
   connected: boolean;
   runs: RunSummary[];
+  /** Lesson intake jobs (never in the Runs list; listed on Lessons, openable on the Stage by id). */
+  intakeJobs: IntakeJobSummary[];
+  refreshIntake: () => Promise<void>;
   components: HarnessComponent[];
   lessons: Lesson[];
   selectedRunId: string | null;
@@ -101,6 +104,7 @@ function connect(set: (p: Partial<State> | ((s: State) => Partial<State>)) => vo
     const msg = JSON.parse(e.data) as ServerMessage;
     if (msg.type === "hello") set({ info: msg.info });
     else if (msg.type === "runs") set({ runs: msg.runs });
+    else if (msg.type === "intake") set({ intakeJobs: msg.jobs });
     else if (msg.type === "event") {
       const ev = msg.event;
       set((s) => {
@@ -160,6 +164,7 @@ function writeUrl(nav: NavState, replace: boolean) {
 export const useStore = create<State>((set, get) => ({
   connected: false,
   runs: [],
+  intakeJobs: [],
   components: [],
   lessons: [],
   selectedRunId: null,
@@ -191,17 +196,17 @@ export const useStore = create<State>((set, get) => ({
     if (booted) return;
     booted = true;
     connect(set, get);
-    let info, components, lessons, runs;
+    let info, components, lessons, runs, intakeJobs: IntakeJobSummary[] = [];
     try {
-      [info, components, lessons, runs] = await Promise.all([api.info(), api.components(), api.lessons(), api.runs()]);
+      [info, components, lessons, runs, intakeJobs] = await Promise.all([api.info(), api.components(), api.lessons(), api.runs(), api.intakeJobs().catch(() => [] as IntakeJobSummary[])]);
     } catch (e) {
       booted = false;
       set({ booting: false, bootError: (e as Error).message });
       return;
     }
-    set({ info, components, lessons, runs, booting: false, bootError: null });
+    set({ info, components, lessons, runs, intakeJobs, booting: false, bootError: null });
     void get().refreshPresets();
-    const known = (id: string) => get().runs.some((r) => r.id === id);
+    const known = (id: string) => isKnownRun(get(), id);
     const fromUrl = decodeNav(location.search, { runExists: known });
     const latest = get().runs;
     const pick = fromUrl.run ?? latest.find((r) => r.status === "running" || r.status === "waiting_approval")?.id ?? latest[0]?.id ?? null;
@@ -223,7 +228,7 @@ export const useStore = create<State>((set, get) => ({
   syncFromUrl: () => {
     const s = get();
     // Before boot has loaded the run list we cannot tell a stale id from a real one; keep it.
-    const known = s.booting ? undefined : (id: string) => s.runs.some((r) => r.id === id);
+    const known = s.booting ? undefined : (id: string) => isKnownRun(s, id);
     const next = decodeNav(location.search, { runExists: known });
     const prev = s.nav();
     if (sameNav(prev, next)) return;
@@ -253,6 +258,13 @@ export const useStore = create<State>((set, get) => ({
       set({ presets: p.presets, defaultPreset: p.default });
     } catch {
       /* presets are optional; New run falls back to the defaults */
+    }
+  },
+  refreshIntake: async () => {
+    try {
+      set({ intakeJobs: await api.intakeJobs() });
+    } catch {
+      /* keep what we have */
     }
   },
   refreshLessons: async () => {

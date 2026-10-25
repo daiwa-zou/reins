@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_NAV, DETAILS_SUBS, RUN_VIEWS, SECTIONS, SHORTCUTS, applyNavAction, decodeNav, encodeNav, keyForSection, normalizeNav, sameNav, shortcutFor, type NavState } from "./nav";
+import { DEFAULT_NAV, DETAILS_SUBS, RUN_VIEWS, SECTIONS, SHORTCUTS, applyNavAction, decodeNav, encodeNav, isKnownRun, keyForSection, normalizeNav, sameNav, shortcutFor, type NavState } from "./nav";
 
 describe("nav URL round-trip", () => {
   it("round-trips every section × view × sub combination with a run", () => {
@@ -183,5 +183,14 @@ describe("nav: lessons and harness deep links", () => {
   it("a stage target focuses the stageLessons component card", () => {
     const state: NavState = { section: "harness", run: null, view: "activity", sub: "transcript", component: "stageLessons" };
     expect(decodeNav(encodeNav(state))).toEqual(state);
+  });
+  it("an intake job id is a run the Stage can open, though it is not in the Runs list", () => {
+    const s = { runs: [{ id: "r1" }], intakeJobs: [{ id: "intake-some-article" }] };
+    expect(isKnownRun(s, "r1")).toBe(true);
+    expect(isKnownRun(s, "intake-some-article")).toBe(true);
+    expect(isKnownRun(s, "intake-unknown")).toBe(false);
+    const known = (id: string) => isKnownRun(s, id);
+    expect(decodeNav("?run=intake-some-article", { runExists: known }).run).toBe("intake-some-article");
+    expect(decodeNav("?run=intake-unknown", { runExists: known }).run).toBeNull();
   });
 });

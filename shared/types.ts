@@ -501,7 +501,22 @@ export type ClientMessage =
   | { type: "subscribe"; runId: string; fromSeq?: number }
   | { type: "unsubscribe"; runId: string };
 
+/** A lesson intake job as the web app lists it (GET /api/intake, and the "intake" server message). */
+export interface IntakeJobSummary {
+  id: string;
+  slug: string;
+  url?: string;
+  status: "running" | "waiting_approval" | "adopted" | "rejected" | "failed" | "refused" | "cancelled" | "interrupted";
+  createdAt: string;
+  updatedAt?: string;
+  lessonSlug?: string;
+  reason?: string;
+  /** Live in this server process: it can be approved or cancelled. */
+  active: boolean;
+}
+
 export type ServerMessage =
   | { type: "event"; event: RunEvent }
+  | { type: "intake"; jobs: IntakeJobSummary[] }
   | { type: "runs"; runs: RunSummary[] }
   | { type: "hello"; info: ServerInfo };

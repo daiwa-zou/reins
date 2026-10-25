@@ -16,6 +16,8 @@ export function Sidebar() {
   const section = useStore((s) => s.section);
   const navigate = useStore((s) => s.navigate);
   const needs = useStore((s) => s.runs.filter((r) => r.status === "waiting_approval").length);
+  // Lesson drafts waiting for review: intake jobs are not runs, so they are counted on Lessons.
+  const drafts = useStore((s) => s.intakeJobs.filter((j) => j.status === "waiting_approval" && j.active).length);
   const [collapsed, setCollapsed] = useState(false);
 
   const items = SECTIONS.map((s) => {
@@ -34,6 +36,11 @@ export function Sidebar() {
         <Icon size={16} aria-hidden />
         {!collapsed && <span className="flex-1">{s.label}</span>}
         {s.id === "runs" && needs > 0 && <span className={`badge badge-warn ${collapsed ? "absolute ml-5 -mt-4 px-1" : ""}`}>{needs}</span>}
+        {s.id === "lessons" && drafts > 0 && (
+          <span className={`badge badge-warn ${collapsed ? "absolute ml-5 -mt-4 px-1" : ""}`} title={`${drafts} lesson draft${drafts === 1 ? "" : "s"} waiting for your review`} data-lesson-drafts>
+            {drafts}
+          </span>
+        )}
       </button>
     );
   });

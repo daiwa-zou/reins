@@ -6,7 +6,7 @@ import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
 import { api, type LessonAudit } from "../lib/api";
 import { FOUNDATIONS } from "@shared/components";
-import { ImplicationsByKind, IntakeForm, StandingControl } from "../components/LessonImplications";
+import { ImplicationsByKind, IntakeForm, IntakeJobs, IntakeNotice, StandingControl } from "../components/LessonImplications";
 import type { LessonProblem } from "@shared/types";
 
 /**
@@ -151,6 +151,7 @@ export function LessonsPanel() {
       </div>
       <div id="lesson-view" className="flex-1 min-w-0 overflow-auto p-5">
         <div className="max-w-3xl mx-auto flex flex-col gap-4">
+          {open && <IntakeNotice />}
           {!open && (
             <>
               <div className="card p-4 text-small leading-relaxed">
@@ -179,6 +180,7 @@ export function LessonsPanel() {
                 )}
               </div>
               <IntakeForm />
+              <IntakeJobs />
               {userProblems.length > 0 && (
                 <div className="card p-4 text-small" style={{ borderColor: "var(--warn)" }} role="status">
                   <div className="font-semibold text-[var(--warn)]">

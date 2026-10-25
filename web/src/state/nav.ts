@@ -180,3 +180,8 @@ export function applyNavAction(state: NavState, action: ShortcutAction): NavStat
   if (action.type === "view") return state.run ? normalizeNav({ ...state, section: "runs", view: action.view }) : state;
   return null;
 }
+
+/** A run id the Stage can open: a run in the list, or a lesson intake job (they share the Stage but not the Runs list). */
+export function isKnownRun(s: { runs: { id: string }[]; intakeJobs: { id: string }[] }, id: string): boolean {
+  return s.runs.some((r) => r.id === id) || s.intakeJobs.some((j) => j.id === id);
+}
