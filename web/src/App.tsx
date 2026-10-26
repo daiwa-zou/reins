@@ -74,6 +74,8 @@ export function App() {
           return;
         }
         case "newRun":
+          // The dialog autofocuses the task field; without this the "n" keypress lands in it.
+          e.preventDefault();
           return openModal("newRun");
         case "demo":
           return void startDemo();
