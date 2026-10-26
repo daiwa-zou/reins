@@ -434,7 +434,7 @@ export function parseComposition(idsOrName: string[] | string | undefined, recip
 export function inferComposition(cfg: PresetConfig): { effort: HarnessEffort; supervision: Supervision } {
   const on = (id: ComponentId) => (typeof cfg.components?.[id] === "boolean" ? cfg.components[id]! : COMPONENTS.find((c) => c.id === id)!.defaultOn);
   const p = cfg.pauses ?? {};
-  const supervision: Supervision = cfg.guardrail?.mode === "ask" ? "ask-every-write" : PAUSE_KEYS.every((k) => p[k] === false) ? "unattended" : "check-in";
+  const supervision: Supervision = cfg.guardrail?.mode === "ask" ? "ask-every-write" : PAUSE_KEYS.every((k) => !p[k]) ? "unattended" : "check-in";
   const effort: HarnessEffort = on("contracts") ? "high" : !on("planner") && !on("evaluator") ? "low" : "medium";
   return { effort, supervision };
 }

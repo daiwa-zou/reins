@@ -85,3 +85,87 @@ export function lastUserText(params: any): string {
 }
 
 export const phasesOf = (events: RunEvent[]) => events.filter((e): e is Extract<RunEvent, { type: "phase.started" }> => e.type === "phase.started");
+
+// ---- Publishing: a bare-repo remote and a fake gh ---------------------------
+
+/** Turn a tmpWorkspace into a clone of a bare "remote" at ../remote.git, with origin set and the base branch pushed. Returns the base branch name. */
+export function withRemote(ws: string): { remote: string; base: string } {
+  const remote = path.join(path.dirname(ws), `${path.basename(ws)}-remote.git`);
+  execSync(`git init -q --bare ${JSON.stringify(remote)}`);
+  const base = execSync("git rev-parse --abbrev-ref HEAD", { cwd: ws, encoding: "utf8" }).trim();
+  execSync(`git remote add origin ${JSON.stringify(remote)} && git push -q -u origin ${base}`, { cwd: ws });
+  return { remote, base };
+}
+
+/**
+ * A fake `gh` for tests: a node script that records every call in a state
+ * file, numbers pull requests as they are created, answers `pr view` from a
+ * per-PR queue of scripted views (the last one repeats), and on `pr merge`
+ * pushes the head branch onto the base in the real remote, so the harness's
+ * pull afterwards is a real fast-forward. Returns the command to run it and
+ * the state file path.
+ */
+export function fakeGh(_ws: string, views: Record<string, object[]> = {}): { command: string; state: string; read: () => FakeGhState } {
+  // Its files live outside the workspace, or the build's `git add -A` would commit them.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reins-gh-"));
+  const state = path.join(dir, "gh-state.json");
+  const script = path.join(dir, "fake-gh.mjs");
+  fs.writeFileSync(state, JSON.stringify({ next: 1, prs: {}, views, calls: [], comments: [] }, null, 2));
+  fs.writeFileSync(
+    script,
+    `import fs from "node:fs";
+import { execSync } from "node:child_process";
+const STATE = ${JSON.stringify(state)};
+const st = JSON.parse(fs.readFileSync(STATE, "utf8"));
+const args = process.argv.slice(2);
+st.calls.push(args);
+const save = () => fs.writeFileSync(STATE, JSON.stringify(st, null, 2));
+const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+const prOf = (ref) => { const m = String(ref).match(/(\\d+)$/); return m ? m[1] : ref; };
+const [group, verb] = args;
+if (group === "auth" && verb === "status") { save(); console.log("Logged in to github.com"); process.exit(0); }
+if (group === "pr" && verb === "create") {
+  const n = String(st.next++);
+  const body = flag("--body-file") ? fs.readFileSync(flag("--body-file"), "utf8") : flag("--body") ?? "";
+  st.prs[n] = { number: Number(n), url: "https://example.test/pr/" + n, base: flag("--base"), head: flag("--head"), title: flag("--title"), body, state: "OPEN" };
+  save(); console.log(st.prs[n].url); process.exit(0);
+}
+if (group === "pr" && verb === "view") {
+  const n = prOf(args[2]); const pr = st.prs[n];
+  if (!pr) { console.error("no pull requests found for " + args[2]); process.exit(1); }
+  const q = st.views[n] ?? [];
+  const v = q.length > 1 ? q.shift() : q[0] ?? {};
+  save();
+  console.log(JSON.stringify({ number: pr.number, url: pr.url, state: pr.state, mergedAt: null, reviewDecision: "", statusCheckRollup: [], mergeStateStatus: "CLEAN", headRefName: pr.head, baseRefName: pr.base, ...v }));
+  process.exit(0);
+}
+if (group === "pr" && verb === "merge") {
+  const n = prOf(args[2]); const pr = st.prs[n];
+  execSync("git push -q origin " + pr.head + ":" + pr.base, { stdio: "pipe" });
+  pr.state = "MERGED"; pr.method = args.find((a) => /^--(squash|merge|rebase)$/.test(a));
+  save(); console.log("Merged pull request #" + n); process.exit(0);
+}
+if (group === "pr" && verb === "comment") { st.comments.push({ pr: prOf(args[2]), body: flag("--body") ?? (flag("--body-file") ? fs.readFileSync(flag("--body-file"), "utf8") : "") }); save(); console.log("https://example.test/pr/" + prOf(args[2]) + "#comment"); process.exit(0); }
+save(); console.error("fake gh: unsupported " + args.join(" ")); process.exit(2);
+`,
+  );
+  return { command: `node ${JSON.stringify(script)}`, state, read: () => JSON.parse(fs.readFileSync(state, "utf8")) };
+}
+
+export interface FakeGhState {
+  next: number;
+  prs: Record<string, { number: number; url: string; base: string; head: string; title: string; body: string; state: string; method?: string }>;
+  views: Record<string, object[]>;
+  calls: string[][];
+  comments: { pr: string; body: string }[];
+}
+
+/** Scripted `gh pr view` answers. */
+export const prView = {
+  waiting: { state: "OPEN", reviewDecision: "", statusCheckRollup: [{ __typename: "CheckRun", name: "ci", status: "IN_PROGRESS", conclusion: "" }] },
+  approved: { state: "OPEN", reviewDecision: "APPROVED", statusCheckRollup: [{ __typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "SUCCESS" }] },
+  checksOnly: { state: "OPEN", reviewDecision: "", statusCheckRollup: [{ __typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "SUCCESS" }] },
+  failing: { state: "OPEN", reviewDecision: "", statusCheckRollup: [{ __typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "FAILURE" }, { __typename: "StatusContext", context: "lint", state: "SUCCESS" }] },
+  closed: { state: "CLOSED", reviewDecision: "" },
+  merged: { state: "MERGED", mergedAt: "2026-01-01T00:00:00Z" },
+};

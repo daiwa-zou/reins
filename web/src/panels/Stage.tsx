@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowDown, Brain, ChevronDown, ChevronRight, Eraser, ExternalLink, GitCommitHorizontal, Hand, Minimize2, RefreshCw, Wrench } from "lucide-react";
+import { ArrowDown, Brain, ChevronDown, ChevronRight, Eraser, ExternalLink, GitCommitHorizontal, GitPullRequest, Hand, Minimize2, RefreshCw, Wrench } from "lucide-react";
 import type { FeedItem, RunModel, ToolCall } from "../state/derive";
 import { PHASE_LABEL, PHASE_ORDER, isLive } from "../state/derive";
 import { groupCalls, summarizeNames } from "../state/feedGroups";
@@ -171,7 +171,7 @@ function EndCard({ model }: { model: RunModel }) {
 
 function PhaseStepper({ model }: { model: RunModel }) {
   const cfg = model.config;
-  const enabled = PHASE_ORDER.filter((p) => (p === "plan" ? cfg?.components.planner !== false : p === "breakdown" ? cfg?.components.planner !== false && cfg?.components.workPackages === true : p === "contract" ? cfg?.components.contracts !== false : p === "tests" ? cfg?.components.testsFirst === true : p === "evaluate" ? cfg?.components.evaluator !== false : true));
+  const enabled = PHASE_ORDER.filter((p) => (p === "plan" ? cfg?.components.planner !== false : p === "breakdown" ? cfg?.components.planner !== false && cfg?.components.workPackages === true : p === "contract" ? cfg?.components.contracts !== false : p === "tests" ? cfg?.components.testsFirst === true : p === "publish" ? cfg?.components.publish === true : p === "evaluate" ? cfg?.components.evaluator !== false : true));
   const latestByPhase = new Map<Phase, RunModel["phases"][number]>();
   for (const p of model.phases) latestByPhase.set(p.phase, p);
   const rounds = model.phases.filter((p) => p.phase === "build").length;
@@ -293,6 +293,21 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
           <span className="mono">{item.sha}</span>
           <span className="truncate">{item.message}</span>
           <span className="faint">· {item.files} files</span>
+        </div>
+      );
+    case "pr":
+      return (
+        <div className="flex items-center gap-2 text-small px-1 fade-in">
+          <GitPullRequest size={14} className="shrink-0" style={{ color: item.what === "merged" ? "var(--ok)" : "var(--accent)" }} aria-hidden />
+          <Badge tone={item.what === "merged" ? "ok" : "neutral"}>{item.what === "merged" ? "merged" : "pull request"}</Badge>
+          <a className="underline underline-offset-2" href={item.url} target="_blank" rel="noreferrer">
+            #{item.number}
+          </a>
+          <span className="mono muted truncate">
+            {item.branch} → {item.base}
+          </span>
+          {item.package && <span className="faint truncate">· {item.package.id}: {item.package.title}</span>}
+          {item.sha && <span className="mono faint">· {item.sha.slice(0, 7)}</span>}
         </div>
       );
     case "note":

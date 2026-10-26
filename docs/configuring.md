@@ -30,8 +30,8 @@ At `max` the evaluate phase tells the evaluator to run every contract criterion'
 | id | Label | Chip | Pauses | Guardrail mode | Action classifier |
 |---|---|---|---|---|---|
 | `unattended` | Unattended | Unattended | none | `auto` | on |
-| `check-in` | Check in at gates | Check in | `afterPlan`, `afterContract`, `afterEvaluation` | `auto` | on |
-| `ask-every-write` | Ask before every write | Ask every write | `afterPlan`, `afterContract`, `beforeCommit`, `afterEvaluation` | `ask` | off |
+| `check-in` | Check in at gates | Check in | `afterPlan`, `afterContract`, `afterEvaluation`, `beforeMerge` | `auto` | on |
+| `ask-every-write` | Ask before every write | Ask every write | `afterPlan`, `afterContract`, `beforeCommit`, `afterEvaluation`, `beforeMerge` | `ask` | off |
 <!-- /generated:supervision -->
 
 A pause turns on only if its gate exists at the chosen effort: no plan pause without the planner, no contract pause without contracts, no evaluation pause without the evaluator. So every effort × supervision × engine combination composes to a config with zero config-checker warnings (a test checks all 24). `trust` mode stays reachable only through Customize.
@@ -148,7 +148,7 @@ New run shows the Effort and Supervision controls, each with a one-line meaning,
 
 ### Lessons for this stage
 
-With the `stageLessons` component on (the default, on both engines), each phase's first message gets a block "Lessons for this stage": the stage implications (`[stage:plan]`, `[stage:breakdown]`, `[stage:contract]`, `[stage:build]`, `[stage:evaluate]`, `[stage:wrapup]`) that are bundled or reviewed, reviewed before bundled, newest lesson first, deduplicated, at most 8 lines. The lines are resolved when the run is created and recorded on the run config as `stageLessons`, so a replay or a later look at the run shows exactly what the agents saw.
+With the `stageLessons` component on (the default, on both engines), each phase's first message gets a block "Lessons for this stage": the stage implications (`[stage:plan]`, `[stage:breakdown]`, `[stage:contract]`, `[stage:tests]`, `[stage:build]`, `[stage:evaluate]`, `[stage:publish]`, `[stage:wrapup]`) that are bundled or reviewed, reviewed before bundled, newest lesson first, deduplicated, at most 8 lines. The lines are resolved when the run is created and recorded on the run config as `stageLessons`, so a replay or a later look at the run shows exactly what the agents saw.
 
 ## Work packages
 
@@ -162,12 +162,16 @@ With `testsFirst` on (always, on both engines), each package's contract is follo
 
 An agreed plan is written to `.reins/tests.json` and explained in `.reins/tests.md` (the explanation, the red run's exit code and output, one section per test), recorded as a `tests.agreed` event, committed on its own (`reins: tests — <title>`), and adds one hard criterion `T` ("The tests written in the tests stage pass") whose verification step is the command, so the evaluator runs the suite. The builder's first message carries a "Tests to make pass" section and the rule not to modify, weaken, skip or delete them; a test it believes wrong goes in its progress note and `open_items`. A writer that never proposes gets a warning and the build goes ahead with the contract unchanged. The Stage shows the plan as a *tests written* card.
 
+## Publish
+
+With `publish` on (always, on both engines) the harness carries every package to a merged pull request. At run start it checks for the remote named by `publish.remote` (`origin`) and a `gh` login; when either is missing it says so in one warn note ("Publish skipped: …") and packages are built on the current branch as before. Otherwise every package starts on its own branch, `reins/<run>-<package>-<title>`, cut from the base after `git pull --ff-only`, so each package builds on the merged tip of the ones before it. After a package passes evaluation comes the **publish** phase: push the branch, `gh pr create` onto the base with a body a reviewer can judge by intent (the package and its features, the contract with the evaluator's verdict and evidence per criterion, the tests written first from `.reins/tests.md`, the base sha), recorded as `pr.opened`. The harness then looks at the pull request every `pollSeconds` (60): a failing check fails the run naming the checks; a closed pull request fails it; once the pull request is approved with green or no checks (`mergeWhen: "approved"`, the default) or has green checks (`"checks"`), the `beforeMerge` pause asks you (check in at gates and ask before every write), then `gh pr merge --<mergeMethod>` (squash by default), the base is checked out and pulled, the package branch is deleted, and `pr.merged` records the new base sha. Waiting longer than `maxWaitMinutes` (240) fails the run with the reason it was still waiting; the pull request stays open. With `mergeWhen: "never"` the pull request is opened and the next package stacks on this branch without waiting. The policy lives on the run config as `publish` and in presets under the same key (`remote`, `base`, `mergeWhen`, `mergeMethod`, `pollSeconds`, `maxWaitMinutes`, `maxReviewRounds`; `shared/components.ts` `DEFAULT_PUBLISH`). The Stage shows each pull request and its merge as a row with the link.
+
 ## The config checker
 
 `checkRunConfig(config)` in `shared/config.ts` reports settings that will be ignored or contradict each other:
 
 - an unmet `requires` (e.g. `resetWithHandoff` without `progressFile`);
-- settings that do nothing: fix rounds or the after-evaluation pause with the evaluator off, the contract pause with contracts off, the plan pause with the planner off, the commit pause with commits off;
+- settings that do nothing: fix rounds or the after-evaluation pause with the evaluator off, the contract pause with contracts off, the plan pause with the planner off, the commit pause with commits off, the merge pause with publish off;
 - suspicious numbers: `context.resetAtTokens <= context.compactAtTokens`, `budgetUsd < 1`, `maxTurnsPerPhase < 5`.
 
 New run shows the warnings live, and the Harness section shows them for the selected run. At run start the orchestrator writes each one to the run log as a `note` with level `warn`, before the first phase. Warnings never block a run.
@@ -193,6 +197,7 @@ Every switch with its tier, what it does, what the harness does instead when it 
 | `workPackages` | Work packages | Always on | After the plan, the planner slices the feature list into pull-request-sized packages; contract, build and evaluate run once per package, in order. | No breakdown phase: the feature list is built as one package, so one contract covers the whole run and a pull request would be as big as the task. (With the planner off there is no feature list to slice, so the run is one package as well.) | Direct API, Claude Code | – | on |
 | `contracts` | Sprint contracts | Set by Effort | Builder and evaluator agree what 'done' means and how to verify it before any code is written. | No contract phase: the run is held to one generic criterion ("the task as described is complete and verified by running the result"). | Direct API, Claude Code | – | on |
 | `testsFirst` | Tests first | Always on | After the contract, a test writer encodes each criterion as a test that must fail before the build, explains every test in .reins/tests.md, and making the suite pass becomes a hard criterion. | No tests phase: the builder writes whatever tests it chooses while building, and only the contract's own verification steps are checked. | Direct API, Claude Code | – | on |
+| `publish` | Publish as pull requests | Always on | Each package is built on its own branch cut from the freshly pulled base; once it passes evaluation the harness pushes, opens a pull request, waits for approval and green checks, merges, and pulls the base before the next package. | No publish phase and no pull request: packages are built and committed one after another on the current branch, and nothing is pushed. | Direct API, Claude Code | – | on |
 | `evaluator` | Skeptical evaluator | Set by Effort | A separate agent checks every contract criterion against the live result. | No evaluate phase and no contract review: nobody but the builder checks the result, and fix rounds never run. | Direct API, Claude Code | – | on |
 | `scouts` | Scout subagents | Set by Effort | The builder can delegate a research question to a short-lived read-only subagent that returns a summary, not its transcript. | delegate_scout is not offered, so the builder explores the codebase in its own context window. | Direct API | – | on |
 | `featureList` | Feature list (features.json) | Always on | A structured feature list the agent must not delete from, only mark done. | Features are still tracked in the run log, but .reins/features.json is not written, so the next session cannot re-read what remains. | Direct API, Claude Code | – | on |

@@ -56,7 +56,8 @@ describe("derive (fold of the event log)", () => {
     expect(after.finishedTs).toBe("2026-01-01T00:00:04.000Z");
   });
   it("knows the breakdown phase, between plan and contract", () => {
-    expect(PHASE_ORDER).toEqual(["plan", "breakdown", "contract", "tests", "build", "evaluate", "wrapup"]);
+    expect(PHASE_ORDER).toEqual(["plan", "breakdown", "contract", "tests", "build", "evaluate", "publish", "wrapup"]);
+    expect(PHASE_LABEL.publish).toBe("Publish");
     expect(PHASE_LABEL.breakdown).toBe("Breakdown");
     expect(PHASE_LABEL.tests).toBe("Tests");
   });
@@ -81,5 +82,16 @@ describe("derive (fold of the event log)", () => {
     const item = m.feed.find((f) => f.kind === "tests") as any;
     expect(item.plan.tests).toHaveLength(1);
     expect(item.red.exitCode).toBe(1);
+  });
+  it("folds pr.opened and pr.merged into the pull request list and the feed", () => {
+    const pkg = { id: "P1", title: "Say hello", index: 1, total: 2 };
+    const evs = [
+      { runId: "r", seq: 0, ts: "2026-01-01T00:00:00.000Z", type: "pr.opened", number: 7, url: "https://example.test/pr/7", branch: "reins/r-p1-say-hello", base: "main", package: pkg },
+      { runId: "r", seq: 1, ts: "2026-01-01T00:10:00.000Z", type: "pr.merged", number: 7, url: "https://example.test/pr/7", branch: "reins/r-p1-say-hello", base: "main", sha: "abc" },
+    ] as unknown as RunEvent[];
+    const m = derive(evs);
+    expect(m.pullRequests).toEqual([{ number: 7, url: "https://example.test/pr/7", branch: "reins/r-p1-say-hello", base: "main", package: pkg, openedTs: "2026-01-01T00:00:00.000Z", merged: { sha: "abc", ts: "2026-01-01T00:10:00.000Z" } }]);
+    expect(m.feed.map((f) => f.kind)).toEqual(["pr", "pr"]);
+    expect((m.feed[1] as any).what).toBe("merged");
   });
 });

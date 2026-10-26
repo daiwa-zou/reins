@@ -35,12 +35,23 @@ export type FeedItem =
   | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
   | { kind: "tests"; seq: number; ts: string; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
+  | { kind: "pr"; seq: number; ts: string; what: "opened" | "merged"; number: number; url: string; branch: string; base: string; package?: PackageRef; sha?: string }
   | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }
   | { kind: "context"; seq: number; ts: string; what: "compacted" | "cleared" | "reset"; role: RoleId; detail: string }
   | { kind: "steer"; seq: number; ts: string; text: string; delivered: boolean }
   | { kind: "commit"; seq: number; ts: string; sha: string; message: string; files: number }
   | { kind: "note"; seq: number; ts: string; level: "info" | "warn" | "error"; text: string }
   | { kind: "summary"; seq: number; ts: string; summary: string; costUsd: number; durationMs: number };
+
+export interface PullRequestInfo {
+  number: number;
+  url: string;
+  branch: string;
+  base: string;
+  package?: PackageRef;
+  openedTs: string;
+  merged?: { sha: string; ts: string };
+}
 
 export interface PhaseStat {
   phase: Phase;
@@ -67,6 +78,8 @@ export interface RunModel {
   contractHistory: { by: RoleId; criteria: ContractCriterion[]; rationale: string }[];
   /** The latest tests-stage plan (per package) with its red run. */
   tests?: { plan: TestPlan; red: { exitCode: number | null; excerpt: string } };
+  /** Pull requests the publish stage opened, in order, with their merges. */
+  pullRequests: PullRequestInfo[];
   evaluations: { round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }[];
   features: FeatureItem[];
   snapshots: (ContextSnapshot & { seq: number })[];
@@ -100,6 +113,7 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
     calls: [],
     contract: [],
     contractHistory: [],
+    pullRequests: [],
     evaluations: [],
     features: [],
     snapshots: [],
@@ -233,6 +247,18 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         m.feed.push({ kind: "tests", seq: ev.seq, ts: ev.ts, plan: ev.plan, red: ev.red });
         currentTurn = null;
         break;
+      case "pr.opened":
+        m.pullRequests.push({ number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, ...(ev.package ? { package: ev.package } : {}), openedTs: ev.ts });
+        m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "opened", number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, ...(ev.package ? { package: ev.package } : {}) });
+        currentTurn = null;
+        break;
+      case "pr.merged": {
+        const pr = m.pullRequests.find((p) => p.number === ev.number);
+        if (pr) pr.merged = { sha: ev.sha, ts: ev.ts };
+        m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "merged", number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, sha: ev.sha });
+        currentTurn = null;
+        break;
+      }
       case "evaluation.result":
         m.evaluations.push({ round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
         m.feed.push({ kind: "evaluation", seq: ev.seq, ts: ev.ts, round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
@@ -300,7 +326,7 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
   return m;
 }
 
-export const PHASE_ORDER: Phase[] = ["plan", "breakdown", "contract", "tests", "build", "evaluate", "wrapup"];
-export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", breakdown: "Breakdown", contract: "Contract", tests: "Tests", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
+export const PHASE_ORDER: Phase[] = ["plan", "breakdown", "contract", "tests", "build", "evaluate", "publish", "wrapup"];
+export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", breakdown: "Breakdown", contract: "Contract", tests: "Tests", build: "Build", evaluate: "Evaluate", publish: "Publish", wrapup: "Wrap up" };
 export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier", scout: "Scout", librarian: "Librarian" };
 export const isLive = (s: RunStatus) => s === "running" || s === "paused" || s === "waiting_approval" || s === "queued";

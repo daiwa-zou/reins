@@ -527,7 +527,7 @@ const implicationSchema = {
   type: "object",
   properties: {
     kind: { type: "string", enum: ["component", "stage", "skill", "foundation", "gap"] },
-    target: { type: "string", description: "A component id, a phase (plan, breakdown, contract, tests, build, evaluate, wrapup), a skill name or a foundation id. Empty for gap." },
+    target: { type: "string", description: "A component id, a phase (plan, breakdown, contract, tests, build, evaluate, publish, wrapup), a skill name or a foundation id. Empty for gap." },
     claim: { type: "string", description: "One sentence: what the harness should do." },
     quote: { type: "string", description: "Evidence: a passage copied verbatim from the source." },
     domains: { type: "array", items: { type: "string" }, description: "Optional domain tags, e.g. web, cli, golang" },

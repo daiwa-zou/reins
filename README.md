@@ -17,7 +17,7 @@ Press **d** to watch a recorded run. For live runs pick an engine in the New run
 
 ## What it does
 
-A run moves through seven phases; contract, tests, build and evaluate repeat once per work package. Roles never share a context window; they hand work to each other through files in the workspace's `.reins/` folder.
+A run moves through eight phases; contract, tests, build, evaluate and publish repeat once per work package. Roles never share a context window; they hand work to each other through files in the workspace's `.reins/` folder.
 
 | Phase | Who | What | Lesson |
 |---|---|---|---|
@@ -27,6 +27,7 @@ A run moves through seven phases; contract, tests, build and evaluate repeat onc
 | Tests | Test writer | Per package. Writes failing tests for every hard criterion through the real interface, explains each in `.reins/tests.md`; the harness runs the suite and refuses a plan that is already green. Passing the suite becomes a hard criterion. | Claude Code best practices; How Anthropic teams use Claude Code |
 | Build | Builder | Per package. One feature at a time, session preamble first (progress notes, contract, baseline test run), self-verification before `finish`, commit per phase. | Effective harnesses; Claude Code best practices |
 | Evaluate | Evaluator | Re-runs every verification step itself and reports pass/fail with evidence. Hard failures send the builder back for a fix round. | Harness design; Demystifying evals |
+| Publish | Harness, then **you** | Per package. Pushes the package branch (cut from the freshly pulled base), opens a pull request whose body carries the contract, the evidence and the tests, waits for approval and green checks, asks before merging, merges and pulls the base so the next package starts from the merged tip. Skipped with a note when there is no remote or `gh` login. | Claude Code on the web; Redesigning source control |
 | Wrap up | Harness | Progress notes appended so the next session starts informed. | Effective context engineering |
 
 ## The parts of the harness

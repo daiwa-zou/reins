@@ -45,5 +45,7 @@ foundations: reviewIntent
   > never needing to read the generated code
 - [component:scouts] Make specialized subagents with narrow prompts easy to define and reuse for repetitive work.
   > using two specialized subagents
+- [component:publish] Treat the pull request's review comments and check results as input the harness acts on, not a person's chore.
+  > GitHub Actions automate PR comments
 - [foundation:declarativeConfig] Let runs start headless from CI or events using the same declarative run config.
   > GitHub Actions automate PR comments

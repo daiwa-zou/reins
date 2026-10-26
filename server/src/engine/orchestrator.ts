@@ -12,6 +12,8 @@ import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor, type PromptRole } from "../roles/prompts.js";
 import { packageLabel, packageRef, renderBreakdown, renderPackage, singlePackage, validateBreakdown, PACKAGE_MAX_LINES } from "../../../shared/packages.js";
 import { renderTestPlanDoc, renderTestsForBuilder, testsCriterion, validateTestPlan } from "../../../shared/testPlan.js";
+import { branchNameFor, prState, Publisher, renderPrBody, sleep } from "./publish.js";
+import { DEFAULT_PUBLISH } from "../../../shared/components.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
 import { runShell } from "../tools/registry.js";
 import { EFFORT_TABLE } from "../../../shared/components.js";
@@ -41,12 +43,27 @@ export class Orchestrator {
   private builderSession: string | undefined;
   private startedAt = Date.now();
 
+  private publisher: Publisher;
+  private sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Set when the publish stage can run here: the remote, its URL and the base branch pull requests target. */
+  private publishing: { remote: string; url: string; base: string } | null = null;
+  /** The current package's branch and the base sha it was cut from. */
+  private branch: { name: string; baseSha: string } | null = null;
+
   constructor(
     private client: Anthropic | null,
     private config: RunConfig,
     private bus: RunBus,
     private control: OrchestratorControl,
-  ) {}
+    deps: { publisher?: Publisher; sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {},
+  ) {
+    this.publisher = deps.publisher ?? new Publisher();
+    this.sleep = deps.sleep ?? sleep;
+  }
+
+  private get publishPolicy() {
+    return { ...DEFAULT_PUBLISH, ...(this.config.publish ?? {}) };
+  }
 
   /** Lines every role gets in its first message: project memory, the skills index, and the clock (agents are time-blind). */
   private projectContext(): Record<string, string> {
@@ -164,6 +181,15 @@ export class Orchestrator {
     });
     // Contradictory or ignored settings are recorded, never blocking: one warn note each, before any phase.
     for (const w of checkRunConfig(this.config)) this.bus.emitEvent({ type: "note", level: "warn", text: `Config check: ${w.message}` });
+    // Publishing needs a remote and a gh login; without them the run says so once and builds on the current branch.
+    if (this.config.components.publish) {
+      const policy = this.publishPolicy;
+      const c = gitRepo ? await this.publisher.check(ws, policy.remote, this.control.signal) : ({ ok: false, reason: "the workspace is not a git repository" } as const);
+      if (c.ok) {
+        this.publishing = { remote: policy.remote, url: c.url, base: policy.base ?? c.base };
+        this.bus.emitEvent({ type: "note", level: "info", text: `Publishing to ${policy.remote} (${c.url}): one branch and pull request per package onto ${this.publishing.base}; merge when ${policy.mergeWhen === "approved" ? "approved with green checks" : policy.mergeWhen === "checks" ? "checks are green" : "never (pull requests stay open and stack)"}.` });
+      } else this.bus.emitEvent({ type: "note", level: "warn", text: `Publish skipped: ${c.reason}; packages are built on the current branch and nothing is pushed.` });
+    }
     const existing = readWorkspaceFile(ws, ".reins/features.json");
     if (existing) {
       try {
@@ -241,9 +267,26 @@ export class Orchestrator {
         this.builderSession = undefined;
       }
       const pkgBrief: Record<string, string> = this.pkg ? { "Work package": `${packageLabel(this.pkg)}\n${renderPackage(pkg, this.features)}` } : {};
+      const failed = (summary: string) => this.finish(false, this.pkg ? `Package ${this.pkg.id} (${this.pkg.title}): ${summary}` : summary);
+      if (this.publishing) {
+        // Every package starts from the freshly pulled base, on its own branch.
+        const name = branchNameFor(this.config.id, pkg.id, pkg.title);
+        try {
+          const baseSha = await this.publisher.startBranch(ws, this.publishing.remote, this.publishing.base, name, this.control.signal);
+          this.branch = { name, baseSha };
+          this.baseSha = baseSha;
+          this.bus.emitEvent({ type: "note", level: "info", text: `Branch ${name} cut from ${this.publishing.base} at ${baseSha.slice(0, 7)}.` });
+        } catch (err) {
+          return failed(`Could not start the package branch: ${(err as Error).message}`);
+        }
+      }
       const outcome = await this.runPackage(pkgBrief, pkg);
-      if (!outcome.ok) return this.finish(false, this.pkg ? `Package ${this.pkg.id} (${this.pkg.title}): ${outcome.summary}` : outcome.summary);
+      if (!outcome.ok) return failed(outcome.summary);
       lastEval = outcome.ev;
+      if (this.publishing && this.branch) {
+        const published = await this.publishPackage(pkg, outcome.ev);
+        if (!published.ok) return failed(published.summary);
+      }
     }
     this.pkg = undefined;
 
@@ -435,6 +478,70 @@ export class Orchestrator {
     return { ok: true, ev: lastEval };
   }
 
+
+  /** Push the package branch, open its pull request, wait until it can be merged, merge it and pull the base. */
+  private async publishPackage(pkg: WorkPackage, ev: Evaluation | null): Promise<{ ok: true } | { ok: false; summary: string }> {
+    const ws = this.config.workspace;
+    const pub = this.publishing!;
+    const branch = this.branch!;
+    const policy = this.publishPolicy;
+    const signal = this.control.signal;
+    type Outcome = { ok: true } | { ok: false; summary: string };
+    return this.phase<Outcome>("publish", 0, async () => {
+      const fail = (summary: string) => ({ result: null, summary, value: { ok: false, summary } as Outcome });
+      let pr: { number: number; url: string };
+      try {
+        await this.publisher.push(ws, pub.remote, branch.name, signal);
+        const body = renderPrBody({ pkg, features: this.features, contract: this.contract, evaluation: ev, testsDoc: readWorkspaceFile(ws, ".reins/tests.md") ?? "", baseSha: branch.baseSha, base: pub.base, runId: this.config.id || "run" });
+        pr = await this.publisher.open(ws, { base: pub.base, head: branch.name, title: pkg.title, body }, signal);
+      } catch (err) {
+        return fail(`Could not open the pull request: ${(err as Error).message}`);
+      }
+      const where = `Pull request #${pr.number} (${pr.url})`;
+      this.bus.emitEvent({ type: "pr.opened", number: pr.number, url: pr.url, branch: branch.name, base: pub.base, ...(this.pkg ? { package: this.pkg } : {}) });
+      if (policy.mergeWhen === "never") {
+        // The next package stacks on this branch; a person merges the pull requests in order.
+        pub.base = branch.name;
+        return { result: null, summary: `${where} opened; not waiting for a merge, the next package stacks on ${branch.name}.`, value: { ok: true } as Outcome };
+      }
+      const deadline = Date.now() + policy.maxWaitMinutes * 60_000;
+      for (;;) {
+        if (signal.aborted) return fail(`Stopped while waiting on ${where}.`);
+        let st;
+        try {
+          st = prState(await this.publisher.view(ws, pr.number, signal), policy.mergeWhen);
+        } catch (err) {
+          return fail(`Could not read ${where}: ${(err as Error).message}`);
+        }
+        if (st.kind === "merged") break;
+        if (st.kind === "closed") return fail(`${where} was closed without being merged.`);
+        if (st.kind === "failing") return fail(`${where} has failing checks: ${st.checks.join(", ")}.`);
+        if (st.kind === "ready") {
+          if (this.config.pauses.beforeMerge) {
+            const a = await this.control.requestPhaseApproval(`Merge pull request #${pr.number}?`, `${pkg.title} is approved with green checks. Merge it (${policy.mergeMethod}) into ${pub.base}?`, { number: pr.number, url: pr.url, branch: branch.name, base: pub.base, method: policy.mergeMethod });
+            if (!a.approved) return fail(`Merge of ${where.charAt(0).toLowerCase() + where.slice(1)} rejected${a.note ? `: ${a.note}` : ""}. It stays open.`);
+          }
+          try {
+            await this.publisher.merge(ws, pr.number, policy.mergeMethod, signal);
+          } catch (err) {
+            return fail(`Could not merge ${where}: ${(err as Error).message}`);
+          }
+          break;
+        }
+        if (Date.now() >= deadline) return fail(`${where} was not merged after ${policy.maxWaitMinutes} minutes (${st.why}). It stays open; merge it and start the next package with a new run.`);
+        await this.sleep(policy.pollSeconds * 1000, signal);
+      }
+      let sha: string;
+      try {
+        sha = await this.publisher.afterMerge(ws, pub.remote, pub.base, branch.name, signal);
+      } catch (err) {
+        return fail(`${where} is merged, but the base could not be pulled: ${(err as Error).message}`);
+      }
+      this.bus.emitEvent({ type: "pr.merged", number: pr.number, url: pr.url, branch: branch.name, base: pub.base, sha });
+      this.branch = null;
+      return { result: null, summary: `${where} merged (${policy.mergeMethod}) into ${pub.base} at ${sha.slice(0, 7)}.`, value: { ok: true } as Outcome };
+    });
+  }
 
   /** A hard criterion that was not observed to pass (failed or unverified) fails the sprint. */
   private verdictFor(results: CriterionResult[]): "pass" | "fail" {

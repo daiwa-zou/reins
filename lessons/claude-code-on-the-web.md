@@ -35,6 +35,8 @@ foundations: secretsOutside
   > backend changes where Claude can verify via test-driven development
 - [stage:contract] Prefer criteria that have a verification path the builder can run, such as tests, over criteria only a person can judge.
   > backend changes where Claude can verify via test-driven development
+- [component:publish] End every package with a pull request the harness opens itself, carrying the summary of what changed and why.
+  > Automatic PR creation and change summaries arrive at the end of a task.
 - [foundation:reviewIntent] Make the end-of-task summary of changes the primary deliverable shown to the user.
   > Automatic PR creation and change summaries arrive at the end of a task.
 - [component:taskBudget] Show one budget across surfaces when they share a quota.

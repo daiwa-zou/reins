@@ -7,7 +7,7 @@ export type RoleId = "planner" | "builder" | "evaluator" | "classifier" | "scout
 /** Roles every run config carries settings for. The librarian (lesson intake) borrows the planner's settings unless set. */
 export type RunRoleId = Exclude<RoleId, "librarian">;
 
-export type Phase = "plan" | "breakdown" | "contract" | "tests" | "build" | "evaluate" | "wrapup";
+export type Phase = "plan" | "breakdown" | "contract" | "tests" | "build" | "evaluate" | "publish" | "wrapup";
 
 export type RunStatus =
   | "queued"
@@ -23,6 +23,7 @@ export type ComponentId =
   | "workPackages"
   | "contracts"
   | "testsFirst"
+  | "publish"
   | "evaluator"
   | "progressFile"
   | "featureList"
@@ -92,6 +93,25 @@ export interface RunPauses {
   afterContract: boolean;
   beforeCommit: boolean;
   afterEvaluation: boolean;
+  /** Before the harness merges a package's pull request. Absent on runs that predate publishing. */
+  beforeMerge?: boolean;
+}
+
+/** How the publish stage opens and merges a package's pull request. */
+export interface PublishPolicy {
+  /** The git remote to push to. */
+  remote: string;
+  /** The branch pull requests target; the branch checked out at run start when absent. */
+  base?: string;
+  /** Merge when an approving review is in and checks are green; when checks are green; or never (open the PR and stack the next package). */
+  mergeWhen: "approved" | "checks" | "never";
+  mergeMethod: "squash" | "merge" | "rebase";
+  /** Seconds between looks at the pull request. */
+  pollSeconds: number;
+  /** Give up waiting for a merge after this long; the run fails naming the PR. */
+  maxWaitMinutes: number;
+  /** Review-feedback fix rounds per pull request. */
+  maxReviewRounds: number;
 }
 
 export interface ContextPolicy {
@@ -135,6 +155,8 @@ export interface RunConfig {
   budgetUsd: number;
   maxTurnsPerPhase: number;
   maxFixRounds: number;
+  /** The publish stage's policy. Absent on runs that predate it (defaults apply). */
+  publish?: PublishPolicy;
   createdAt: string;
   /** Set on a trial that runs in a fresh git worktree cut from another workspace, so trial sets still group by the original. */
   origin?: { workspace: string; fresh: true };
@@ -169,8 +191,9 @@ export interface ConfigWarning {
 }
 
 /** The parts of a run config a preset may set. Never task, workspace, id or createdAt. */
-export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "presets" | "stageLessons" | "ablated" | "components" | "roles" | "pauses" | "context" | "guardrail">> & {
+export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "presets" | "stageLessons" | "ablated" | "components" | "roles" | "pauses" | "context" | "guardrail" | "publish">> & {
   components?: Partial<Record<ComponentId, boolean>>;
+  publish?: Partial<PublishPolicy>;
   roles?: Partial<Record<RoleId, Partial<RoleSettings>>>;
   pauses?: Partial<RunPauses>;
   context?: Partial<ContextPolicy>;
@@ -419,6 +442,8 @@ export type RunEvent = Base &
     | { type: "contract.agreed"; criteria: ContractCriterion[] }
     | { type: "breakdown.agreed"; packages: WorkPackage[]; rationale: string }
     | { type: "tests.agreed"; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
+    | { type: "pr.opened"; number: number; url: string; branch: string; base: string; package?: PackageRef }
+    | { type: "pr.merged"; number: number; url: string; branch: string; base: string; sha: string }
     | {
         type: "evaluation.result";
         round: number;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMPONENTS, defaultRunConfig, EFFORT_LEVELS, SUPERVISION_LEVELS } from "../../shared/components.js";
+import { COMPONENTS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_LEVELS, SUPERVISION_LEVELS } from "../../shared/components.js";
 import { applyPreset, checkRunConfig, diffFromDefaults, presetFromConfig, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
 import { composeRun, compositionConfig, migrateLegacy } from "../../shared/presets.js";
 import type { EngineId, Preset, RunConfig } from "../../shared/types.js";
@@ -171,5 +171,21 @@ describe("validatePresetConfig", () => {
     expect(sanitizePresetName("my preset 1")).toBe("my preset 1");
     expect(sanitizePresetName("/etc/passwd")).toBe("etc-passwd");
     expect(sanitizePresetName("...")).toBe("");
+  });
+});
+
+describe("publish policy", () => {
+  it("the checker warns about a merge pause when publish is off, and validatePresetConfig keeps a well-formed publish block", () => {
+    const cfg = defaultRunConfig({ task: "t", workspace: "/w" });
+    cfg.components.publish = false;
+    cfg.pauses.beforeMerge = true;
+    expect(checkRunConfig(cfg).map((w) => w.setting)).toContain("pauses.beforeMerge");
+    const { config, dropped } = validatePresetConfig({ publish: { mergeWhen: "checks", mergeMethod: "rebase", pollSeconds: 5, maxWaitMinutes: 10, maxReviewRounds: 1, remote: "upstream", base: "develop", bogus: 1 } });
+    expect(config.publish).toEqual({ mergeWhen: "checks", mergeMethod: "rebase", pollSeconds: 5, maxWaitMinutes: 10, maxReviewRounds: 1, remote: "upstream", base: "develop" });
+    expect(dropped).toEqual(["publish.bogus"]);
+    expect(() => validatePresetConfig({ publish: { mergeWhen: "sometimes" } })).toThrow(/publish.mergeWhen must be one of approved, checks, never/);
+    expect(() => validatePresetConfig({ publish: { pollSeconds: -1 } })).toThrow(/publish.pollSeconds must be a non-negative number/);
+    const applied = applyPreset(defaultRunConfig({ task: "t", workspace: "/w" }), { name: "p", config: { publish: { mergeWhen: "never" } } });
+    expect(applied.publish).toEqual({ ...DEFAULT_PUBLISH, mergeWhen: "never" });
   });
 });

@@ -531,6 +531,7 @@ export function NewRun() {
                         ["afterContract", "to approve the contract"],
                         ["beforeCommit", "before each commit"],
                         ["afterEvaluation", "after each evaluation"],
+                        ["beforeMerge", "before each merge"],
                       ] as const
                     ).map(([k, label]) => (
                       <label key={k} className="flex items-center gap-1.5">

@@ -86,7 +86,7 @@ const LIBRARIAN = `You are the librarian inside Reins, an agent harness. You tur
 
 How to distil
 - Read the whole source first. Learnings are dense bullets that keep the source's own numbers, names and examples; do not add facts the source does not contain.
-- Implications are what the source means for an agent harness. Each one targets exactly one thing: a component, a stage (plan, breakdown, contract, tests, build, evaluate, wrapup), a skill or a foundation, or is a gap (an idea the harness does not implement). Split a compound idea into one implication per target.
+- Implications are what the source means for an agent harness. Each one targets exactly one thing: a component, a stage (plan, breakdown, contract, tests, build, evaluate, publish, wrapup), a skill or a foundation, or is a gap (an idea the harness does not implement). Split a compound idea into one implication per target.
 - Every implication cites evidence: a quote copied verbatim from the source, a phrase or a sentence, never paraphrased. If you cannot quote it, drop the implication.
 - A stage implication is a single sentence an agent in that stage should read; write it as an instruction.
 - Tag an implication with domains (web, cli, golang, python, ...) only when it applies only there.

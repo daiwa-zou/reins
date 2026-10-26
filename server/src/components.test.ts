@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMPONENTS, COMPONENT_IDS, defaultRunConfig, EFFORT_COMPONENTS, EFFORT_LEVELS, EFFORT_TABLE, FOUNDATIONS, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "../../shared/components.js";
+import { COMPONENTS, COMPONENT_IDS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_COMPONENTS, EFFORT_LEVELS, EFFORT_TABLE, FOUNDATIONS, PAUSE_GATE, PAUSE_KEYS, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "../../shared/components.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DIRECT_ONLY = ["toolSearch", "toolExamples", "compaction", "contextEditing", "taskBudget", "scouts"];
-const BOTH = ["thinkTool", "skills", "actionClassifier", "osSandbox", "planner", "contracts", "evaluator", "featureList", "progressFile", "projectMemory", "gitCommits", "selfVerification", "resetWithHandoff", "workPackages", "testsFirst"];
+const BOTH = ["thinkTool", "skills", "actionClassifier", "osSandbox", "planner", "contracts", "evaluator", "featureList", "progressFile", "projectMemory", "gitCommits", "selfVerification", "resetWithHandoff", "workPackages", "testsFirst", "publish"];
 
 describe("tiers and the Effort / Supervision tables", () => {
   it("every component has the tier of spec §1; actionClassifier is the only engine-tier one", () => {
     const effort = ["planner", "contracts", "evaluator", "scouts", "taskBudget", "thinkTool"];
     for (const c of COMPONENTS) expect(c.tier, c.id).toBe(c.id === "actionClassifier" ? "engine" : effort.includes(c.id) ? "effort" : "always");
-    expect(COMPONENTS.filter((c) => c.tier === "always")).toHaveLength(16);
+    expect(COMPONENTS.filter((c) => c.tier === "always")).toHaveLength(17);
     expect([...EFFORT_COMPONENTS]).toEqual(effort);
   });
   it("EFFORT_TABLE has exactly the spec's cells", () => {
@@ -30,9 +30,11 @@ describe("tiers and the Effort / Supervision tables", () => {
     expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].chip)).toEqual(["Unattended", "Check in", "Ask every write"]);
     expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].mode)).toEqual(["auto", "auto", "ask"]);
     expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].actionClassifier)).toEqual([true, true, false]);
-    expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false });
-    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true });
-    expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true });
+    expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforeMerge: false });
+    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforeMerge: true });
+    expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforeMerge: true });
+    expect(PAUSE_KEYS).toEqual(["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforeMerge"]);
+    expect(PAUSE_GATE.beforeMerge).toBe("publish");
   });
   it("defaultRunConfig takes its budgets from EFFORT_TABLE (medium)", () => {
     const d = defaultRunConfig({ task: "t", workspace: "/w" });
@@ -42,8 +44,8 @@ describe("tiers and the Effort / Supervision tables", () => {
 });
 
 describe("component catalogue", () => {
-  it("has 23 components, each with whenOff and a non-empty engines subset", () => {
-    expect(COMPONENTS).toHaveLength(23);
+  it("has 24 components, each with whenOff and a non-empty engines subset", () => {
+    expect(COMPONENTS).toHaveLength(24);
     for (const c of COMPONENTS) {
       expect(c.whenOff.trim().length, c.id).toBeGreaterThan(10);
       expect(c.engines.length, c.id).toBeGreaterThan(0);
@@ -68,6 +70,16 @@ describe("component catalogue", () => {
     expect(tf).toMatchObject({ tier: "always", group: "roles", defaultOn: true, engines: ["anthropic", "claude-code"] });
     expect(tf.requires ?? []).toEqual([]);
     expect(tf.short).toMatch(/fail/);
+  });
+
+  it("publish is always on, on both engines; the default config pauses before each merge and carries the publish policy", () => {
+    const pub = COMPONENTS.find((c) => c.id === "publish")!;
+    expect(pub).toMatchObject({ tier: "always", group: "roles", defaultOn: true, engines: ["anthropic", "claude-code"] });
+    expect(pub.whenOff).toMatch(/no pull request/i);
+    const d = defaultRunConfig({ task: "t", workspace: "/w" });
+    expect(d.pauses.beforeMerge).toBe(true);
+    expect(d.publish).toEqual(DEFAULT_PUBLISH);
+    expect(defaultRunConfig({ task: "t", workspace: "/w", publish: { mergeWhen: "checks" } as any }).publish).toEqual({ ...DEFAULT_PUBLISH, mergeWhen: "checks" });
   });
 
   it("requires ids exist", () => {

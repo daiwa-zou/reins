@@ -1,8 +1,8 @@
 // Pure helpers over RunConfig: the config checker, built-in presets, applying a
 // preset, the diff from defaults and validation of user presets. No I/O, so the
 // server, the web UI and vitest all use exactly the same rules.
-import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, HarnessEffort, Preset, PresetConfig, Supervision, RoleId, RunRoleId, RunConfig } from "./types.js";
-import { cleanGuidance, COMPONENTS, COMPONENT_IDS, defaultRunConfig, EFFORT_LEVELS, isEffort, isSupervision, PAUSE_KEYS, SUPERVISION_LEVELS } from "./components.js";
+import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, HarnessEffort, Preset, PresetConfig, PublishPolicy, Supervision, RoleId, RunRoleId, RunConfig } from "./types.js";
+import { cleanGuidance, COMPONENTS, COMPONENT_IDS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_LEVELS, isEffort, isSupervision, PAUSE_KEYS, PUBLISH_MERGE_METHODS, PUBLISH_MERGE_WHEN, SUPERVISION_LEVELS } from "./components.js";
 
 export const ENGINE_LABEL: Record<EngineId | "replay", string> = { anthropic: "Direct API", "claude-code": "Claude Code", replay: "Replay" };
 
@@ -17,6 +17,7 @@ export const PAUSE_LABEL: Record<(typeof PAUSE_KEYS)[number], string> = {
   afterContract: "Pause to approve the contract",
   beforeCommit: "Pause before each commit",
   afterEvaluation: "Pause after each evaluation",
+  beforeMerge: "Pause before each merge",
 };
 
 const label = (id: ComponentId) => COMPONENTS.find((c) => c.id === id)?.label ?? id;
@@ -61,6 +62,8 @@ export function checkRunConfig(config: unknown): ConfigWarning[] {
     out.push({ level: "warn", component: "contracts", setting: "pauses.afterContract", message: `${PAUSE_LABEL.afterContract} (pauses.afterContract) does nothing with ${label("contracts")} off: there is no contract to approve.` });
   if (!on("planner") && pauses.afterPlan === true)
     out.push({ level: "warn", component: "planner", setting: "pauses.afterPlan", message: `${PAUSE_LABEL.afterPlan} (pauses.afterPlan) does nothing with the ${label("planner")} off: there is no plan phase.` });
+  if (!on("publish") && pauses.beforeMerge === true)
+    out.push({ level: "warn", component: "publish", setting: "pauses.beforeMerge", message: `${PAUSE_LABEL.beforeMerge} (pauses.beforeMerge) does nothing with ${label("publish")} off: no pull request is opened or merged.` });
   if (!on("gitCommits") && pauses.beforeCommit === true)
     out.push({ level: "warn", component: "gitCommits", setting: "pauses.beforeCommit", message: `${PAUSE_LABEL.beforeCommit} (pauses.beforeCommit) does nothing with ${label("gitCommits")} off: the harness never commits.` });
   const mode = isObj(config.guardrail) ? config.guardrail.mode : undefined;
@@ -114,6 +117,7 @@ export function applyPreset(base: RunConfig, preset: Pick<Preset, "name" | "conf
     pauses: { ...base.pauses, ...(p.pauses ?? {}) },
     context: { ...base.context, ...(p.context ?? {}) },
     guardrail: { ...base.guardrail, ...(p.guardrail ?? {}) },
+    publish: { ...(base.publish ?? DEFAULT_PUBLISH), ...(p.publish ?? {}) },
     ...(Array.isArray(p.guidance) ? { guidance: [...p.guidance] } : base.guidance ? { guidance: [...base.guidance] } : {}),
     task: base.task,
     workspace: base.workspace,
@@ -299,6 +303,27 @@ export function validatePresetConfig(raw: unknown, opts: { legacy?: boolean } = 
           } else dropped.push(`guardrail.${gk}`);
         }
         config.guardrail = g;
+        break;
+      }
+      case "publish": {
+        if (!isObj(v)) bad("publish", "an object (remote, base, mergeWhen, mergeMethod, pollSeconds, maxWaitMinutes, maxReviewRounds)");
+        const pub: Partial<PublishPolicy> = {};
+        for (const [pk, pv] of Object.entries(v as object)) {
+          if (pk === "remote" || pk === "base") {
+            if (typeof pv !== "string" || !pv.trim()) bad(`publish.${pk}`, "a non-empty string");
+            pub[pk] = (pv as string).trim().slice(0, 120);
+          } else if (pk === "mergeWhen") {
+            if (!PUBLISH_MERGE_WHEN.includes(pv as PublishPolicy["mergeWhen"])) bad("publish.mergeWhen", `one of ${PUBLISH_MERGE_WHEN.join(", ")}`);
+            pub.mergeWhen = pv as PublishPolicy["mergeWhen"];
+          } else if (pk === "mergeMethod") {
+            if (!PUBLISH_MERGE_METHODS.includes(pv as PublishPolicy["mergeMethod"])) bad("publish.mergeMethod", `one of ${PUBLISH_MERGE_METHODS.join(", ")}`);
+            pub.mergeMethod = pv as PublishPolicy["mergeMethod"];
+          } else if (pk === "pollSeconds" || pk === "maxWaitMinutes" || pk === "maxReviewRounds") {
+            if (typeof pv !== "number" || !Number.isFinite(pv) || pv < 0) bad(`publish.${pk}`, "a non-negative number");
+            pub[pk] = pv as number;
+          } else dropped.push(`publish.${pk}`);
+        }
+        config.publish = pub;
         break;
       }
       case "effort":

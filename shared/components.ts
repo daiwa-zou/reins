@@ -1,4 +1,4 @@
-import type { ComponentId, ComponentTier, Foundation, GuardrailMode, HarnessComponent, HarnessEffort, RunConfig, RunSummary, Supervision, Trial, TrialSet } from "./types.js";
+import type { ComponentId, ComponentTier, Foundation, GuardrailMode, HarnessComponent, HarnessEffort, PublishPolicy, RunConfig, RunSummary, Supervision, Trial, TrialSet } from "./types.js";
 
 export const HARNESS_VERSION = "0.2.0";
 
@@ -52,6 +52,18 @@ export const COMPONENTS: HarnessComponent[] = [
     whenOff: "No tests phase: the builder writes whatever tests it chooses while building, and only the contract's own verification steps are checked.",
     engines: ["anthropic", "claude-code"],
     assumption: "A builder that writes its own tests after the code tests what it built, not what was asked; tests written first from the contract pin the requirement.",
+    lessons: [],
+    defaultOn: true,
+    group: "roles",
+    tier: "always",
+  },
+  {
+    id: "publish",
+    label: "Publish as pull requests",
+    short: "Each package is built on its own branch cut from the freshly pulled base; once it passes evaluation the harness pushes, opens a pull request, waits for approval and green checks, merges, and pulls the base before the next package.",
+    whenOff: "No publish phase and no pull request: packages are built and committed one after another on the current branch, and nothing is pushed.",
+    engines: ["anthropic", "claude-code"],
+    assumption: "A change nobody reviews and merges is not done; the harness, not a person, should carry a finished package to a merged pull request.",
     lessons: [],
     defaultOn: true,
     group: "roles",
@@ -425,10 +437,10 @@ export const EFFORT_TABLE: Record<HarnessEffort, EffortRow> = {
   max: row("Max", "Everything, with the think tool, three fix rounds and the evaluator re-running every criterion.", "111111", 3, 120, 40, true),
 };
 
-export type PauseKey = "afterPlan" | "afterContract" | "beforeCommit" | "afterEvaluation";
-export const PAUSE_KEYS: PauseKey[] = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation"];
+export type PauseKey = "afterPlan" | "afterContract" | "beforeCommit" | "afterEvaluation" | "beforeMerge";
+export const PAUSE_KEYS: PauseKey[] = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforeMerge"];
 /** The gate each pause waits at: a pause turns on only when its gate exists at the chosen effort. */
-export const PAUSE_GATE: Record<PauseKey, ComponentId> = { afterPlan: "planner", afterContract: "contracts", beforeCommit: "gitCommits", afterEvaluation: "evaluator" };
+export const PAUSE_GATE: Record<PauseKey, ComponentId> = { afterPlan: "planner", afterContract: "contracts", beforeCommit: "gitCommits", afterEvaluation: "evaluator", beforeMerge: "publish" };
 
 export interface SupervisionRow {
   label: string;
@@ -441,10 +453,17 @@ export interface SupervisionRow {
 }
 
 export const SUPERVISION_TABLE: Record<Supervision, SupervisionRow> = {
-  unattended: { label: "Unattended", chip: "Unattended", meaning: "Never pauses; the guardrail runs in auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false }, mode: "auto", actionClassifier: true },
-  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract and each evaluation; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true }, mode: "auto", actionClassifier: true },
-  "ask-every-write": { label: "Ask before every write", chip: "Ask every write", meaning: "Every pause is on and the guardrail asks before anything that is not read-only.", pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true }, mode: "ask", actionClassifier: false },
+  unattended: { label: "Unattended", chip: "Unattended", meaning: "Never pauses; the guardrail runs in auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforeMerge: false }, mode: "auto", actionClassifier: true },
+  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract, each evaluation and before each merge; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforeMerge: true }, mode: "auto", actionClassifier: true },
+  "ask-every-write": { label: "Ask before every write", chip: "Ask every write", meaning: "Every pause is on and the guardrail asks before anything that is not read-only.", pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforeMerge: true }, mode: "ask", actionClassifier: false },
 };
+
+// ---- Publishing ------------------------------------------------------------
+
+export const PUBLISH_MERGE_WHEN: PublishPolicy["mergeWhen"][] = ["approved", "checks", "never"];
+export const PUBLISH_MERGE_METHODS: PublishPolicy["mergeMethod"][] = ["squash", "merge", "rebase"];
+/** Wait for an approving review and green checks, squash, look every minute, give up after four hours. */
+export const DEFAULT_PUBLISH: PublishPolicy = { remote: "origin", mergeWhen: "approved", mergeMethod: "squash", pollSeconds: 60, maxWaitMinutes: 240, maxReviewRounds: 3 };
 
 export const TIER_LABEL: Record<ComponentTier, string> = { always: "Always on", effort: "Set by Effort", engine: "Follows settings" };
 
@@ -474,12 +493,13 @@ export function defaultRunConfig(partial: Partial<RunConfig> & { task: string; w
       ...(partial.roles ?? {}),
     },
     components,
-    pauses: partial.pauses ?? { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false },
+    pauses: partial.pauses ?? { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false, beforeMerge: true },
     context: partial.context ?? { compactAtTokens: 150_000, clearToolResultsAfterTurns: 8, resetAtTokens: 400_000 },
     guardrail: partial.guardrail ?? { mode: "auto", allowNetwork: false, askPatterns: [], denyPatterns: [] },
     budgetUsd: partial.budgetUsd ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].budgetUsd,
     maxTurnsPerPhase: partial.maxTurnsPerPhase ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].maxTurnsPerPhase,
     maxFixRounds: partial.maxFixRounds ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].maxFixRounds,
+    publish: { ...DEFAULT_PUBLISH, ...((partial.publish as Partial<PublishPolicy> | undefined) ?? {}) },
     createdAt: partial.createdAt ?? new Date().toISOString(),
     ...(typeof partial.preset === "string" && partial.preset.trim() ? { preset: partial.preset.trim().slice(0, 80) } : {}),
     ...(Array.isArray(partial.guidance) && cleanGuidance(partial.guidance).lines.length ? { guidance: cleanGuidance(partial.guidance).lines } : {}),

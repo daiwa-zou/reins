@@ -41,6 +41,8 @@ foundations: reviewIntent
   > invested in post-merge and pre-deploy testing
 - [component:workPackages] Keep every change small enough that a reviewer can judge its intent as one pull request; the cost of a change should follow its size, not the task's.
   > Cost scales with change size not repo size
+- [stage:publish] Write the pull request for a reviewer judging intent: what the package is for, what was agreed and how it was verified, not a tour of the lines.
+  > Reviewers now focus on the intent of a change, not every line
 - [foundation:reviewIntent] Give reviewers intent-level aids, such as summaries of what a change is for and rules separating trivial from consequential changes.
   > Reviewers now focus on the intent of a change, not every line
 - [stage:plan] Write the architectural constraints the builder must not violate into the spec as explicit, checkable rules.
