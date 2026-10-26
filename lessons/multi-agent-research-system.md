@@ -35,11 +35,33 @@ foundations: fileHandoff
 - Subagents should write reports, code and data to the filesystem and pass lightweight references to the coordinator, avoiding the "game of telephone" and token overhead. Clio usage data showed specialized software dev 10%, professional/technical content 8%, business strategy 8%, academic 7%, and verifying facts about people/places/orgs 5%.
 
 ## Harness implications
-- Build an explicit orchestrator-worker primitive: a lead that plans, writes its plan to durable memory, spawns N workers with structured briefs (objective, output format, tools/sources, boundaries), and synthesizes. Make the brief schema first-class in the UI so vague delegation is visible.
-- Budget effort by task class and show it: a per-task complexity tier that caps subagent count and tool calls (1 agent with 3-10 calls, 2-4 with 10-15, 10+), with runaway guardrails and a visible token meter, since tokens dominate quality and cost (about 15x chat).
-- Give every worker an isolated context and let it return references to filesystem artifacts rather than dumping full content into the lead; the UI should link to those artifacts.
-- Checkpoint and resume by default; surface tool failures to the agent as data; deploy harness updates rainbow-style so in-flight sessions keep their version.
-- Record full traces of decisions, tool calls and interaction structure (not necessarily content) and expose a trace viewer; non-determinism makes bug reports undiagnosable otherwise.
-- Support parallel tool calls and parallel worker spawns natively; design toward async worker completion with a results inbox for the lead, rather than batch-join.
-- Ship an eval loop: about 20 real queries, one LLM judge with a 5-criterion rubric plus pass/fail, end-state grading for mutating tasks, and periodic human review of source and tool quality.
-- Treat tool descriptions as code the harness can test and let agents rewrite (a tool-testing agent improved descriptions 40%), keep each tool's purpose distinct, and expose extended/interleaved thinking as a scratchpad for planning by the lead and after each tool result by workers.
+- [component:planner] The lead writes its plan to durable memory before it delegates any work.
+  > saves the plan to Memory (context past 200k tokens is truncated)
+- [stage:build] Give every scout a brief with an objective, an output format, the sources to use and clear boundaries.
+  > each subagent brief needs an objective, output format, tool and source guidance, and task boundaries
+- [component:taskBudget] Scale effort to task complexity, capping subagents and tool calls per tier and showing tokens spent.
+  > simple fact-finding uses 1 agent and 3-10 tool calls
+- [component:scouts] Workers keep isolated contexts and return references to filesystem artifacts rather than full content.
+  > pass lightweight references to the coordinator
+- [component:progressFile] Resume long-running work from checkpoints instead of restarting it.
+  > resume from checkpoints instead of restarting
+- [foundation:toolHygiene] Report tool failures to the agent as data so it can adapt.
+  > tell the agent when a tool fails so it adapts
+- [gap] Deploy harness updates rainbow-style so in-flight sessions keep their version.
+  > Rainbow deployments gradually shift traffic from old to new
+- [foundation:eventLog] Record full traces of decisions, tool calls and interaction structure, with a trace viewer.
+  > Full production tracing was needed to debug
+- [foundation:ownedLoop] Run independent tool calls in parallel within a turn.
+  > subagents issue 3+ tool calls in parallel
+- [gap] Let workers complete asynchronously into a results inbox for the lead instead of a batch join.
+  > Async would add parallelism at the cost of result coordination
+- [component:evaluator] Grade with one LLM judge using a rubric and a pass/fail verdict rather than a panel of judges.
+  > One judge was more consistent and human-aligned than multiple judges.
+- [stage:evaluate] Judge the outcome and whether the process was reasonable, not whether the agent followed a particular sequence of steps.
+  > judge outcomes plus whether the process was reasonable, not step sequences
+- [foundation:reliability] Start evals with about 20 representative real tasks rather than waiting for a large suite.
+  > About 20 representative real queries suffice early
+- [gap] Let an agent test a tool and rewrite its description from the failures it sees.
+  > rewrote its description, cutting later task completion time by 40%
+- [component:thinkTool] Let workers reason after each tool result to assess its quality and find gaps.
+  > use interleaved thinking after each tool result to assess quality

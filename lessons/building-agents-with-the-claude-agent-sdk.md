@@ -31,11 +31,28 @@ foundations: ownedLoop
 - If performance varies as features are added, build a representative eval set from real customer usage. The article does not cover permissions/hooks (announced the same day elsewhere), compaction thresholds, or built-in tool names.
 
 ## Harness implications
-- Structure the harness around the explicit three-phase loop and make the phase visible in the UI (gathering, acting, verifying), so users can see when an agent skipped verification.
-- Default to file-system-based agentic retrieval with `grep`/`tail`-style partial reads; treat workspace layout as a designed context surface; add embeddings only as an opt-in accelerator.
-- Provide subagents as a built-in with isolated context and excerpt-only returns, usable both for parallel fan-out and for keeping the main context clean.
-- Auto-compaction must be a harness service, not an agent responsibility, with hooks for what to preserve.
-- Tool definitions are context: keep the tool set small, context-efficient, and centred on the agent's primary actions; expose Bash and code execution as the general escape hatch; integrate MCP for third-party auth.
-- Build verification channels into the harness: deterministic rule and lint feedback that reports which rule failed and why, screenshot capture at multiple viewports, and an optional judge subagent gated by cost.
-- Instrument failures and build evals from real usage; expose a loop for inspecting failing runs and adjusting tools rather than prompts.
-- The same harness should serve non-coding agents; avoid baking coding assumptions into the core loop.
+- [foundation:eventLog] Show the agent's current phase (gathering context, acting, verifying) so a skipped verification is visible.
+  > The agent loop is gather context, take action, verify work, repeat
+- [foundation:toolHygiene] Default to agentic search with partial reads such as grep and tail, and add embeddings only as an opt-in accelerator.
+  > using `grep`/`tail` on large logs or uploads instead of loading them whole
+- [foundation:fileHandoff] Treat the workspace's folder and file layout as a designed context surface.
+  > "The folder and file structure of an agent becomes a form of context engineering"
+- [component:scouts] Offer subagents with isolated context that return only relevant excerpts, for parallel fan-out and a clean main context.
+  > isolated context windows that return only relevant excerpts, not full threads
+- [component:compaction] Make auto-compaction a harness service, not something the agent must remember to do.
+  > the SDK auto-summarizes prior messages so long-running agents do not run out of context
+- [component:toolSearch] Keep the tool set small and context-efficient, centred on the agent's primary actions, with Bash as the general escape hatch.
+  > design them for context efficiency and make them the agent's primary actions
+- [gap] Integrate MCP so third-party auth and API calls need no custom glue.
+  > MCP supplies standardized integrations handling auth and API calls
+- [component:selfVerification] Feed back deterministic rule and lint results that say which rule failed and why.
+  > Defined rules are the best feedback: clear rules plus which one failed and why.
+- [gap] Capture screenshots at several viewport sizes so the agent can check layout and responsiveness.
+  domains: web
+  > use Playwright MCP across viewport sizes and interactive elements
+- [component:evaluator] Use an LLM judge only where its gain justifies the cost, since it is not a robust method on its own.
+  > It is "generally not a very robust method" with heavy latency tradeoffs
+- [foundation:eventLog] Keep failing runs inspectable so tools, not only prompts, can be adjusted from real failures.
+  > review outputs, especially failures, and ask whether the agent has the right tools
+- [gap] Keep coding assumptions out of the core loop so the same harness serves non-coding agents.
+  > Terminal access plus file create/edit/search turned out to make Claude effective at non-coding work too

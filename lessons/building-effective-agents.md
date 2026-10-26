@@ -30,11 +30,27 @@ foundations: ownedLoop
 - Poka-yoke your tools: change arguments so mistakes are harder. On SWE-bench more time went into tools than the prompt, and relative-path errors after `cd` were fixed completely by requiring absolute paths. (The page carries a later note that the tooling landscape has changed and points to Managed Agents.)
 
 ## Harness implications
-- Offer the five workflow patterns (chaining with gates, routing, sectioning/voting parallelization, orchestrator-workers, evaluator-optimizer) as composable primitives alongside a free agent loop, and let users pick the least autonomous one that works.
-- Keep the harness thin and inspectable: raw prompts, tool schemas and responses must be viewable; avoid abstraction that hides them.
-- Show planning steps in the UI (transparency principle) and ground every step in environment feedback that is also displayed.
-- Build in stopping conditions (max iterations, budget), checkpoints where the agent pauses for human judgment, and sandboxed execution for compounding-error risk.
-- Treat tool definitions as a first-class, testable artifact: a tool workbench for trying many inputs, docstring-quality descriptions, examples and edge cases, and poka-yoke constraints such as absolute paths and exact-match edits.
-- Choose output formats that match natural text (string replacement over diffs, markdown over JSON-embedded code) to reduce model error.
-- Routing should allow model tiering (cheap model for easy inputs) and voting should expose tunable thresholds.
-- Measure outcomes and add complexity only when evals show gains; the harness should make that measurement easy.
+- [foundation:ownedLoop] Offer workflow patterns (chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer) as composable steps alongside a free agent loop.
+  > use workflows for predictable, well-defined tasks and agents for flexible, model-driven decisions at scale
+- [foundation:ownedLoop] Keep the harness thin so raw prompts, tool schemas and responses stay viewable.
+  > add abstraction that hides prompts and responses, hinders debugging
+- [component:planner] Show the agent's planning steps explicitly and ground each step in displayed environment feedback.
+  > transparency (explicitly show the agent's planning steps)
+- [component:taskBudget] Build in stopping conditions such as a maximum iteration count and a budget.
+  > should include stopping conditions such as a maximum iteration count
+- [component:actionClassifier] Let the agent pause at checkpoints for human judgment before risky steps.
+  > can pause at checkpoints or blockers for human feedback
+- [component:osSandbox] Run agents in a sandbox with guardrails, because errors compound.
+  > test extensively in sandboxes with guardrails
+- [component:toolExamples] Document each tool with example usage, edge cases, input formats and boundaries from other tools.
+  > Include example usage, edge cases, input-format requirements, and clear boundaries from other tools
+- [foundation:toolHygiene] Poka-yoke tool arguments so mistakes are harder, such as requiring absolute paths and exact-match edits.
+  > fixed completely by requiring absolute paths
+- [foundation:toolHygiene] Choose tool formats close to natural text, such as string replacement over diffs.
+  > diffs force counting changed lines before writing code
+- [foundation:declarativeConfig] Allow model tiering so cheap models take easy inputs.
+  > easy questions to Haiku 4.5, hard ones to Sonnet 4.5
+- [gap] Expose tunable thresholds when several reviewers vote on the same output.
+  > several reviewers voting on vulnerabilities or inappropriate content with tunable thresholds
+- [stage:plan] Plan the simplest design that can work, and add steps or components only where they demonstrably help.
+  > measure, then add complexity only when it demonstrably helps
