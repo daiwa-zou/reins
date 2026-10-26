@@ -29,10 +29,17 @@ foundations: reliability
 - Getting started: test on hard agentic scenarios, add a domain-customized think definition plus system-prompt instructions and examples, and monitor usage and refine. The downside is minimal (no external effect unless called, no interference with other tools), and Claude 3.5 Sonnet (New) also gained, so the effect generalizes.
 
 ## Harness implications
-- Offer a built-in no-op `think`/scratchpad tool the harness can enable per task profile (policy-heavy, long tool chains), while defaulting to native extended thinking for current models.
-- Render think-tool content as collapsible reasoning rows distinct from tool calls so users can audit the checklist (rules, info gathered, compliance, result verification) without noise.
-- Let task profiles inject domain checklists and examples into the system prompt (not tool descriptions), and make these editable templates.
-- Measure consistency with pass^k-style repeated runs in the harness eval mode, not just single-shot success; surface variance.
-- Encourage "verify tool results before acting" as a harness-level pattern: after large or surprising tool outputs, prompt the agent to assess them before the next side-effecting call.
-- Track output-token cost of reasoning tools so users can see the trade-off and turn them off for simple flows.
-- Use the SWE-bench adaptation as a template: after a failing test or located bug, the harness can nudge a brainstorming step before edits.
+- [component:thinkTool] Offer a no-op think tool for policy-heavy, long tool chains, but default to native extended thinking on current models.
+  > extended thinking has improved and is now recommended over a dedicated think tool in most cases
+- [component:narration] Render think-tool content as its own reasoning row, distinct from ordinary tool calls, so the checklist can be audited without noise.
+  > It adds no information and changes no state; it only logs a thought.
+- [component:thinkTool] Put domain checklists and examples for the think step in the system prompt, not in the tool description.
+  > Put complex guidance in the system prompt, not the tool description
+- [foundation:reliability] Measure consistency with pass^k over repeated runs, not single-shot success.
+  > the probability all k independent trials succeed
+- [stage:build] After a large or surprising tool result, stop and assess it before the next side-effecting call.
+  > Use it for tool output analysis before acting (possibly backtracking)
+- [component:thinkTool] Track the output-token cost of reasoning tools so they can be turned off for simple flows.
+  > it costs longer prompts and more output tokens
+- [gap] After a failing test or a located bug, nudge a brainstorming step that lists candidate fixes before any edit.
+  > suggests brainstorming fixes after locating a bug or after failing tests

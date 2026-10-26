@@ -32,11 +32,27 @@ foundations: cacheAsSignal
 - Conclusion: the shift is from crafting a perfect prompt to curating what enters the limited attention budget at each step; smarter models need less prescription but context stays finite.
 
 ## Harness implications
-- Treat the context window as a budgeted resource: track and display tokens per source (system prompt, tool defs, tool results, history) so pollution is visible; expose a "context cost" per tool call in the UI.
-- Build compaction as a first-class, tunable stage: a summarization prompt that explicitly preserves decisions, open bugs, and implementation details, discards stale tool output, and re-attaches the N most recently touched files. Make the summary inspectable and editable by the user.
-- Implement tool-result clearing automatically for old tool outputs before full compaction is needed; keep a pointer so the agent can re-fetch.
-- Provide persistent note and memory primitives (todo list, NOTES.md or memory dir) that survive context resets and sessions; surface them in the UI as the agent's visible working state.
-- Support sub-agents with isolated contexts whose return channel is a bounded summary (about 1-2K tokens); the lead agent's context should never receive raw sub-agent transcripts.
-- Favor JIT retrieval tools (glob/grep/head/tail/search) plus a small up-front bootstrap (CLAUDE.md-style project memory) over pre-indexed embedding dumps; keep identifiers (paths, links) cheap to carry.
-- Keep tool sets small and non-overlapping, and lint tool definitions for ambiguity ("could a human pick?"). Structure system prompts in sections at the right altitude, start minimal, add rules only against observed failures, and prefer canonical examples over rule lists.
-- Offer a choice (or auto-selection) among compaction, note-taking and multi-agent based on task shape, and make which one is active visible to the user.
+- [component:taskBudget] Treat the context window as a budgeted resource and track how many tokens each source (system prompt, tool definitions, tool results, history) uses.
+  > every token depletes it, and context has diminishing marginal returns
+- [gap] Show the context cost of each tool call in the UI so pollution is visible where it happens.
+  > Degradation is a gradient not a cliff
+- [component:compaction] Compaction should preserve decisions, open bugs and implementation details, discard stale tool output, and leave a summary the user can inspect.
+  > preserves architectural decisions, unresolved bugs and implementation details, discards redundant tool outputs and messages
+- [component:contextEditing] Clear old tool results automatically before full compaction is needed, keeping a pointer so the agent can re-fetch them.
+  > tool result clearing (drop raw results deep in history)
+- [component:progressFile] Persistent notes outside the context window survive resets and sessions and show the agent's working state.
+  > write notes to persistent storage outside the window and read them back
+- [component:scouts] Sub-agents work in isolated contexts and return a bounded summary of about 1-2K tokens, never their raw transcript.
+  > return a condensed summary of about 1,000-2,000 tokens
+- [foundation:toolHygiene] Favour just-in-time retrieval with targeted queries and head/tail over loading whole objects or pre-indexed dumps.
+  > Claude Code writes targeted queries and uses `head`/`tail` to inspect large data without loading whole objects
+- [component:projectMemory] Load a small project-memory bootstrap such as CLAUDE.md up front and explore the rest just in time.
+  > Claude Code drops `CLAUDE.md` files into context up front
+- [component:toolSearch] Keep the loaded tool set small and non-overlapping, because if a human cannot say which tool to use the agent cannot either.
+  > if a human engineer cannot say definitively which tool to use, the agent cannot either
+- [stage:plan] Write the spec at the right altitude: specific enough to guide the builder, flexible enough to leave it strong heuristics, never brittle if-else rules.
+  > Aim for specific enough to guide, flexible enough to give strong heuristics.
+- [component:toolExamples] Prefer a few diverse canonical examples over a laundry list of edge-case rules.
+  > the recommendation is a diverse set of canonical examples
+- [component:compaction] Choose among compaction, note-taking and sub-agents by task shape, and make the active one visible to the user.
+  > compaction for extensive back-and-forth needing conversational flow; note-taking for iterative development with clear milestones

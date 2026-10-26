@@ -30,12 +30,27 @@ foundations: effectiveConfig, cacheAsSignal
 - Timeline: Feb Opus 4.6 ships (`high`); early Mar reports begin; Mar 4 effort to `medium`; Mar 26 caching change ships; Apr 7 effort reverted; Apr 10 caching fix (v2.1.101); Apr 16 verbosity prompt ships with Opus 4.7; Apr 20 prompt reverted and all resolved (v2.1.116); Apr 23 limits reset and postmortem published.
 
 ## Harness implications
-- Make context-management operations observable: every prune, clear or compaction of thinking or messages must be logged per turn with its trigger reason, and the trace viewer should show what was removed. A "thinking cleared on N consecutive turns" or "cleared mid-tool-use" anomaly should alert.
-- Track cache hit rate and uncached-token counts per session as first-class metrics; a sudden rise in cache misses after a release is a regression signal independent of quality evals.
-- Session-state corner cases (idle over 1h, resume, follow-up during tool use) need explicit regression tests and fixtures; dogfooding on a non-public build does not cover them. Test the exact artifact users run.
-- Any flag or experiment active during an investigation (server-side experiments, display changes) must be visible in trace metadata so maskers are discoverable, not discovered a week later.
-- Prompt changes are code: version them, diff them, run per-model eval suites before ship, and run line-by-line ablations. Gate model-specific prompt lines to the target model in the harness, not by convention.
-- Defaults that trade intelligence for latency should be treated as regressions until proven otherwise; show the effective effort, model and prompt version in the UI so users and support can correlate "feels dumber" reports with configuration.
-- Use soak periods and gradual rollouts for intelligence-affecting changes, with a monitoring dashboard that segments quality signals by release version, model, and effort so a 3% slice-level drop does not hide in aggregate.
-- Run automated code review with full repo context over every PR to the harness, since the back-test showed the stronger model with more context catches bugs that review, tests and dogfooding missed.
-- Provide a frictionless in-product feedback path (`/feedback`) and a way to pair reports with the session's config and trace so reports stop looking like random noise.
+- [foundation:eventLog] Log every prune, clear or compaction of thinking or messages per turn with its trigger, so the trace shows what was removed.
+  > every subsequent request in that process applied the prune
+- [gap] Alert when thinking is cleared on several consecutive turns or in the middle of tool use.
+  > so even the current turn's reasoning was dropped
+- [foundation:cacheAsSignal] Track cache hit rate and uncached tokens per session, because a jump in cache misses after a release is a regression signal on its own.
+  > Dropping thinking blocks changed the request prefix each turn, causing cache misses
+- [gap] Cover session-state corner cases (idle over an hour, resume, follow-up during tool use) with explicit regression tests and fixtures.
+  > Only stale or resumed sessions were affected
+- [gap] Test the exact artifact users run, not an internal build with unreleased features.
+  > the exact public build of Claude Code
+- [foundation:effectiveConfig] Record every flag or experiment active during a run in its metadata so a masking change can be found.
+  > an internal-only server-side message-queuing experiment and a separate change to how thinking is displayed masked the bug
+- [foundation:effectiveConfig] Treat prompt changes as code: version them and ablate them line by line before they ship.
+  > Later line-by-line ablations (remove each prompt line, measure)
+- [gap] Gate model-specific prompt lines to their target model in the harness, not by convention.
+  > model-specific changes must be gated to their target model
+- [foundation:effectiveConfig] Show the effective effort, model and prompt version of a run, since a defaults change is a regression until proven otherwise.
+  > a defaults change is a product regression even when evals say the tradeoff is small
+- [foundation:reliability] Use soak periods and quality signals segmented by release, model and effort so a small slice-level drop does not hide in aggregate.
+  > soak periods, broader evals and gradual rollouts
+- [gap] Run automated code review with full repository context over every change to the harness.
+  > Opus 4.7 found the bug and Opus 4.6 did not
+- [foundation:eventLog] Pair each user feedback report with the session's config and trace so it can be reproduced.
+  > credit to users who filed `/feedback` with reproducible examples
