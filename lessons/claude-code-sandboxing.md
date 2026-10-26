@@ -27,11 +27,19 @@ components: actionClassifier, osSandbox
 - Developers building their own agents can reuse the open-sourced sandboxing code. The article does not cover notification text, how violations are reported back to Claude, settings keys, the default-allowed command list, or explicit limitations.
 
 ## Harness implications
-- Ship a native OS-level sandbox (bubblewrap / Seatbelt) for the shell tool that covers all spawned subprocesses, avoiding container overhead for local use.
-- Always pair filesystem isolation with network isolation; one without the other is bypassable.
-- Route all egress through a proxy outside the sandbox over a Unix domain socket; make the proxy the policy point for domain allowlists and the place where new-domain confirmations are raised.
-- Turn sandbox violations into immediate, specific user prompts ("process tried to reach X / write Y") rather than silent failures, and show them in the UI as boundary events distinct from ordinary permission prompts.
-- Make both boundaries configurable per project (paths, domains) with a simple command to enable, and make the proxy customizable for team-specific outbound rules.
-- Keep credentials outside the sandbox and mediate privileged operations (git push, signing) through a scoped-credential proxy that validates the operation (branch, repo) before attaching real tokens.
-- Use the same sandbox runtime to isolate MCP servers and subagents, not just bash.
-- Measure and display the reduction in permission prompts as a product metric; the goal is fewer, more meaningful prompts rather than zero prompts.
+- [component:osSandbox] Enforce the shell sandbox at the OS level so it covers every script and subprocess a command spawns.
+  > restrictions apply to any scripts, programs, or subprocesses spawned by a command
+- [component:osSandbox] Always pair filesystem isolation with network isolation, since either one alone can be bypassed.
+  > Both boundaries are required together
+- [component:osSandbox] Route all egress through a proxy outside the sandbox that enforces the domain allowlist.
+  > all internet access goes through a Unix domain socket connected to a proxy server running outside the sandbox
+- [component:osSandbox] Turn sandbox violations into immediate, specific notices that are shown apart from ordinary permission prompts.
+  > Any attempt to reach something outside the sandbox triggers an immediate notification
+- [component:osSandbox] Make both boundaries configurable per project by path and by domain.
+  > Both boundaries are configurable by path and by domain
+- [foundation:secretsOutside] Keep credentials outside the sandbox and let the harness attach them to privileged operations such as git push after checking the operation.
+  > Sensitive credentials (git credentials, signing keys) are kept outside the sandbox
+- [component:osSandbox] Use the same sandbox for MCP servers and subagents, not only for the shell tool.
+  > it can sandbox arbitrary processes, agents, and MCP servers
+- [component:osSandbox] Measure the drop in permission prompts, aiming for fewer and more meaningful prompts rather than none.
+  > sandboxing reduced permission prompts by 84%

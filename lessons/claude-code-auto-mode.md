@@ -30,11 +30,27 @@ foundations: untrustedOutput
 - What's next: expand the real overeagerness testset and improve safety and cost. The classifier need not be flawless, only make autonomy substantially safer than no guardrails; users should judge which tasks and environments suit autonomous runs and report errors.
 
 ## Harness implications
-- Offer a tiered permission pipeline: static allowlist for read-only tools, version-control-reviewable in-project edits without checks, and a model classifier for everything with external blast radius.
-- Drop broad execution grants (blanket shell, wildcard interpreters, package-manager run) when entering an autonomous mode; carry over only narrow rules.
-- Run the action classifier on user messages plus tool calls only, stripping assistant prose and tool results, so injected or rationalizing text cannot sway it.
-- Use two-stage classification (cheap yes/no filter, then chain-of-thought on flagged items) with shared prompt prefixes to keep latency, cost, and FPR low.
-- Make the policy templated and editable: environment/trust boundary, grouped block rules, narrow allow exceptions, with a command to dump defaults.
-- Implement deny-and-continue with escalation thresholds (3 consecutive / 20 total) and distinct headless behavior (terminate); the UI should show denials, the agent's reroute, and the escalation counter.
-- Add an input-side PI probe on tool outputs and show flagged content with a visible warning banner in the transcript. Check subagent delegations both ways: deny on dispatch, warn-annotate on return, and propagate warnings up the orchestrator chain.
-- Surface the honest miss rate in the UI and docs and let users pick auto mode per task and environment; keep it as one layer inside a sandbox, not a replacement. Evaluate `&&` chains, file-written payloads, and assembled commands as single real-world actions, not token patterns.
+- [component:actionClassifier] Tier permissions: allow read-only tools statically, let in-project edits through because version control reviews them, and classify everything with external blast radius.
+  > in-project file operations skip the classifier because they are reviewable via version control
+- [gap] Drop broad execution grants such as blanket shell or wildcard interpreters when entering an autonomous mode, keeping only narrow rules.
+  > rules granting arbitrary code execution are dropped
+- [foundation:untrustedOutput] Show the action classifier only user messages and tool calls, never the agent's prose or tool results, so injected or rationalizing text cannot sway it.
+  > with assistant prose, tool descriptions and tool results stripped
+- [component:actionClassifier] Classify in two stages, a cheap yes/no filter and then chain-of-thought on flagged items only, to keep latency and false positives low.
+  > Stage 2 runs chain-of-thought on flagged items only, cutting FPR from 8.5% to 0.4%
+- [component:actionClassifier] Make the permission policy a templated, editable set of trust boundary, block rules and allow exceptions, with a way to print the defaults.
+  > `claude auto-mode defaults` prints the baseline to edit
+- [component:actionClassifier] Return a denial as a tool result that tells the agent to find a safer path without routing around the block.
+  > a denial returns as a tool result instructing the agent to find a safer path without routing around the block
+- [gap] Escalate to the human after repeated denials (3 consecutive or 20 total) and stop in headless mode.
+  > After 3 consecutive or 20 total denials, escalate to the human
+- [foundation:untrustedOutput] Scan tool outputs for prompt injection before they enter context and mark flagged content as suspect.
+  > prepends a warning to treat the content as suspect
+- [component:scouts] Check subagent delegations both ways: on dispatch, and on return with a warning attached to suspicious results.
+  > a return check reviews the subagent's full action history
+- [gap] Show the classifier's honest miss rate so users can choose autonomous mode per task and environment.
+  > The 17% miss rate is "the honest number."
+- [component:osSandbox] Keep the action classifier as one layer inside a sandbox, not a replacement for it.
+  > Auto mode is a large improvement over skip-permissions but a regression versus careful manual review
+- [component:actionClassifier] Judge chained commands, file-written payloads and assembled commands as the single real-world action they perform.
+  > `&&` chains count as one action

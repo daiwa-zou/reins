@@ -35,12 +35,23 @@ foundations: secretsOutside, untrustedOutput
 - Summary principles: contain at the environment layer first, then steer at the model layer (the phish and allowlist cases were egress problems with nothing anomalous for the model to catch); match isolation strength to the user's oversight capacity; and be wary of custom components (hypervisors, syscall filters and container runtimes held, while custom proxies and wrappers broke).
 
 ## Harness implications
-- Default-deny egress with an outside-the-sandbox proxy, and treat each allowed domain as a capability grant: constrain which operations and tokens may traverse it (e.g. only the harness's own session token, strip server-side-fetch headers).
-- Keep credentials out of the execution environment (host keychain or vault, scoped per-session tokens, independent revocation); never rely on classifiers to stop a user-pasted exfiltration.
-- Nothing from an untrusted directory executes before trust is granted: defer hooks, settings, MCP config, and localhost listeners until after the trust prompt, and treat project-open as internet-facing input.
-- Resolve symlinks before path validation; offer filesystem modes (read-only, read-write, read-write-no-delete) and admin-settable mount allowlists.
-- Avoid a privileged outer process with an override key that injections or fatigue can persuade; if one exists, make exceptions explicit, logged, and rate-limited in the UI.
-- Inspect tool output before it enters context with a small fast model via the proxy layer, and show the user when content was flagged and why.
-- Prefer mature isolation primitives (gVisor, seccomp, Seatbelt, bubblewrap, hypervisors) and minimize bespoke proxies and wrappers; audit the custom pieces hardest. Scale isolation to the user's oversight capacity (HITL sandbox for experts who can read bash, sealed VM with admin boundaries for non-experts) and make the current mode and boundaries visible.
-- Plan observability for admins (OTLP/event export) from the start, and show the user per-session what left the sandbox over the network.
-- Treat persistent state (memory, CLAUDE.md, scheduled-agent state) as an injection surface: scan at startup and show provenance of instructions. Do not automatically trust sub-agent output more than raw tool output; carry trust levels through multi-agent handoffs.
+- [component:osSandbox] Deny egress by default and treat every allowed domain as a capability grant, not a destination filter.
+  > an allowlist entry is a capability grant, not a destination filter
+- [foundation:secretsOutside] Keep credentials out of the execution environment, because classifiers cannot stop an exfiltration the user pasted in.
+  > Credentials that never enter the sandbox cannot be exfiltrated
+- [foundation:untrustedOutput] Load nothing executable from an untrusted project (hooks, settings, MCP config) before trust is granted.
+  > defer parsing and execution of project-local config until trust is accepted
+- [component:osSandbox] Resolve symlinks before path validation and offer read-only, read-write and no-delete filesystem modes.
+  > Symlinks must be resolved before path validation
+- [component:actionClassifier] Avoid a privileged outer process that an injection or a tired click can talk into skipping the sandbox; make any exception explicit and logged.
+  > a privileged outer process decides per command whether to enforce the sandbox
+- [foundation:untrustedOutput] Inspect tool output before it enters context, even from trusted tools, and show the user what was flagged and why.
+  > Tool output is attack surface even from trusted tools.
+- [component:osSandbox] Prefer mature isolation primitives over bespoke proxies and wrappers, scaled to the user's oversight capacity and visible in the UI.
+  > the weakest layer is the one you built yourself
+- [foundation:eventLog] Plan exportable logs from the start so admins can see after the fact what each session sent out.
+  > pull-based OTLP exports for after-the-fact logs
+- [component:projectMemory] Treat persistent memory such as CLAUDE.md as an injection surface that is checked at startup and shown with its provenance.
+  > let injections reload each start, needing startup classifiers
+- [component:scouts] Do not trust sub-agent output more than raw tool output.
+  > trusting sub-agent output more than raw tool output makes it an injection vector
