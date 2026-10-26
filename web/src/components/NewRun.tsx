@@ -137,12 +137,12 @@ export function NewRun() {
   }, [opening]);
   const setCfg = (updater: RunConfig | ((c: RunConfig) => RunConfig)) => {
     touched.current = true;
-    setCfgRaw((c) => {
-      const next = typeof updater === "function" ? updater(c) : updater;
-      setNewRunDraft(next);
-      return next;
-    });
+    setCfgRaw(updater);
   };
+  // The draft follows every change you make, synced after the render (a store write inside a state updater runs during render, which React warns about).
+  useEffect(() => {
+    if (touched.current) setNewRunDraft(cfg);
+  }, [cfg, setNewRunDraft]);
   const [checkError, setCheckError] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
   const [check, setCheck] = useState<{ exists: boolean; git: boolean; files: string[]; path: string; suggestions?: { domain: string; reason: string }[] } | null>(null);
