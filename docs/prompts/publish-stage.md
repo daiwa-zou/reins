@@ -1,3 +1,5 @@
+Status: done. Commit 1 landed as c4bcf42 and commit 2 as a52dff2 (2026-10-26); the pipeline is plan → breakdown → per package [contract → tests → build ⇄ evaluate → publish] → wrap up. Kept as the record of the brief.
+
 Add the publish stage to the Reins pipeline, after each package's evaluation passes. Work test-first, as the breakdown and tests stages were (see `server/src/engine/breakdown.test.ts`, `testsStage.test.ts` and the `scripted.ts` kit), and land it as two commits on main.
 
 Pipeline today: plan → breakdown → per package [contract → tests → build ⇄ evaluate] → wrap up (`server/src/engine/orchestrator.ts`, `runPackage`). Phases carry `package: { id, title, index, total }`.
