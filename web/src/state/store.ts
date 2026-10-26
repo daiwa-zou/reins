@@ -181,8 +181,8 @@ export const useStore = create<State>((set, get) => ({
   section: "runs",
   view: "activity",
   sub: "transcript",
-  // No stored preference: open on wide screens (Tailwind xl, 1280px), closed below.
-  overviewOpen: readPref(PREF_OVERVIEW, matchMedia("(min-width: 1280px)").matches),
+  // Closed unless asked for: the run header carries the budget, and Progress opens the rail on demand.
+  overviewOpen: readPref(PREF_OVERVIEW, false),
   showThinking: readPref(PREF_THINKING, false),
   theme: savedTheme,
   modal: null,

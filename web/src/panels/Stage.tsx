@@ -175,23 +175,37 @@ function PhaseStepper({ model }: { model: RunModel }) {
   const latestByPhase = new Map<Phase, RunModel["phases"][number]>();
   for (const p of model.phases) latestByPhase.set(p.phase, p);
   const rounds = model.phases.filter((p) => p.phase === "build").length;
+  const merged = [...model.pullRequests].reverse().find((pr) => pr.merged);
   return (
-    <div className="flex items-center gap-1 px-4 py-1.5 border-b line overflow-x-auto text-small" aria-label="Phases">
+    <div className="flex items-center gap-1 px-4 py-2 border-b line overflow-x-auto text-small" aria-label="Phases">
       {enabled.map((p, i) => {
         const stat = latestByPhase.get(p);
         const state = !stat ? "todo" : stat.finishedTs ? "done" : "active";
         return (
           <React.Fragment key={p}>
             {i > 0 && <ChevronRight size={12} className="faint shrink-0" aria-hidden />}
-            <div className={`flex items-center gap-2 px-2 py-0.5 rounded-lg ${state === "active" ? "sunk font-semibold" : state === "done" ? "muted" : "faint"}`} title={stat?.summary} aria-current={state === "active" ? "step" : undefined}>
-              <span className={`w-2 h-2 rounded-full ${state === "done" ? "bg-[var(--ok)]" : state === "active" ? "bg-[var(--accent)] pulse" : "bg-[var(--line-strong)]"}`} />
+            <div className="phase-pill" data-state={state} title={stat?.summary} aria-current={state === "active" ? "step" : undefined}>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${state === "done" ? "bg-[var(--ok)]" : state === "active" ? "bg-[var(--accent)] pulse" : "bg-[var(--line-strong)]"}`} />
               {PHASE_LABEL[p]}
+              {state === "active" && stat?.package && (
+                <span className="font-normal">
+                  · {stat.package.id} of {stat.package.total} · {stat.package.title}
+                </span>
+              )}
               {p === "build" && rounds > 1 && <span className="badge badge-neutral">×{rounds}</span>}
               {stat && <Elapsed start={stat.startedTs} end={stat.finishedTs} className="faint mono text-caption font-normal" title="Time in this phase" />}
             </div>
           </React.Fragment>
         );
       })}
+      {merged && (
+        <>
+          <span className="flex-1" />
+          <a className="faint text-caption whitespace-nowrap underline-offset-2 hover:underline" href={merged.url} target="_blank" rel="noreferrer" title={merged.branch}>
+            {merged.package ? `package ${merged.package.id}` : "last package"} merged as #{merged.number}
+          </a>
+        </>
+      )}
     </div>
   );
 }

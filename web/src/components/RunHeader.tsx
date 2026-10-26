@@ -5,7 +5,8 @@ import type { RunModel } from "../state/derive";
 import { isLive } from "../state/derive";
 import { StatusBadge } from "./ui";
 import { api } from "../lib/api";
-import { money, duration, tilde, nextTitle } from "../lib/format";
+import { money, duration, tilde, nextTitle, tokens } from "../lib/format";
+import { budgetOf, countedTokens } from "@shared/budget";
 import { useNow } from "../lib/useNow";
 import { runElapsed } from "../lib/time";
 import { runChipLabel } from "@shared/presets";
@@ -65,16 +66,13 @@ export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
           <span className="faint shrink-0" aria-hidden>
             ·
           </span>
-          <span className="mono shrink-0" title={est ? "Estimated at list price; a Claude subscription is not billed per token" : "Cost so far, from reported token usage"}>
-            {est ? "est. " : ""}
-            {money(model.costUsd)}
+          <span className="mono shrink-0" title="Elapsed">
+            {duration(elapsed)}
           </span>
           <span className="faint shrink-0" aria-hidden>
             ·
           </span>
-          <span className="mono shrink-0" title="Elapsed">
-            {duration(elapsed)}
-          </span>
+          <BudgetInline model={model} est={est} />
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
@@ -110,5 +108,26 @@ export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** The budget as a slim gauge in the engine's unit, with the list-price figure beside it (an estimate on a subscription). */
+function BudgetInline({ model, est }: { model: RunModel; est: boolean }) {
+  const cfg = model.config!;
+  const b = budgetOf(cfg);
+  const spent = b.kind === "tokens" ? countedTokens(model.usage) : model.costUsd;
+  const frac = b.limit ? Math.min(1, spent / b.limit) : 0;
+  const fmt = (n: number) => (b.kind === "tokens" ? tokens(n) : money(n));
+  return (
+    <span className="inline-flex items-center gap-2 shrink-0" title={b.kind === "tokens" ? "Tokens counted against the subscription (cache reads at a tenth) of the run's token budget" : "Spent of the dollar budget"} data-budget-inline>
+      <span className="inline-block w-20 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg-sunk)" }} aria-hidden>
+        <span className="block h-full" style={{ width: `${Math.round(frac * 100)}%`, background: frac > 0.9 ? "var(--bad)" : frac > 0.7 ? "var(--warn)" : "var(--accent)" }} />
+      </span>
+      <span className="mono">
+        {fmt(spent)} of {fmt(b.limit)}
+        {b.kind === "tokens" ? " tokens" : ""}
+      </span>
+      {est && <span className="faint">≈ {money(model.costUsd)} at list price, not billed</span>}
+    </span>
   );
 }

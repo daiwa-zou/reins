@@ -26,43 +26,50 @@ export function Transcript({ model }: { model: RunModel }) {
   const events = useStore((s) => s.events[runId] ?? []);
   const scrubSeq = useStore((s) => s.scrubSeq);
   const setScrub = useStore((s) => s.setScrub);
-  const [on, setOn] = useState<Record<string, boolean>>({ tools: true, text: true, guard: true, context: false, flow: true, artifacts: true, notes: true });
-  const [roles, setRoles] = useState<Record<RoleId, boolean>>({ planner: true, builder: true, evaluator: true, classifier: true, scout: true, librarian: true });
+  // One kind of event at a time, or everything (context snapshots only when asked for); one role or all.
+  const [group, setGroup] = useState<string>("all");
+  const [role, setRole] = useState<RoleId | "all">("all");
   const [q, setQ] = useState("");
 
-  const allowed = useMemo(() => new Set(GROUPS.filter((g) => on[g.id]).flatMap((g) => g.types)), [on]);
-  const maxSeq = events.length ? events[events.length - 1].seq : 0;
+  const allowed = useMemo(() => new Set(GROUPS.filter((g) => (group === "all" ? g.id !== "context" : g.id === group)).flatMap((g) => g.types)), [group]);
   const shown = useMemo(() => {
     const upto = scrubSeq ?? Infinity;
-    return events.filter((e) => e.seq <= upto && allowed.has(e.type) && ("role" in e ? roles[(e as any).role as RoleId] !== false : true) && (!q || JSON.stringify(e).toLowerCase().includes(q.toLowerCase())));
-  }, [events, allowed, roles, q, scrubSeq]);
+    return events.filter((e) => e.seq <= upto && allowed.has(e.type) && (role === "all" || !("role" in e) || (e as any).role === role) && (!q || JSON.stringify(e).toLowerCase().includes(q.toLowerCase())));
+  }, [events, allowed, role, q, scrubSeq]);
 
   if (!events.length) return <Empty title="No events yet" />;
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-4 py-2 border-b line flex flex-col gap-2" style={{ background: "var(--bg-elev)" }}>
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] muted shrink-0 mono w-20">seq {scrubSeq ?? maxSeq} / {maxSeq}</span>
-          <input type="range" min={0} max={maxSeq} value={scrubSeq ?? maxSeq} onChange={(e) => setScrub(Number(e.target.value) >= maxSeq ? null : Number(e.target.value))} className="flex-1 accent-[var(--accent)]" aria-label="Scrub through the run" />
-          <button className="btn btn-sm" disabled={scrubSeq === null} onClick={() => setScrub(null)}>
-            Live
+      <div className="px-4 py-2 border-b line flex flex-wrap items-center gap-2" style={{ background: "var(--bg-elev)" }}>
+        <label className="text-small muted inline-flex items-center gap-1.5">
+          Show
+          <select className="input" style={{ width: "auto", padding: "4px 8px", fontSize: 12 }} value={group} onChange={(e) => setGroup(e.target.value)} aria-label="Which events to show">
+            <option value="all">Everything · {events.length}</option>
+            {GROUPS.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-small muted inline-flex items-center gap-1.5">
+          Role
+          <select className="input" style={{ width: "auto", padding: "4px 8px", fontSize: 12 }} value={role} onChange={(e) => setRole(e.target.value as RoleId | "all")} aria-label="Which role's events to show">
+            <option value="all">All roles</option>
+            {(["planner", "builder", "evaluator", "scout", "classifier"] as RoleId[]).map((r) => (
+              <option key={r} value={r}>
+                {r[0].toUpperCase() + r.slice(1)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <input className="input ml-auto" style={{ maxWidth: 240, padding: "4px 8px", fontSize: 12 }} type="search" placeholder="Search events" aria-label="Search events" value={q} onChange={(e) => setQ(e.target.value)} />
+        {scrubSeq !== null && (
+          <button className="btn btn-sm" onClick={() => setScrub(null)}>
+            Back to live
           </button>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {GROUPS.map((g) => (
-            <button key={g.id} className={`btn btn-sm ${on[g.id] ? "" : "btn-ghost faint"}`} onClick={() => setOn({ ...on, [g.id]: !on[g.id] })}>
-              {g.label}
-            </button>
-          ))}
-          <span className="w-px h-5 line border-l mx-1" />
-          {(["planner", "builder", "evaluator", "scout"] as RoleId[]).map((r) => (
-            <button key={r} className={`btn btn-sm ${roles[r] ? "" : "btn-ghost faint"}`} onClick={() => setRoles({ ...roles, [r]: !roles[r] })}>
-              <RoleChip role={r} />
-            </button>
-          ))}
-          <input className="input ml-auto" style={{ maxWidth: 240, padding: "4px 8px", fontSize: 12 }} placeholder="Search events…" aria-label="Search events" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        )}
       </div>
       <div className="flex-1 overflow-auto px-4 py-2">
         <div className="max-w-4xl mx-auto flex flex-col gap-1">

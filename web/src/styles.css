@@ -181,6 +181,11 @@ pre { white-space: pre-wrap; word-break: break-word; }
 .subtab:hover { color: var(--fg); background: var(--bg-sunk); }
 .subtab[aria-selected="true"] { color: var(--fg); background: var(--bg-elev); border-color: var(--line-strong); }
 
+/* The phase strip: one pill per phase; the active one is highlighted and may name its package. */
+.phase-pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 8px; white-space: nowrap; color: var(--fg-faint); }
+.phase-pill[data-state="done"] { color: var(--fg-muted); }
+.phase-pill[data-state="active"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+
 .pulse { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .fade-in { animation: fade-in 220ms ease-out; }
