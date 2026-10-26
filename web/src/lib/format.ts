@@ -46,3 +46,9 @@ export function tilde(p: string, home?: string): string {
   if (home && p.startsWith(home)) return "~" + p.slice(home.length);
   return p;
 }
+
+/** "Title" -> "Title (2)" -> "Title (3)" so repeated runs stay distinguishable in the list. */
+export function nextTitle(title: string): string {
+  const m = title.match(/^(.*) \((\d+)\)$/);
+  return m ? `${m[1]} (${Number(m[2]) + 1})` : `${title} (2)`;
+}

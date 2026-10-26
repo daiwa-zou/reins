@@ -29,9 +29,9 @@ export interface NavState {
 
 export const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: "runs", label: "Runs", hint: "Watch and steer runs" },
-  { id: "reliability", label: "Reliability", hint: "Repeat a task and see how often it passes" },
-  { id: "harness", label: "Harness", hint: "Start a run from Effort, Supervision and domains; saved presets and installed skills" },
-  { id: "lessons", label: "Lessons", hint: "The engineering posts behind each feature" },
+  { id: "harness", label: "Start", hint: "Start a run from Effort, Supervision and domains; saved presets and installed skills" },
+  { id: "lessons", label: "Lessons", hint: "The library behind the harness, and your domains" },
+  { id: "reliability", label: "Trials", hint: "Repeat a task and see how often it passes" },
 ];
 
 export const RUN_VIEWS: readonly { id: RunView; label: string }[] = [

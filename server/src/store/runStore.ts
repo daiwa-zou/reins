@@ -63,6 +63,7 @@ export function summarize(config: RunConfig, events: RunEvent[]): RunSummary {
   let status: RunSummary["status"] = "queued";
   let phase: RunSummary["phase"];
   let round = 0;
+  let pkg: RunSummary["package"];
   let costUsd = 0;
   let updatedAt = config.createdAt;
   for (const ev of events) {
@@ -74,6 +75,7 @@ export function summarize(config: RunConfig, events: RunEvent[]): RunSummary {
       case "phase.started":
         phase = ev.phase;
         round = ev.round;
+        pkg = ev.package;
         break;
       case "turn.finished":
         costUsd += ev.costUsd;
@@ -88,6 +90,7 @@ export function summarize(config: RunConfig, events: RunEvent[]): RunSummary {
     status,
     phase,
     round,
+    ...(pkg ? { package: pkg } : {}),
     costUsd,
     workspace: config.workspace,
     engine: config.engine,

@@ -50,5 +50,8 @@ export function relTimeAt(iso: string, now: number): string {
   if (d < 60_000) return "just now";
   if (d < 3_600_000) return `${Math.floor(d / 60_000)}m ago`;
   if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`;
+  const days = Math.floor(d / 86_400_000);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
 }

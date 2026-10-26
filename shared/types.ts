@@ -507,6 +507,8 @@ export interface RunSummary {
   status: RunStatus;
   phase?: Phase;
   round: number;
+  /** The work package the latest phase belongs to, when it is a per-package phase. */
+  package?: PackageRef;
   costUsd: number;
   workspace: string;
   engine: RunConfig["engine"];

@@ -2,8 +2,8 @@ import React, { useEffect, useMemo } from "react";
 import { useStore } from "./state/store";
 import { derive, isLive } from "./state/derive";
 import { applyNavAction, shortcutFor } from "./state/nav";
-import { TopBar } from "./components/TopBar";
-import { Sidebar } from "./components/Sidebar";
+import { Rail } from "./components/Rail";
+import { RunList } from "./components/RunList";
 import { RunWorkspace } from "./components/RunWorkspace";
 import { HarnessPanel } from "./panels/Harness";
 import { LessonsPanel } from "./panels/Lessons";
@@ -120,9 +120,9 @@ export function App() {
 
   return (
     <div className="h-full flex flex-col">
-      <TopBar />
       <div className="flex-1 min-h-0 flex">
-        <Sidebar />
+        <Rail />
+        {section === "runs" && <RunList />}
         <main className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 min-h-0 overflow-hidden">{content}</div>
           {bootError && (
