@@ -497,9 +497,13 @@ export class Orchestrator {
       let since = since0;
       let rounds = 0;
       let pr: { number: number; url: string };
+      const body = renderPrBody({ pkg, features: this.features, contract: this.contract, evaluation: ev, testsDoc: readWorkspaceFile(ws, ".reins/tests.md") ?? "", baseSha: branch.baseSha, base: pub.base, runId: this.config.id || "run" });
+      if (this.config.pauses.beforePublish) {
+        const a = await this.control.requestPhaseApproval(`Publish ${pkg.title}?`, `The package passed evaluation. Push ${branch.name} and open a pull request onto ${pub.base}?`, { branch: branch.name, base: pub.base, title: pkg.title, body, ...(this.pkg ? { package: this.pkg } : {}) });
+        if (!a.approved) return fail(`Publishing rejected${a.note ? `: ${a.note}` : ""}. The branch ${branch.name} stays local and unpushed.`);
+      }
       try {
         await this.publisher.push(ws, pub.remote, branch.name, signal);
-        const body = renderPrBody({ pkg, features: this.features, contract: this.contract, evaluation: ev, testsDoc: readWorkspaceFile(ws, ".reins/tests.md") ?? "", baseSha: branch.baseSha, base: pub.base, runId: this.config.id || "run" });
         pr = await this.publisher.open(ws, { base: pub.base, head: branch.name, title: pkg.title, body }, signal);
       } catch (err) {
         return fail(`Could not open the pull request: ${(err as Error).message}`);

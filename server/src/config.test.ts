@@ -93,7 +93,7 @@ describe("checkRunConfig", () => {
 describe("presets", () => {
   it("no composition carries task, workspace, id or createdAt; the dials have 4 and 3 ids", () => {
     expect(EFFORT_LEVELS).toEqual(["low", "medium", "high", "max"]);
-    expect(SUPERVISION_LEVELS).toEqual(["unattended", "check-in", "ask-every-write"]);
+    expect(SUPERVISION_LEVELS).toEqual(["unattended", "ask-to-publish", "check-in", "ask-every-write"]);
     for (const p of BUILT_IN_PRESETS) for (const k of ["task", "workspace", "id", "createdAt"]) expect(Object.keys(p.config), `${p.name}.${k}`).not.toContain(k);
   });
 
@@ -180,6 +180,8 @@ describe("publish policy", () => {
     cfg.components.publish = false;
     cfg.pauses.beforeMerge = true;
     expect(checkRunConfig(cfg).map((w) => w.setting)).toContain("pauses.beforeMerge");
+    cfg.pauses.beforePublish = true;
+    expect(checkRunConfig(cfg).map((w) => w.setting)).toContain("pauses.beforePublish");
     const { config, dropped } = validatePresetConfig({ publish: { mergeWhen: "checks", mergeMethod: "rebase", pollSeconds: 5, maxWaitMinutes: 10, maxReviewRounds: 1, remote: "upstream", base: "develop", bogus: 1 } });
     expect(config.publish).toEqual({ mergeWhen: "checks", mergeMethod: "rebase", pollSeconds: 5, maxWaitMinutes: 10, maxReviewRounds: 1, remote: "upstream", base: "develop" });
     expect(dropped).toEqual(["publish.bogus"]);

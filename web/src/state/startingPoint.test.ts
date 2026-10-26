@@ -62,8 +62,9 @@ describe("effortSummary: what an Effort level turns on, in plain words for the H
   });
   it("supervisionSummary lists the pauses a level turns on, in pipeline order", () => {
     expect(supervisionSummary("unattended")).toEqual([]);
+    expect(supervisionSummary("ask-to-publish")).toEqual(["before publishing each package"]);
     expect(supervisionSummary("check-in")).toEqual(["after the plan", "to approve each contract", "after each evaluation", "before each merge"]);
-    expect(supervisionSummary("ask-every-write")).toEqual(["after the plan", "to approve each contract", "before each commit", "after each evaluation", "before each merge"]);
+    expect(supervisionSummary("ask-every-write")).toEqual(["after the plan", "to approve each contract", "before each commit", "after each evaluation", "before publishing each package", "before each merge"]);
   });
 });
 

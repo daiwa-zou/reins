@@ -532,6 +532,7 @@ export function NewRun() {
                         ["afterContract", "to approve the contract"],
                         ["beforeCommit", "before each commit"],
                         ["afterEvaluation", "after each evaluation"],
+                        ["beforePublish", "before publishing"],
                         ["beforeMerge", "before each merge"],
                       ] as const
                     ).map(([k, label]) => (

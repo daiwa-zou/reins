@@ -30,7 +30,7 @@ export function Help() {
         {(
           [
             ["Effort", "What the harness spends on the task: Low, Medium, High or Max. Sets the planner, contract, evaluator, scouts, fix rounds, turns and budget. Not the roles' reasoning effort."],
-            ["Supervision", "How much you want to be asked: Unattended, Check in at gates (plan, contract, evaluation) or Ask before every write (every pause, guardrail mode ask)."],
+            ["Supervision", "How much you want to be asked: Unattended, Ask before publishing (one prompt before a package's branch is pushed and its pull request opened), Check in at gates (plan, contract, evaluation, merge) or Ask before every write (every pause, guardrail mode ask)."],
             ["Tier", "Who decides whether a component is on: Always on (only an experiment turns it off), Set by Effort, or Follows settings (Supervision and the engine)."],
             ["Experiment", "A run with an always-on component switched off (POST /api/runs with ablated: [...]), recorded as ablated and shown on the title chip."],
             ["Domains", "What kind of project: Web, CLI, Go, Python and any domain a lesson names. Zero or more, layered over Effort and Supervision; they may only raise effort and tighten supervision."],

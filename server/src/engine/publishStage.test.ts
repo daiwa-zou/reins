@@ -194,6 +194,34 @@ describe("the publish stage", () => {
     fs.rmSync(remote, { recursive: true, force: true });
   });
 
+  it("the beforePublish pause asks before the branch is pushed, and a rejection leaves the branch local", async () => {
+    const ws = tmpWorkspace();
+    const { remote, base } = withRemote(ws);
+    const gh = fakeGh(ws, { "1": [prView.approved] });
+    const cfg = cfgFor(ws, { components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false }, pauses: { ...noPauses, beforePublish: true } });
+    const approvals: { title: string; detail: string; payload: any }[] = [];
+    const run = async (approve: boolean) => {
+      const { client } = fakeClient([...packageRound("P1", "hello.txt")]);
+      const bus = new RunBus("t-prepublish", false);
+      const events = collect(bus);
+      const r = await new Orchestrator(client, cfg, bus, control({ requestPhaseApproval: async (title, detail, payload) => (approvals.push({ title, detail, payload }), { approved: approve, note: approve ? undefined : "not today" }) }), { publisher: new Publisher({ gh: gh.command }) }).run();
+      return { r, events };
+    };
+    const rejected = await run(false);
+    expect(rejected.r.ok).toBe(false);
+    expect(rejected.r.summary).toBe("Publishing rejected: not today. The branch reins/run1-p1-greet stays local and unpushed.");
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].title).toBe("Publish Greet?");
+    expect(approvals[0].detail).toMatch(/Push reins\/run1-p1-greet and open a pull request onto main/);
+    expect(approvals[0].payload).toMatchObject({ branch: "reins/run1-p1-greet", base, title: "Greet" });
+    expect(approvals[0].payload.body).toContain("## Definition of done");
+    expect(gh.read().prs).toEqual({});
+    expect(remoteLog(remote, base)).toEqual(["init"]);
+    expect(prEvents(rejected.events, "pr.opened")).toHaveLength(0);
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+
   it("a rejected merge pause stops the run with the PR open", async () => {
     const ws = tmpWorkspace();
     const { remote } = withRemote(ws);

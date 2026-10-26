@@ -17,6 +17,7 @@ export const PAUSE_LABEL: Record<(typeof PAUSE_KEYS)[number], string> = {
   afterContract: "Pause to approve the contract",
   beforeCommit: "Pause before each commit",
   afterEvaluation: "Pause after each evaluation",
+  beforePublish: "Pause before publishing",
   beforeMerge: "Pause before each merge",
 };
 
@@ -62,6 +63,8 @@ export function checkRunConfig(config: unknown): ConfigWarning[] {
     out.push({ level: "warn", component: "contracts", setting: "pauses.afterContract", message: `${PAUSE_LABEL.afterContract} (pauses.afterContract) does nothing with ${label("contracts")} off: there is no contract to approve.` });
   if (!on("planner") && pauses.afterPlan === true)
     out.push({ level: "warn", component: "planner", setting: "pauses.afterPlan", message: `${PAUSE_LABEL.afterPlan} (pauses.afterPlan) does nothing with the ${label("planner")} off: there is no plan phase.` });
+  if (!on("publish") && pauses.beforePublish === true)
+    out.push({ level: "warn", component: "publish", setting: "pauses.beforePublish", message: `${PAUSE_LABEL.beforePublish} (pauses.beforePublish) does nothing with ${label("publish")} off: no branch is pushed and no pull request is opened.` });
   if (!on("publish") && pauses.beforeMerge === true)
     out.push({ level: "warn", component: "publish", setting: "pauses.beforeMerge", message: `${PAUSE_LABEL.beforeMerge} (pauses.beforeMerge) does nothing with ${label("publish")} off: no pull request is opened or merged.` });
   if (!on("gitCommits") && pauses.beforeCommit === true)

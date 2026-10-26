@@ -78,7 +78,7 @@ export type ComponentTier = "always" | "effort" | "engine";
 /** The Effort dial: what the harness spends on a task (shared/components.ts EFFORT_TABLE). Not the roles' reasoning effort. */
 export type HarnessEffort = "low" | "medium" | "high" | "max";
 /** How much the person wants to be asked (shared/components.ts SUPERVISION_TABLE). */
-export type Supervision = "unattended" | "check-in" | "ask-every-write";
+export type Supervision = "unattended" | "ask-to-publish" | "check-in" | "ask-every-write";
 /** A run composition: one effort, one supervision, any number of domains in the order picked. */
 export interface Composition {
   effort: HarnessEffort;
@@ -93,6 +93,8 @@ export interface RunPauses {
   afterContract: boolean;
   beforeCommit: boolean;
   afterEvaluation: boolean;
+  /** Before the harness pushes a package's branch and opens its pull request. Absent on runs that predate publishing. */
+  beforePublish?: boolean;
   /** Before the harness merges a package's pull request. Absent on runs that predate publishing. */
   beforeMerge?: boolean;
 }

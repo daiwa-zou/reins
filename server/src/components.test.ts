@@ -25,15 +25,18 @@ describe("tiers and the Effort / Supervision tables", () => {
     expect(EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].rerunEveryCriterion)).toEqual([false, false, false, true]);
   });
   it("SUPERVISION_TABLE has the spec's pauses, modes, labels and chips", () => {
-    expect(SUPERVISION_LEVELS).toEqual(["unattended", "check-in", "ask-every-write"]);
-    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].label)).toEqual(["Unattended", "Check in at gates", "Ask before every write"]);
-    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].chip)).toEqual(["Unattended", "Check in", "Ask every write"]);
-    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].mode)).toEqual(["auto", "auto", "ask"]);
-    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].actionClassifier)).toEqual([true, true, false]);
-    expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforeMerge: false });
-    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforeMerge: true });
-    expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforeMerge: true });
-    expect(PAUSE_KEYS).toEqual(["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforeMerge"]);
+    expect(SUPERVISION_LEVELS).toEqual(["unattended", "ask-to-publish", "check-in", "ask-every-write"]);
+    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].label)).toEqual(["Unattended", "Ask before publishing", "Check in at gates", "Ask before every write"]);
+    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].chip)).toEqual(["Unattended", "Ask to publish", "Check in", "Ask every write"]);
+    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].mode)).toEqual(["auto", "auto", "auto", "ask"]);
+    expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].actionClassifier)).toEqual([true, true, true, false]);
+    expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeMerge: false });
+    // Ask before publishing: unattended until a package is ready to go out, then one prompt.
+    expect(SUPERVISION_TABLE["ask-to-publish"].pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeMerge: false });
+    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: false, beforeMerge: true });
+    expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeMerge: true });
+    expect(PAUSE_KEYS).toEqual(["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforePublish", "beforeMerge"]);
+    expect(PAUSE_GATE.beforePublish).toBe("publish");
     expect(PAUSE_GATE.beforeMerge).toBe("publish");
   });
   it("defaultRunConfig takes its budgets from EFFORT_TABLE (medium)", () => {
