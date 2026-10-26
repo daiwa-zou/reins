@@ -5,7 +5,6 @@ url: https://www.anthropic.com/engineering/writing-tools-for-agents
 tags: tools, evals, mcp, context
 takeaway: A tool is a contract between a deterministic system and a non-deterministic agent, so design it for the agent: few consolidated tools with distinct purposes, namespaced names, semantic rather than opaque outputs, token-efficient and truncated results, and descriptions written like onboarding docs. Build tools through a prototype, evaluate, analyze, improve loop on realistic multi-call tasks, and let Claude analyze transcripts and refactor the tools.
 domains: cli
-enables: selfVerification
 guidance: Make errors actionable: on bad input, say what was expected and give an example, on stderr with a non-zero exit code.
 source: post
 standing: bundled

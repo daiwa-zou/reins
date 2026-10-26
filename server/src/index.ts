@@ -224,7 +224,7 @@ app.post("/api/runs/demo", (c) => {
     engine: "replay",
     task: base?.task ?? "Demo",
     workspace: base?.workspace ?? os.homedir(),
-  } as any);
+  } as any, { verbatim: true });
   return c.json(cfg);
 });
 app.delete("/api/runs/:id", (c) => {

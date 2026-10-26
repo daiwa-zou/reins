@@ -44,6 +44,10 @@ export function catalogueProblems(lessons: Lesson[]): LessonProblem[] {
   const { components, foundations } = linkCatalogue(lessons);
   for (const c of components) if (!c.lessons.length) out.push({ file: "catalogue", source: "catalogue", level: "warn", message: `component "${c.id}" is targeted by no implication; add a [component:${c.id}] bullet to the lesson that justifies it` });
   for (const f of foundations) if (!f.lessons.length) out.push({ file: "catalogue", source: "catalogue", level: "warn", message: `foundation "${f.id}" is targeted by no implication; add a [foundation:${f.id}] bullet` });
+  // The tier is a claim a lesson should back: an always-on component needs a trusted (bundled or reviewed) implication.
+  for (const c of COMPONENTS)
+    if (c.tier === "always" && !lessons.some((l) => l.standing !== "unreviewed" && (l.items ?? []).some((i) => i.kind === "component" && i.target === c.id && i.standing !== "unreviewed")))
+      out.push({ file: "catalogue", source: "catalogue", level: "warn", message: `component "${c.id}" is always on (always-tier) but no bundled or reviewed implication targets it; back the tier with a [component:${c.id}] bullet` });
   return out;
 }
 

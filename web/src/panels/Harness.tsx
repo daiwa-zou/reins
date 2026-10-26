@@ -4,9 +4,10 @@ import { useStore } from "../state/store";
 import { Badge } from "../components/ui";
 import { api } from "../lib/api";
 import type { ComponentId, HarnessComponent, RunConfig, SkillInfo } from "@shared/types";
-import { domainPresets, generatedPresets, PROFILE_IDS, presetChip } from "@shared/presets";
+import { domainPresets, generatedPresets, presetChip } from "@shared/presets";
+import { EFFORT_LEVELS, EFFORT_TABLE, TIER_LABEL } from "@shared/components";
 import { ideas, lessonInDomain, linkCatalogue } from "@shared/implications";
-import { BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL } from "@shared/config";
+import { checkRunConfig, diffFromDefaults, ENGINE_LABEL } from "@shared/config";
 import { classifyPresets, startingPointFor } from "../state/startingPoint";
 
 export const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
@@ -43,6 +44,12 @@ export function HarnessPanel({ model }: { model: RunModel }) {
 
   // Only reachable with a run selected: flip one component of that run's config.
   const launchWithout = (run: RunConfig, id: ComponentId) => {
+    const comp = components.find((c) => c.id === id);
+    // Always-tier: the only way to turn one off is an experiment, recorded as `ablated`.
+    if (comp?.tier === "always") {
+      const ablated = run.ablated?.includes(id) ? run.ablated.filter((x) => x !== id) : [...(run.ablated ?? []), id];
+      return openModal("newRun", { ...run, id: undefined, createdAt: undefined, engine: run.engine === "replay" ? availableEngine() : run.engine, ablated, components: { ...run.components, [id]: !ablated.includes(id) ? true : false }, title: `${run.title} (experiment: without ${comp.label})` } as any);
+    }
     openModal("newRun", { ...run, id: undefined, createdAt: undefined, engine: run.engine === "replay" ? availableEngine() : run.engine, components: { ...run.components, [id]: !run.components[id] }, __openHarness: true, title: `${run.title} (${run.components[id] ? "without" : "with"} ${components.find((c) => c.id === id)?.label ?? id})` } as any);
   };
 
@@ -101,6 +108,9 @@ export function HarnessPanel({ model }: { model: RunModel }) {
                         <span className="faint text-[11px] w-3">{open ? "▾" : "▸"}</span>
                         <span className="font-semibold flex-1">{c.label}</span>
                         {cfg ? <Badge tone={enabled ? "ok" : "neutral"}>{enabled ? "on" : "off"}</Badge> : <Badge tone="neutral">{c.defaultOn ? "on by default" : "off by default"}</Badge>}
+                        <Badge tone="neutral" data-tier={c.tier} title={c.tier === "always" ? "On at every effort; only an experiment turns it off" : c.tier === "effort" ? "Set by the Effort dial; Customize may override it" : "Derived from Supervision and the engine"}>
+                          {TIER_LABEL[c.tier]}
+                        </Badge>
                         {ignored && <Badge tone="warn">ignored here</Badge>}
                       </button>
                       <div className="text-[12.5px] leading-snug muted">{c.short}</div>
@@ -139,10 +149,17 @@ export function HarnessPanel({ model }: { model: RunModel }) {
                             <button className="btn btn-ghost btn-sm" onClick={() => navigate({ section: "lessons", component: c.id, lesson: null })} title="Open Lessons filtered to this component">
                               lessons →
                             </button>
-                            {cfg && (
-                              <button className="btn btn-ghost btn-sm" onClick={() => launchWithout(cfg, c.id)} title="Start a new run with this component flipped">
-                                run {enabled ? "without" : "with"} →
+                            {c.tier === "always" ? (
+                              <button className="btn btn-ghost btn-sm" data-experiment={c.id} onClick={() => (cfg ? launchWithout(cfg, c.id) : openModal("newRun", { __compose: {}, ablated: [c.id], title: `Experiment: without ${c.label}` } as any))} title="An ablation experiment: start a run with this always-on component off, recorded on the run">
+                                {cfg && !enabled ? `Experiment: run with ${c.label}` : `Experiment: run without ${c.label}`} →
                               </button>
+                            ) : (
+                              cfg &&
+                              c.tier === "effort" && (
+                                <button className="btn btn-ghost btn-sm" onClick={() => launchWithout(cfg, c.id)} title="Start a new run with this component flipped">
+                                  run {enabled ? "without" : "with"} →
+                                </button>
+                              )
                             )}
                           </div>
                         </div>
@@ -201,11 +218,11 @@ function StartingPoints() {
   const openModal = useStore((s) => s.openModal);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const toastMsg = useStore((s) => s.toastMsg);
-  const list = storePresets.length ? storePresets : [...BUILT_IN_PRESETS, ...generatedPresets([])];
+  const list = storePresets.length ? storePresets : generatedPresets([]);
   const { saved, domains: generated } = classifyPresets(list);
   const domains = domainPresets(lessons);
   const def = startingPointFor(defaultPreset, { saved: saved.map((p) => p.name), generated: generated.map((p) => ({ name: p.name, domain: p.domain })) });
-  const isDefault = (key: string) => (def.kind === "saved" ? def.name === key : def.kind === "compose" ? def.presets.join("+") === key : false);
+  const isDefault = (key: string) => (def.kind === "saved" ? def.name === key : def.kind === "compose" ? ["full", ...def.domains].join("+") === key : false);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -253,24 +270,29 @@ function StartingPoints() {
           docs/configuring.md
         </a>
       </div>
-      <div className="muted text-small -mt-2">A run starts from one profile plus any domains, or from one of your saved presets.</div>
+      <div className="muted text-small -mt-2">A run starts from an Effort, a Supervision level and any domains, or from one of your saved presets.</div>
       <div>
-        <div className="section-label mb-1.5">Profiles · how careful the run is</div>
-        <ul className="grid md:grid-cols-3 gap-2">
-          {PROFILE_IDS.map((id) => {
-            const p = BUILT_IN_PRESETS.find((x) => x.id === id)!;
-            return <Item key={id} k={id} title={p.name} label={p.name} description={p.description} defaultName={p.name} onStart={() => openModal("newRun", { __compose: [id] } as any)} dataKey={{ "data-start-profile": id }} />;
-          })}
+        <div className="section-label mb-1.5">Effort · what the harness spends on the task</div>
+        <ul className="grid md:grid-cols-4 gap-2">
+          {EFFORT_LEVELS.map((id) => (
+            <li key={id} className="card p-2.5 flex flex-col gap-1" data-start-effort={id}>
+              <div className="font-semibold">{EFFORT_TABLE[id].label}</div>
+              <div className="muted text-[12px] leading-snug flex-1">{EFFORT_TABLE[id].meaning}</div>
+              <button type="button" className="btn btn-sm self-start" onClick={() => openModal("newRun", { __compose: { effort: id } } as any)}>
+                Start a run →
+              </button>
+            </li>
+          ))}
         </ul>
       </div>
       <div>
-        <div className="section-label mb-1.5">Domains · what kind of project (added to a profile)</div>
+        <div className="section-label mb-1.5">Domains · what kind of project (layered over Effort and Supervision)</div>
         <ul className="grid md:grid-cols-2 gap-2">
           {domains.map((d) => {
             const shaping = lessons.filter((l) => l.standing !== "unreviewed" && lessonInDomain(l, d.id!));
             const name = domainPresetName(d.id!);
             return (
-              <Item key={d.id} k={`full+${d.id}`} title={presetChip(d.id!)} label={`Full · ${presetChip(d.id!)}`} description={d.description} defaultName={name} onStart={() => openModal("newRun", { __compose: ["full", d.id!] } as any)} dataKey={{ "data-start-domain": d.id! }}>
+              <Item key={d.id} k={`full+${d.id}`} title={presetChip(d.id!)} label={`Medium · Check in · ${presetChip(d.id!)}`} description={d.description} defaultName={name} onStart={() => openModal("newRun", { __compose: { domains: [d.id!] } } as any)} dataKey={{ "data-start-domain": d.id! }}>
                 {shaping.length > 0 && (
                   <div className="text-[11.5px] leading-snug">
                     <span className="faint">Shaped by: </span>

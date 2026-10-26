@@ -1,7 +1,7 @@
 import React from "react";
-import type { Lesson } from "@shared/types";
-import { BUILT_IN_PRESETS } from "@shared/config";
-import { domainPresets, PROFILE_IDS, presetChip } from "@shared/presets";
+import type { Composition, HarnessEffort, Lesson, Supervision } from "@shared/types";
+import { DEFAULT_COMPOSITION, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "@shared/components";
+import { domainPresets, effortRecommendations, presetChip } from "@shared/presets";
 import { compositionError } from "../state/runChip";
 
 export interface DomainSuggestion {
@@ -9,53 +9,52 @@ export interface DomainSuggestion {
   reason: string;
 }
 
-/**
- * Profile + Domains: exactly one profile and any number of domains, layered
- * in the order picked (shared/presets.ts composeRun). `value` is the run's
- * `presets` list, profile first; an empty list means nothing is picked here
- * (a saved preset or custom settings are active), so nothing shows pressed.
- */
-export function ComposePicker({ lessons, value, suggestions, onChange }: { lessons: Lesson[]; value: string[]; suggestions: DomainSuggestion[]; onChange: (ids: string[]) => void }) {
-  const profile = value.find((x) => (PROFILE_IDS as readonly string[]).includes(x));
-  const picked = value.filter((x) => x !== profile);
-  const domains = domainPresets(lessons);
-  const ids = [...new Set([...domains.map((d) => d.id!), ...suggestions.map((s) => s.domain)])];
-  const error = compositionError(value, lessons);
-  const reason = (d: string) => suggestions.find((s) => s.domain === d)?.reason;
-  const setProfile = (p: string) => onChange([p, ...picked]);
-  const toggle = (d: string) => {
-    const next = picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d];
-    onChange([profile ?? "full", ...next]);
-  };
+function Segmented<T extends string>({ name, label, ids, value, labelOf, meaningOf, onPick }: { name: string; label: string; ids: T[]; value: T | undefined; labelOf: (id: T) => string; meaningOf: (id: T) => string; onPick: (id: T) => void }) {
   return (
-    <div className="flex flex-col gap-2 text-[12.5px]" data-compose-picker>
+    <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold w-[64px]" id="profile-label">
-          Profile
+        <span className="font-semibold w-[84px]" id={`${name}-label`}>
+          {label}
         </span>
-        <div className="inline-flex rounded-lg border line overflow-hidden" role="radiogroup" aria-labelledby="profile-label">
-          {PROFILE_IDS.map((p) => {
-            const on = profile === p;
+        <div className="inline-flex rounded-lg border line overflow-hidden" role="radiogroup" aria-labelledby={`${name}-label`} data-control={name}>
+          {ids.map((id) => {
+            const on = value === id;
             return (
-              <button
-                key={p}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                data-profile={p}
-                className={`px-3 py-1 text-[12.5px] ${on ? "bg-[var(--accent)] text-white" : "hover:brightness-95"}`}
-                title={BUILT_IN_PRESETS.find((x) => x.id === p)?.description}
-                onClick={() => setProfile(p)}
-              >
-                {presetChip(p)}
+              <button key={id} type="button" role="radio" aria-checked={on} {...{ [`data-${name}`]: id }} className={`px-3 py-1 text-[12.5px] ${on ? "bg-[var(--accent)] text-white" : "hover:brightness-95"}`} title={meaningOf(id)} onClick={() => onPick(id)}>
+                {labelOf(id)}
               </button>
             );
           })}
         </div>
-        <span className="faint text-[11.5px]">how careful the run is</span>
       </div>
+      <div className="faint text-[11.5px] leading-snug pl-[92px]" data-meaning={name}>
+        {value ? meaningOf(value) : ""}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Effort + Supervision + Domains (shared/presets.ts composeRun). Effort decides what the harness
+ * spends; Supervision decides when it asks you; domains layer lessons in the order picked. Lesson
+ * recommendations for an effort level are shown with their reason and a Use button, never applied silently.
+ */
+export function ComposePicker({ lessons, value, suggestions, onChange, onOpenLesson }: { lessons: Lesson[]; value: Partial<Composition> | null; suggestions: DomainSuggestion[]; onChange: (c: Composition) => void; onOpenLesson?: (slug: string) => void }) {
+  const cur: Composition = { effort: value?.effort ?? DEFAULT_COMPOSITION.effort, supervision: value?.supervision ?? DEFAULT_COMPOSITION.supervision, domains: value?.domains ?? [] };
+  const active = !!value;
+  const picked = cur.domains;
+  const domains = domainPresets(lessons);
+  const ids = [...new Set([...domains.map((d) => d.id!), ...suggestions.map((s) => s.domain)])];
+  const error = active ? compositionError(cur, lessons) : null;
+  const reason = (d: string) => suggestions.find((s) => s.domain === d)?.reason;
+  const toggle = (d: string) => onChange({ ...cur, domains: picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d] });
+  const recs = effortRecommendations(lessons, picked).filter((r) => r.level !== cur.effort);
+  return (
+    <div className="flex flex-col gap-2 text-[12.5px]" data-compose-picker>
+      <Segmented<HarnessEffort> name="effort" label="Effort" ids={EFFORT_LEVELS} value={active ? cur.effort : undefined} labelOf={(id) => EFFORT_TABLE[id].label} meaningOf={(id) => EFFORT_TABLE[id].meaning} onPick={(effort) => onChange({ ...cur, effort })} />
+      <Segmented<Supervision> name="supervision" label="Supervision" ids={SUPERVISION_LEVELS} value={active ? cur.supervision : undefined} labelOf={(id) => SUPERVISION_TABLE[id].label} meaningOf={(id) => SUPERVISION_TABLE[id].meaning} onPick={(supervision) => onChange({ ...cur, supervision })} />
       <div className="flex flex-wrap items-center gap-1.5" role="group" aria-labelledby="domains-label">
-        <span className="font-semibold w-[64px]" id="domains-label">
+        <span className="font-semibold w-[84px]" id="domains-label">
           Domains
         </span>
         {ids.map((d) => {
@@ -63,16 +62,7 @@ export function ComposePicker({ lessons, value, suggestions, onChange }: { lesso
           const why = reason(d);
           const known = domains.some((x) => x.id === d);
           return (
-            <button
-              key={d}
-              type="button"
-              aria-pressed={on}
-              disabled={!known}
-              className={`badge ${on ? "badge-accent" : "badge-neutral"} hover:brightness-95`}
-              title={known ? `${domains.find((x) => x.id === d)?.description ?? ""}${why ? `\nSuggested: ${why}` : ""}` : `No lesson names the domain "${d}" yet${why ? ` (suggested: ${why})` : ""}`}
-              onClick={() => toggle(d)}
-              data-domain={d}
-            >
+            <button key={d} type="button" aria-pressed={on} disabled={!known} className={`badge ${on ? "badge-accent" : "badge-neutral"} hover:brightness-95`} title={known ? `${domains.find((x) => x.id === d)?.description ?? ""}${why ? `\nSuggested: ${why}` : ""}` : `No lesson names the domain "${d}" yet${why ? ` (suggested: ${why})` : ""}`} onClick={() => toggle(d)} data-domain={d}>
               {on ? "✓ " : ""}
               {presetChip(d)}
               {why && <span className="muted"> · suggested</span>}
@@ -81,6 +71,19 @@ export function ComposePicker({ lessons, value, suggestions, onChange }: { lesso
         })}
         <span className="faint text-[11.5px]">what kind of project; pick any</span>
       </div>
+      {recs.map((r) => (
+        <div key={`${r.slug}:${r.claim}`} className="rounded-md border line px-2.5 py-1.5 flex flex-wrap items-center gap-2 text-[12px]" data-effort-recommendation={r.level}>
+          <span>
+            <b>{presetChip(r.domain)}:</b> {r.claim}{" "}
+            <button type="button" className="link" onClick={() => onOpenLesson?.(r.slug)}>
+              ({r.slug})
+            </button>
+          </span>
+          <button type="button" className="btn btn-sm ml-auto" data-use-effort={r.level} onClick={() => onChange({ ...cur, effort: r.level })}>
+            Use {EFFORT_TABLE[r.level].label}
+          </button>
+        </div>
+      ))}
       {error && (
         <div className="text-[11.5px] leading-snug text-[var(--bad)]" role="alert" data-compose-error>
           {error}

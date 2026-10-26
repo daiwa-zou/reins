@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { defaultRunConfig } from "../../shared/components.js";
-import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, presetFromConfig, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
-import type { RunConfig } from "../../shared/types.js";
+import { COMPONENTS, defaultRunConfig, EFFORT_LEVELS, SUPERVISION_LEVELS } from "../../shared/components.js";
+import { applyPreset, checkRunConfig, diffFromDefaults, presetFromConfig, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
+import { composeRun, compositionConfig, migrateLegacy } from "../../shared/presets.js";
+import type { EngineId, Preset, RunConfig } from "../../shared/types.js";
 
 const base = () => defaultRunConfig({ task: "t", workspace: "/tmp" });
-const preset = (name: string) => BUILT_IN_PRESETS.find((p) => p.name === name)!;
+// The retired built-in presets, in migrated form (Full → medium + check-in, Minimal → low + unattended,
+// Careful → high + ask every write, Claude Code → medium + check-in on the claude-code engine).
+const LEGACY_NAMES = ["Full", "Minimal", "Careful", "Claude Code"];
+const preset = (name: string): Pick<Preset, "name" | "config"> => {
+  const m = migrateLegacy(name);
+  return { name, config: { ...compositionConfig(m.effort, m.supervision, m.engine), ...(m.engine ? { engine: m.engine } : {}) } };
+};
+const BUILT_IN_PRESETS = LEGACY_NAMES.map(preset);
 const engineIgnored = (cfg: RunConfig) => checkRunConfig(cfg).filter((w) => w.message.includes("ignored on this engine"));
 
 describe("checkRunConfig", () => {
@@ -12,11 +20,28 @@ describe("checkRunConfig", () => {
     expect(checkRunConfig(defaultRunConfig({ task: "t", workspace: "/tmp" }))).toEqual([]);
   });
 
-  it("(a) flags components that the chosen engine ignores", () => {
+  it("(a) components the chosen engine ignores follow the engine: recorded off, never warned about", () => {
     const w = checkRunConfig({ ...base(), engine: "claude-code" });
-    const ids = w.filter((x) => x.message.includes("ignored on this engine")).map((x) => x.component).sort();
-    expect(ids).toEqual(["compaction", "contextEditing", "scouts", "taskBudget", "toolExamples", "toolSearch"]);
+    expect(w.filter((x) => x.message.includes("ignored on this engine"))).toEqual([]);
+    const ids = Object.entries(compositionConfig("medium", "check-in", "claude-code").components!).filter(([, v]) => !v).map(([k]) => k).sort();
+    expect(ids).toEqual(["compaction", "contextEditing", "contracts", "scouts", "taskBudget", "thinkTool", "toolExamples", "toolSearch"]);
     expect(w.every((x) => x.level === "warn" || x.level === "info")).toBe(true);
+  });
+
+  it("every effort × supervision × engine combination composes with zero checkRunConfig warnings", () => {
+    for (const effort of EFFORT_LEVELS)
+      for (const supervision of SUPERVISION_LEVELS)
+        for (const engine of ["anthropic", "claude-code"] as EngineId[]) {
+          const c = composeRun({ effort, supervision, domains: ["golang", "cli"] }, [], undefined, engine);
+          const cfg = applyPreset({ ...base(), engine }, { name: c.label, config: c.config });
+          expect(checkRunConfig(cfg), `${effort} ${supervision} ${engine}`).toEqual([]);
+          for (const comp of COMPONENTS) if (!comp.engines.includes(engine)) expect(cfg.components[comp.id], `${comp.id} on ${engine}`).toBe(false);
+        }
+  });
+
+  it("a claude-code composition raises zero checkRunConfig warnings", () => {
+    const c = composeRun({ effort: "max", supervision: "ask-every-write", domains: [] }, [], undefined, "claude-code");
+    expect(checkRunConfig({ ...applyPreset(base(), { name: c.label, config: c.config }), engine: "claude-code" })).toEqual([]);
   });
 
   it("(b) flags unmet requires: resetWithHandoff on with progressFile off", () => {
@@ -66,42 +91,43 @@ describe("checkRunConfig", () => {
 });
 
 describe("presets", () => {
-  it("no built-in preset carries task, workspace, id or createdAt", () => {
-    expect(BUILT_IN_PRESETS.map((p) => p.name)).toEqual(["Full", "Minimal", "Careful", "Claude Code"]);
+  it("no composition carries task, workspace, id or createdAt; the dials have 4 and 3 ids", () => {
+    expect(EFFORT_LEVELS).toEqual(["low", "medium", "high", "max"]);
+    expect(SUPERVISION_LEVELS).toEqual(["unattended", "check-in", "ask-every-write"]);
     for (const p of BUILT_IN_PRESETS) for (const k of ["task", "workspace", "id", "createdAt"]) expect(Object.keys(p.config), `${p.name}.${k}`).not.toContain(k);
   });
 
-  it("Full gives zero diffs", () => {
-    expect(diffFromDefaults(applyPreset(base(), preset("Full")))).toEqual([]);
+  it("Full (medium + check-in) differs from the defaults only by the effort and supervision tables", () => {
+    expect(diffFromDefaults(applyPreset(base(), preset("Full"))).map((d) => d.path)).toEqual(["components.contracts", "components.scouts", "pauses.afterPlan", "pauses.afterContract", "pauses.afterEvaluation"]);
     expect(diffFromDefaults(base())).toEqual([]);
   });
 
-  it("Minimal leaves only narration, actionClassifier and osSandbox on, and lists each one switched off", () => {
+  it("Minimal (low + unattended) leaves the always-tier on and every effort-tier component off, and lists each one switched off", () => {
     const cfg = applyPreset(base(), preset("Minimal"));
-    expect(Object.entries(cfg.components).filter(([, v]) => v).map(([k]) => k).sort()).toEqual(["actionClassifier", "narration", "osSandbox"]);
+    expect(Object.entries(cfg.components).filter(([, v]) => v).map(([k]) => k).sort()).toEqual([...COMPONENTS.filter((c) => c.tier === "always").map((c) => c.id), "actionClassifier"].sort());
     const diff = diffFromDefaults(cfg);
-    // thinkTool is off by default (the post's Dec 2025 update), so Minimal does not list it.
-    for (const id of ["planner", "contracts", "evaluator", "scouts", "featureList", "progressFile", "projectMemory", "gitCommits", "compaction", "contextEditing", "taskBudget", "toolSearch", "toolExamples", "skills", "selfVerification"]) {
+    // thinkTool is off by default (the post's Dec 2025 update), so low effort does not list it.
+    for (const id of ["planner", "contracts", "evaluator", "scouts", "taskBudget"]) {
       const d = diff.find((x) => x.path === `components.${id}`);
       expect(d, id).toBeDefined();
       expect(d!.text).toMatch(/: off \(default on\)$/);
     }
     expect(diff.find((x) => x.path === "components.planner")!.text).toBe("Planner: off (default on)");
-    // Minimal is coherent: no no-op pauses or fix rounds.
+    // Low + unattended is coherent: no no-op pauses or fix rounds.
     expect(checkRunConfig(cfg)).toEqual([]);
   });
 
-  it("Careful sets guardrail ask and every pause on", () => {
+  it("Careful (high + ask every write) sets guardrail ask and every pause on", () => {
     const cfg = applyPreset(base(), preset("Careful"));
     expect(cfg.guardrail.mode).toBe("ask");
     expect(Object.values(cfg.pauses).every(Boolean)).toBe(true);
     expect(checkRunConfig(cfg)).toEqual([]);
   });
 
-  it("Claude Code preset with the claude-code engine has no engine-ignored warnings; Full with it does", () => {
+  it("Claude Code (medium + check-in on claude-code) and Full on claude-code have no engine-ignored warnings", () => {
     expect(engineIgnored(applyPreset({ ...base(), engine: "claude-code" }, preset("Claude Code")))).toEqual([]);
     expect(applyPreset(base(), preset("Claude Code")).engine).toBe("claude-code");
-    expect(engineIgnored(applyPreset({ ...base(), engine: "claude-code" }, preset("Full"))).length).toBeGreaterThan(0);
+    expect(engineIgnored(applyPreset({ ...base(), engine: "claude-code" }, preset("Full")))).toEqual([]);
   });
 
   it("applyPreset keeps the base task, workspace, id and createdAt and records the preset", () => {

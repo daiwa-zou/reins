@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HarnessComponent, IntakeJobSummary, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
+import type { Composition, EngineId, HarnessComponent, IntakeJobSummary, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
 import { api, type PresetEntry } from "../lib/api";
 import { decodeNav, encodeNav, isKnownRun, normalizeNav, sameNav, type DetailsSub, type NavState, type RunView, type Section } from "./nav";
 
@@ -43,6 +43,8 @@ interface State {
   skill: string | null;
   presets: PresetEntry[];
   defaultPreset: string | null;
+  /** The composition New run opens on (the default preset's, or a retired default migrated). */
+  defaultComposition: (Composition & { engine?: EngineId }) | null;
   refreshPresets: () => Promise<void>;
   refreshLessons: () => Promise<void>;
   toast?: { text: string; kind: "info" | "error" };
@@ -183,6 +185,7 @@ export const useStore = create<State>((set, get) => ({
   skill: null,
   presets: [],
   defaultPreset: null,
+  defaultComposition: null,
   booting: true,
   bootError: null,
   approvalDrafts: {},
@@ -255,7 +258,7 @@ export const useStore = create<State>((set, get) => ({
   refreshPresets: async () => {
     try {
       const p = await api.presets();
-      set({ presets: p.presets, defaultPreset: p.default });
+      set({ presets: p.presets, defaultPreset: p.default, defaultComposition: p.defaultComposition ?? null });
     } catch {
       /* presets are optional; New run falls back to the defaults */
     }

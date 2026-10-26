@@ -31,7 +31,7 @@ export function LessonsPanel() {
   const openModal = useStore((s) => s.openModal);
   // Domains New run can pick (unreviewed lessons do not shape runs yet).
   const knownDomains = useMemo(() => presetDomains(lessons), [lessons]);
-  const startWithDomain = (d: string) => openModal("newRun", { __compose: ["full", d] } as any);
+  const startWithDomain = (d: string) => openModal("newRun", { __compose: { domains: [d] } } as any);
 
   const reload = async () => {
     await refreshLessons();

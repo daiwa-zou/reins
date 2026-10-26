@@ -9,7 +9,7 @@ import { money, duration, tilde } from "../lib/format";
 import { nextTitle } from "./TopBar";
 import { useNow } from "../lib/useNow";
 import { runElapsed } from "../lib/time";
-import { presetsLabel } from "@shared/presets";
+import { runChipLabel } from "@shared/presets";
 import { runPresetChip } from "../state/runChip";
 
 /** Identity and controls of the selected run: the only place its cost and status sit in the chrome. */
@@ -53,7 +53,7 @@ export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
             <StatusBadge status={model.status} />
           </span>
           {runPresetChip(cfg) && (
-            <span className="badge badge-accent shrink-0" data-preset-chip title={cfg.presets?.length ? `Presets, in the order layered: ${presetsLabel(cfg.presets)}` : cfg.job === "intake" ? "A lesson intake job, not a run" : `Preset: ${cfg.preset}`}>
+            <span className="badge badge-accent shrink-0" data-preset-chip title={cfg.effort ? `Effort · Supervision · domains in the order layered: ${runChipLabel(cfg)}` : cfg.presets?.length ? `Presets (before Effort and Supervision): ${runChipLabel(cfg)}` : cfg.job === "intake" ? "A lesson intake job, not a run" : `Preset: ${cfg.preset}`}>
               {runPresetChip(cfg)}
             </span>
           )}

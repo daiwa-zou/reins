@@ -4,8 +4,8 @@ import { useStore } from "../state/store";
 import { api, IntakeRefusedError } from "../lib/api";
 import { Badge } from "./ui";
 
-const KIND_LABEL: Record<ImplicationKind, string> = { component: "Components", stage: "Stages", skill: "Skills", foundation: "Foundations", gap: "Ideas (gaps)" };
-const KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "gap"];
+const KIND_LABEL: Record<ImplicationKind, string> = { component: "Components", stage: "Stages", skill: "Skills", foundation: "Foundations", gap: "Ideas (gaps)", effort: "Effort recommendations" };
+const KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "effort", "gap"];
 
 /** A lesson's implications grouped by kind; each target links to where it lives in Reins. */
 export function ImplicationsByKind({ lesson }: { lesson: Lesson }) {

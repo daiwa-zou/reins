@@ -1,4 +1,4 @@
-import type { ComponentId, Foundation, HarnessComponent, RunConfig, RunSummary, Trial, TrialSet } from "./types.js";
+import type { ComponentId, ComponentTier, Foundation, GuardrailMode, HarnessComponent, HarnessEffort, RunConfig, RunSummary, Supervision, Trial, TrialSet } from "./types.js";
 
 export const HARNESS_VERSION = "0.2.0";
 
@@ -19,6 +19,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "roles",
+    tier: "effort",
   },
   {
     id: "contracts",
@@ -30,6 +31,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "roles",
+    tier: "effort",
   },
   {
     id: "evaluator",
@@ -41,6 +43,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "roles",
+    tier: "effort",
   },
   {
     id: "scouts",
@@ -52,6 +55,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "roles",
+    tier: "effort",
   },
   {
     id: "featureList",
@@ -63,6 +67,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "memory",
+    tier: "always",
   },
   {
     id: "progressFile",
@@ -74,6 +79,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "memory",
+    tier: "always",
   },
   {
     id: "projectMemory",
@@ -85,6 +91,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "memory",
+    tier: "always",
   },
   {
     id: "gitCommits",
@@ -96,6 +103,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "memory",
+    tier: "always",
   },
   {
     id: "compaction",
@@ -107,6 +115,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "context",
+    tier: "always",
   },
   {
     id: "contextEditing",
@@ -118,6 +127,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "context",
+    tier: "always",
   },
   {
     id: "resetWithHandoff",
@@ -128,8 +138,9 @@ export const COMPONENTS: HarnessComponent[] = [
     requires: [{ id: "progressFile", reason: "The handoff is read from .reins/progress.md, which is only written when progress notes are on." }],
     assumption: "The model gets 'context anxiety' and wraps up early as the window fills.",
     lessons: [],
-    defaultOn: false,
+    defaultOn: true,
     group: "context",
+    tier: "always",
   },
   {
     id: "taskBudget",
@@ -141,6 +152,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "context",
+    tier: "effort",
   },
   {
     id: "thinkTool",
@@ -152,6 +164,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: false,
     group: "tools",
+    tier: "effort",
   },
   {
     id: "toolSearch",
@@ -163,6 +176,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "tools",
+    tier: "always",
   },
   {
     id: "toolExamples",
@@ -174,6 +188,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "tools",
+    tier: "always",
   },
   {
     id: "skills",
@@ -185,6 +200,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "tools",
+    tier: "always",
   },
   {
     id: "selfVerification",
@@ -196,6 +212,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "tools",
+    tier: "always",
   },
   {
     id: "narration",
@@ -207,6 +224,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "tools",
+    tier: "always",
   },
   {
     id: "actionClassifier",
@@ -218,6 +236,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "safety",
+    tier: "engine",
   },
   {
     id: "osSandbox",
@@ -229,6 +248,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "safety",
+    tier: "always",
   },
   {
     id: "stageLessons",
@@ -240,6 +260,7 @@ export const COMPONENTS: HarnessComponent[] = [
     lessons: [],
     defaultOn: true,
     group: "context",
+    tier: "always",
   },
 ];
 
@@ -338,6 +359,78 @@ export const MODELS = [
   { id: "claude-fable-5-1", label: "Claude Fable 5.1", inputPerM: 10, outputPerM: 50, cacheReadPerM: 0.25 },
 ];
 
+// ---- Effort and Supervision: the two dials of a run composition ------------
+// The exact tables live here, once. The server, the web UI, docs generation
+// (shared/docsTables.ts) and the tests all import them.
+
+export const EFFORT_LEVELS: HarnessEffort[] = ["low", "medium", "high", "max"];
+export const SUPERVISION_LEVELS: Supervision[] = ["unattended", "check-in", "ask-every-write"];
+export const DEFAULT_COMPOSITION: { effort: HarnessEffort; supervision: Supervision } = { effort: "medium", supervision: "check-in" };
+
+/** The effort-tier components, in table order. */
+export const EFFORT_COMPONENTS = ["planner", "contracts", "evaluator", "scouts", "taskBudget", "thinkTool"] as const satisfies readonly ComponentId[];
+export type EffortComponentId = (typeof EFFORT_COMPONENTS)[number];
+
+export interface EffortRow {
+  label: string;
+  /** One line a person understands, shown under the control in New run. */
+  meaning: string;
+  components: Record<EffortComponentId, boolean>;
+  maxFixRounds: number;
+  maxTurnsPerPhase: number;
+  budgetUsd: number;
+  /** Max only: the evaluator re-runs every criterion's verification afresh, and an incomplete report is refused. */
+  rerunEveryCriterion: boolean;
+}
+
+const row = (label: string, meaning: string, on: string, maxFixRounds: number, maxTurnsPerPhase: number, budgetUsd: number, rerunEveryCriterion = false): EffortRow => ({
+  label,
+  meaning,
+  components: Object.fromEntries(EFFORT_COMPONENTS.map((id, i) => [id, on[i] === "1"])) as Record<EffortComponentId, boolean>,
+  maxFixRounds,
+  maxTurnsPerPhase,
+  budgetUsd,
+  rerunEveryCriterion,
+});
+
+/** Columns of `on`: planner, contracts, evaluator, scouts, taskBudget, thinkTool. */
+export const EFFORT_TABLE: Record<HarnessEffort, EffortRow> = {
+  low: row("Low", "The builder alone, on a small budget: no plan, contract or evaluation.", "000000", 0, 30, 3),
+  medium: row("Medium", "Plan, build and evaluate once, with one fix round, on the default budget.", "101010", 1, 60, 10),
+  high: row("High", "Adds a negotiated contract and scouts, two fix rounds and a larger budget.", "111110", 2, 90, 20),
+  max: row("Max", "Everything, with the think tool, three fix rounds and the evaluator re-running every criterion.", "111111", 3, 120, 40, true),
+};
+
+export type PauseKey = "afterPlan" | "afterContract" | "beforeCommit" | "afterEvaluation";
+export const PAUSE_KEYS: PauseKey[] = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation"];
+/** The gate each pause waits at: a pause turns on only when its gate exists at the chosen effort. */
+export const PAUSE_GATE: Record<PauseKey, ComponentId> = { afterPlan: "planner", afterContract: "contracts", beforeCommit: "gitCommits", afterEvaluation: "evaluator" };
+
+export interface SupervisionRow {
+  label: string;
+  /** Text in the run title chip. */
+  chip: string;
+  meaning: string;
+  pauses: Record<PauseKey, boolean>;
+  mode: GuardrailMode;
+  actionClassifier: boolean;
+}
+
+export const SUPERVISION_TABLE: Record<Supervision, SupervisionRow> = {
+  unattended: { label: "Unattended", chip: "Unattended", meaning: "Never pauses; the guardrail runs in auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false }, mode: "auto", actionClassifier: true },
+  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract and each evaluation; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true }, mode: "auto", actionClassifier: true },
+  "ask-every-write": { label: "Ask before every write", chip: "Ask every write", meaning: "Every pause is on and the guardrail asks before anything that is not read-only.", pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true }, mode: "ask", actionClassifier: false },
+};
+
+export const TIER_LABEL: Record<ComponentTier, string> = { always: "Always on", effort: "Set by Effort", engine: "Follows settings" };
+
+export const isEffort = (v: unknown): v is HarnessEffort => typeof v === "string" && (EFFORT_LEVELS as string[]).includes(v);
+export const isSupervision = (v: unknown): v is Supervision => typeof v === "string" && (SUPERVISION_LEVELS as string[]).includes(v);
+export function tierOf(id: string): ComponentTier | undefined {
+  return COMPONENTS.find((c) => c.id === id)?.tier;
+}
+export const ALWAYS_IDS = (): ComponentId[] => COMPONENTS.filter((c) => c.tier === "always").map((c) => c.id);
+
 export const CONTEXT_LIMIT_TOKENS = 1_000_000;
 
 export function defaultRunConfig(partial: Partial<RunConfig> & { task: string; workspace: string }): RunConfig {
@@ -360,14 +453,18 @@ export function defaultRunConfig(partial: Partial<RunConfig> & { task: string; w
     pauses: partial.pauses ?? { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false },
     context: partial.context ?? { compactAtTokens: 150_000, clearToolResultsAfterTurns: 8, resetAtTokens: 400_000 },
     guardrail: partial.guardrail ?? { mode: "auto", allowNetwork: false, askPatterns: [], denyPatterns: [] },
-    budgetUsd: partial.budgetUsd ?? 10,
-    maxTurnsPerPhase: partial.maxTurnsPerPhase ?? 60,
-    maxFixRounds: partial.maxFixRounds ?? 2,
+    budgetUsd: partial.budgetUsd ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].budgetUsd,
+    maxTurnsPerPhase: partial.maxTurnsPerPhase ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].maxTurnsPerPhase,
+    maxFixRounds: partial.maxFixRounds ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].maxFixRounds,
     createdAt: partial.createdAt ?? new Date().toISOString(),
     ...(typeof partial.preset === "string" && partial.preset.trim() ? { preset: partial.preset.trim().slice(0, 80) } : {}),
     ...(Array.isArray(partial.guidance) && cleanGuidance(partial.guidance).lines.length ? { guidance: cleanGuidance(partial.guidance).lines } : {}),
     ...(Array.isArray(partial.presets) && partial.presets.length ? { presets: partial.presets.filter((x): x is string => typeof x === "string").slice(0, 12) } : {}),
     ...(partial.stageLessons && typeof partial.stageLessons === "object" ? { stageLessons: partial.stageLessons } : {}),
+    ...(isEffort(partial.effort) ? { effort: partial.effort } : {}),
+    ...(isSupervision(partial.supervision) ? { supervision: partial.supervision } : {}),
+    ...(Array.isArray(partial.domains) ? { domains: partial.domains.filter((x): x is string => typeof x === "string").slice(0, 12) } : {}),
+    ...(Array.isArray(partial.ablated) && partial.ablated.length ? { ablated: partial.ablated.filter((x) => tierOf(x) === "always") } : {}),
   };
 }
 

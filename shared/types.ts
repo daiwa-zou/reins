@@ -67,6 +67,20 @@ export interface HarnessComponent {
   lessons: string[];
   defaultOn: boolean;
   group: "roles" | "memory" | "context" | "tools" | "safety";
+  /** Who decides whether it is on: "always" (nobody; only an ablation experiment turns it off), "effort" (the Effort dial), "engine" (derived from Supervision and the engine). */
+  tier: ComponentTier;
+}
+
+export type ComponentTier = "always" | "effort" | "engine";
+/** The Effort dial: what the harness spends on a task (shared/components.ts EFFORT_TABLE). Not the roles' reasoning effort. */
+export type HarnessEffort = "low" | "medium" | "high" | "max";
+/** How much the person wants to be asked (shared/components.ts SUPERVISION_TABLE). */
+export type Supervision = "unattended" | "check-in" | "ask-every-write";
+/** A run composition: one effort, one supervision, any number of domains in the order picked. */
+export interface Composition {
+  effort: HarnessEffort;
+  supervision: Supervision;
+  domains: string[];
 }
 
 export type GuardrailMode = "ask" | "auto" | "trust";
@@ -126,8 +140,16 @@ export interface RunConfig {
   guidance?: string[];
   /** "intake" for a lesson intake job (never listed with runs); absent for a normal run. */
   job?: "intake";
-  /** The care profile and domain presets the run was composed from, in the order picked, e.g. ["careful","golang","cli"]. */
+  /** Legacy (runs before Effort and Supervision): the care profile and domain presets, e.g. ["careful","golang","cli"]. New runs record effort, supervision and domains instead. */
   presets?: string[];
+  /** The Effort dial the run was composed with. Absent on runs that predate it (derived on read). */
+  effort?: HarnessEffort;
+  /** The Supervision level the run was composed with. Absent on runs that predate it (derived on read). */
+  supervision?: Supervision;
+  /** Domain presets layered over the composition, in the order picked. */
+  domains?: string[];
+  /** Always-tier components switched off as an experiment (the only way to turn one off). */
+  ablated?: ComponentId[];
   /** "Lessons for this stage" lines per phase, resolved when the run was created (stage implications; see shared/implications.ts). */
   stageLessons?: Partial<Record<Phase, string[]>>;
 }
@@ -143,7 +165,7 @@ export interface ConfigWarning {
 }
 
 /** The parts of a run config a preset may set. Never task, workspace, id or createdAt. */
-export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "presets" | "stageLessons" | "components" | "roles" | "pauses" | "context" | "guardrail">> & {
+export type PresetConfig = Partial<Omit<RunConfig, "id" | "task" | "workspace" | "createdAt" | "title" | "preset" | "presets" | "stageLessons" | "ablated" | "components" | "roles" | "pauses" | "context" | "guardrail">> & {
   components?: Partial<Record<ComponentId, boolean>>;
   roles?: Partial<Record<RoleId, Partial<RoleSettings>>>;
   pauses?: Partial<RunPauses>;
@@ -418,7 +440,7 @@ export interface Lesson {
   hash?: string;
 }
 
-export type ImplicationKind = "component" | "stage" | "skill" | "foundation" | "gap";
+export type ImplicationKind = "component" | "stage" | "skill" | "foundation" | "gap" | "effort";
 export type Standing = "bundled" | "reviewed" | "unreviewed";
 export type LessonProvenance = "post" | "article" | "paper" | "postmortem" | "note";
 

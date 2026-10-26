@@ -38,15 +38,17 @@ describe("run preset chip", () => {
   it("labels composed runs, falls back to preset, names intake", () => {
     expect(presetsLabel(["careful", "golang", "cli"])).toBe("Careful · Go · CLI");
     expect(runPresetChip({ presets: ["careful", "golang", "cli"] })).toBe("Careful · Go · CLI");
+    expect(runPresetChip({ effort: "high", supervision: "check-in", domains: ["golang", "cli"] })).toBe("High · Check in · Go · CLI");
+    expect(runPresetChip({ effort: "high", supervision: "check-in", domains: [], ablated: ["compaction"] })).toBe("High · Check in · Experiment: without Compaction");
     expect(runPresetChip({ preset: "My preset" })).toBe("My preset");
     expect(runPresetChip({ job: "intake", presets: ["full"] })).toBe("Lesson intake");
     expect(runPresetChip({})).toBe("");
   });
   it("returns composition errors as strings without throwing", () => {
-    expect(compositionError(["full", "careful"], [])).toMatch(/one care profile/);
-    expect(compositionError(["golang"], [])).toMatch(/care profile/);
-    expect(typeof compositionError(["careful", "nosuchdomain"], [])).toBe("string");
-    expect(compositionError(["careful", "golang", "cli"], [])).toBeNull();
-    expect(compositionError([], [])).toBeNull();
+    expect(compositionError({ effort: "extreme" as any }, [])).toMatch(/unknown effort/);
+    expect(compositionError({ supervision: "sometimes" as any }, [])).toMatch(/supervision/);
+    expect(typeof compositionError({ effort: "high", domains: ["nosuchdomain"] }, [])).toBe("string");
+    expect(compositionError({ effort: "high", supervision: "ask-every-write", domains: ["golang", "cli"] }, [])).toBeNull();
+    expect(compositionError({}, [])).toBeNull();
   });
 });

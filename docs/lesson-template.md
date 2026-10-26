@@ -9,7 +9,7 @@ components: thinkTool
 foundations: eventLog
 domains: web
 enables: evaluator
-disables: narration
+disables: scouts
 guidance: Start the dev server with a timeout and curl the routes you changed.
 takeaway: One paragraph a reader can skim on a card. Say what the lesson is and why it matters to an agent harness.
 ---

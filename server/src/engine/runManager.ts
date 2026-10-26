@@ -137,9 +137,9 @@ export class RunManager extends EventEmitter {
     return run;
   }
 
-  createRun(input: Partial<RunConfig> & { task: string; workspace: string }): RunConfig {
-    // Presets compose here (profile + domains), and the stage lessons are resolved and recorded on the config.
-    const config = defaultRunConfig({ ...resolveRunInput(input), id: nanoid(10) });
+  createRun(input: Partial<RunConfig> & { task: string; workspace: string }, opts: { verbatim?: boolean } = {}): RunConfig {
+    // Effort + Supervision + domains compose here, and the stage lessons are resolved and recorded on the config.
+    const config = defaultRunConfig({ ...resolveRunInput(input, opts), id: nanoid(10) });
     saveConfig(config);
     const run = this.attach(config);
     run.bus.emitEvent({ type: "run.created", config });
@@ -294,7 +294,8 @@ export class RunManager extends EventEmitter {
     if (!base) throw new Error("No such run.");
     const ids: string[] = [];
     for (let i = 0; i < k; i++) {
-      const cfg = this.createRun({ ...base, id: undefined as any, createdAt: undefined as any, title: base.title });
+      // Verbatim: a trial set needs identical configs, ablations (and a legacy run's offs) included.
+      const cfg = this.createRun({ ...base, id: undefined as any, createdAt: undefined as any, title: base.title }, { verbatim: true });
       ids.push(cfg.id);
       await new Promise<void>((resolve) => {
         const check = () => (this.active.has(cfg.id) ? setTimeout(check, 1000) : resolve());

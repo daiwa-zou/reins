@@ -67,31 +67,31 @@ describe("one table, three views", () => {
 });
 
 describe("composable presets", () => {
-  it("layers domains over one profile and labels the run", () => {
-    const c = composeRun(["careful", "golang", "cli"], listLessons());
-    expect(c.presets).toEqual(["careful", "golang", "cli"]);
-    expect(c.label).toBe("Careful · Go · CLI");
+  it("layers domains over the effort and supervision dials and labels the run", () => {
+    const c = composeRun({ effort: "high", supervision: "ask-every-write", domains: ["golang", "cli"] }, listLessons());
+    expect(c.domains).toEqual(["golang", "cli"]);
+    expect(c.label).toBe("High · Ask every write · Go · CLI");
     expect(presetsLabel(["full", "web"])).toBe("Full · Web");
     expect(c.config.pauses).toMatchObject({ afterPlan: true, beforeCommit: true });
     expect(c.config.guardrail?.mode).toBe("ask");
     expect(c.config.guidance!.some((g) => g.includes("go vet"))).toBe(true);
-    expect(() => composeRun(["careful", "minimal"], [])).toThrow(/exactly one/);
-    expect(() => composeRun(["careful", "nonsense"], [])).toThrow(/unknown preset/);
-    expect(() => composeRun(["golang"], [])).toThrow(/exactly one/);
+    expect(() => composeRun({ effort: "extreme" as any }, [])).toThrow(/unknown effort/);
+    expect(() => composeRun({ effort: "high", domains: ["nonsense"] }, [])).toThrow(/unknown domain/);
+    expect(() => composeRun({ supervision: "sometimes" as any, domains: ["golang"] }, [])).toThrow(/unknown supervision/);
   });
   it("later domains win component switches and the override is recorded", () => {
-    const a = lesson("a", "2025-01-01", [], { domains: ["x"], enables: ["actionClassifier"] });
-    const c = composeRun(["careful", "x"], [a]);
-    expect(c.config.components!.actionClassifier).toBe(true);
-    expect(c.basis[0].effect).toMatch(/overrides Careful/);
-    const b = lesson("b", "2025-02-01", [], { domains: ["y"], disables: ["actionClassifier"] });
-    const c2 = composeRun(["careful", "x", "y"], [a, b]);
-    expect(c2.config.components!.actionClassifier).toBe(false);
+    const a = lesson("a", "2025-01-01", [], { domains: ["x"], enables: ["thinkTool"] });
+    const c = composeRun({ effort: "high", supervision: "ask-every-write", domains: ["x"] }, [a]);
+    expect(c.config.components!.thinkTool).toBe(true);
+    expect(c.basis[0].effect).toMatch(/overrides High effort/);
+    const b = lesson("b", "2025-02-01", [], { domains: ["y"], disables: ["thinkTool"] });
+    const c2 = composeRun({ effort: "high", supervision: "ask-every-write", domains: ["x", "y"] }, [a, b]);
+    expect(c2.config.components!.thinkTool).toBe(false);
     expect(c2.basis.find((x) => x.slug === "b")!.effect).toMatch(/overrides a/);
   });
-  it("the profile owns the engine", () => {
+  it("no domain owns the engine", () => {
     const d = lesson("d", "2025-01-01", [], { domains: ["z"] });
-    expect(composeRun(["full", "z"], [d]).config.engine).toBeUndefined();
+    expect(composeRun({ domains: ["z"] }, [d]).config.engine).toBeUndefined();
   });
 });
 
@@ -119,8 +119,10 @@ describe("a run with presets careful, golang, cli", () => {
   it("records the presets and the build phase's first message carries the merged stage block (no duplicates, at most 8)", async () => {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), "reins-stage-"));
     const cfg = defaultRunConfig({ ...resolveRunInput({ task: "Add a --version flag", workspace: ws, presets: ["careful", "golang", "cli"] }), id: "stage-test" });
-    expect(cfg.presets).toEqual(["careful", "golang", "cli"]);
-    expect(cfg.preset).toBe("Careful · Go · CLI");
+    // The legacy body is migrated and recorded in the new shape.
+    expect(cfg.presets).toBeUndefined();
+    expect(cfg).toMatchObject({ effort: "high", supervision: "ask-every-write", domains: ["golang", "cli"] });
+    expect(cfg.preset).toBe("High · Ask every write · Go · CLI");
     expect(cfg.components.stageLessons).toBe(true);
     const criteria = [{ id: "C1", text: "x", verify: "y", hard: true }];
     const { client, calls } = fakeClient([
@@ -156,3 +158,44 @@ describe("a run with presets careful, golang, cli", () => {
     fs.rmSync(ws, { recursive: true, force: true });
   });
 });
+
+describe("max effort re-runs every criterion", () => {
+  const criteria = [
+    { id: "C1", text: "x", verify: "y", hard: true },
+    { id: "C2", text: "soft one", verify: "z", hard: false },
+  ];
+  const script = (extra: Scripted[]): Scripted[] => [
+    { content: [toolUse("p", "finish", { summary: "planned", open_items: [] })], stop_reason: "tool_use" },
+    { content: [toolUse("c1", "propose_contract", { criteria, rationale: "r" })], stop_reason: "tool_use" },
+    { content: [toolUse("c2", "review_contract", { accept: true, criteria, feedback: "ok" })], stop_reason: "tool_use" },
+    { content: [toolUse("b", "finish", { summary: "built", open_items: [] })], stop_reason: "tool_use" },
+    { content: [toolUse("e1", "report_evaluation", { results: [{ id: "C1", pass: true, evidence: "ok" }], summary: "partial" })], stop_reason: "tool_use" },
+    ...extra,
+  ];
+  const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 100, requestPhaseApproval: async () => ({ approved: true }), requestContractApproval: async () => ({ approved: true }) };
+  const make = (effort: "max" | "high") => {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), "reins-max-"));
+    return { ws, cfg: defaultRunConfig({ ...resolveRunInput({ task: "t", workspace: ws, effort, supervision: "unattended" }), id: `max-${effort}` }) };
+  };
+  it("at max, a report that omits a criterion is refused naming the missing id, and the prompt says to re-run every criterion", async () => {
+    const { ws, cfg } = make("max");
+    expect(cfg.effort).toBe("max");
+    const { client, calls } = fakeClient(script([{ content: [toolUse("e2", "report_evaluation", { results: [{ id: "C1", pass: true, evidence: "ok" }, { id: "C2", pass: true, evidence: "ok" }], summary: "all" })], stop_reason: "tool_use" }]));
+    const r = await new Orchestrator(client, cfg, new RunBus("max-max", false), control).run();
+    expect(r.ok).toBe(true);
+    const evalCalls = calls.filter((c) => String(c.messages[0].content).includes("# Phase\nevaluate"));
+    expect(String(evalCalls[0].messages[0].content)).toContain("afresh");
+    const retry = JSON.stringify(evalCalls[1].messages);
+    expect(retry).toMatch(/Refused at max effort: the report omits criteria C2/);
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+  it("at high, the same incomplete report is accepted as before", async () => {
+    const { ws, cfg } = make("high");
+    const { client, calls } = fakeClient(script([]));
+    const r = await new Orchestrator(client, cfg, new RunBus("max-high", false), control).run();
+    expect(r.ok).toBe(true);
+    expect(calls.filter((c) => String(c.messages[0].content).includes("# Phase\nevaluate"))).toHaveLength(1);
+    fs.rmSync(ws, { recursive: true, force: true });
+  });
+});
+
