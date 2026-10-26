@@ -46,6 +46,10 @@ standing: bundled
   > a fresh model tries to refute the result so the worker is not its own grader
 - [stage:evaluate] Review the diff against the criteria from a fresh context and report only correctness and requirement gaps, not style.
   > An adversarial reviewer subagent sees only the diff and criteria, and must be told to report only correctness and requirement gaps or it will over-engineer.
+- [component:workPackages] Cut the plan into pull-request-sized packages, so each one goes through implementation, commit and its own PR.
+  > approval leads to implementation, commit and PR
+- [stage:breakdown] A package whose whole diff fits in one sentence needs no further slicing; one that spans several modules or an unfamiliar area does.
+  > Skip planning when the diff fits in one sentence; plan when unsure of approach, multi-file, or unfamiliar code.
 - [component:planner] Keep the plan as a durable artifact outside the conversation so the work can be reset and re-entered.
   > Have Claude write the plan to a doc or GitHub issue so you can reset if the implementation is poor.
 - [stage:plan] Name the files and interfaces, say what is out of scope, and end the spec with an end-to-end verification step.

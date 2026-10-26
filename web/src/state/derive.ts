@@ -7,6 +7,7 @@ import type {
   EvaluationOrigin,
   FeatureItem,
   GuardrailDecision,
+  PackageRef,
   Phase,
   RoleId,
   RunConfig,
@@ -28,7 +29,7 @@ export interface ToolCall {
 }
 
 export type FeedItem =
-  | { kind: "phase"; seq: number; ts: string; phase: Phase; round: number; finished?: { summary: string; costUsd: number; durationMs: number } }
+  | { kind: "phase"; seq: number; ts: string; phase: Phase; round: number; package?: PackageRef; finished?: { summary: string; costUsd: number; durationMs: number } }
   | { kind: "turn"; seq: number; ts: string; role: RoleId; turn: number; thinking?: string; text?: string; calls: ToolCall[]; usage?: Usage; costUsd?: number; stopReason?: string; finishedTs?: string }
   | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
@@ -42,6 +43,8 @@ export type FeedItem =
 export interface PhaseStat {
   phase: Phase;
   round: number;
+  /** The work package a contract, build or evaluate phase belongs to. */
+  package?: PackageRef;
   startedTs: string;
   finishedTs?: string;
   summary?: string;
@@ -130,9 +133,9 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         m.statusReason = ev.reason;
         break;
       case "phase.started": {
-        m.phases.push({ phase: ev.phase, round: ev.round, startedTs: ev.ts, costUsd: 0, usage: zeroUsage(), turns: 0 });
+        m.phases.push({ phase: ev.phase, round: ev.round, ...(ev.package ? { package: ev.package } : {}), startedTs: ev.ts, costUsd: 0, usage: zeroUsage(), turns: 0 });
         currentPhaseIdx = m.phases.length - 1;
-        m.feed.push({ kind: "phase", seq: ev.seq, ts: ev.ts, phase: ev.phase, round: ev.round });
+        m.feed.push({ kind: "phase", seq: ev.seq, ts: ev.ts, phase: ev.phase, round: ev.round, ...(ev.package ? { package: ev.package } : {}) });
         currentTurn = null;
         break;
       }
@@ -288,7 +291,7 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
   return m;
 }
 
-export const PHASE_ORDER: Phase[] = ["plan", "contract", "build", "evaluate", "wrapup"];
-export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", contract: "Contract", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
+export const PHASE_ORDER: Phase[] = ["plan", "breakdown", "contract", "build", "evaluate", "wrapup"];
+export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", breakdown: "Breakdown", contract: "Contract", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
 export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier", scout: "Scout", librarian: "Librarian" };
 export const isLive = (s: RunStatus) => s === "running" || s === "paused" || s === "waiting_approval" || s === "queued";

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { derive } from "./derive";
+import { derive, PHASE_LABEL, PHASE_ORDER } from "./derive";
 import type { RunEvent } from "@shared/types";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,5 +54,22 @@ describe("derive (fold of the event log)", () => {
     expect(before.finishedTs).toBeUndefined();
     const after = derive(evs).feed.find((f) => f.kind === "turn") as any;
     expect(after.finishedTs).toBe("2026-01-01T00:00:04.000Z");
+  });
+  it("knows the breakdown phase, between plan and contract", () => {
+    expect(PHASE_ORDER).toEqual(["plan", "breakdown", "contract", "build", "evaluate", "wrapup"]);
+    expect(PHASE_LABEL.breakdown).toBe("Breakdown");
+  });
+  it("carries the work package of a phase into the phase list and the feed", () => {
+    const pkg = { id: "P2", title: "Document the endpoint", index: 2, total: 2 };
+    const evs = [
+      { runId: "r", seq: 0, ts: "2026-01-01T00:00:00.000Z", type: "phase.started", phase: "contract", round: 0, package: pkg },
+      { runId: "r", seq: 1, ts: "2026-01-01T00:00:05.000Z", type: "phase.finished", phase: "contract", round: 0, package: pkg, summary: "2 criteria agreed", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.01, durationMs: 5000 },
+      { runId: "r", seq: 2, ts: "2026-01-01T00:00:06.000Z", type: "phase.started", phase: "wrapup", round: 0 },
+    ] as unknown as RunEvent[];
+    const m = derive(evs);
+    expect(m.phases.map((p) => p.package)).toEqual([pkg, undefined]);
+    const item = m.feed.find((f) => f.kind === "phase") as any;
+    expect(item.package).toEqual(pkg);
+    expect(item.finished.summary).toBe("2 criteria agreed");
   });
 });

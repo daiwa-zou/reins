@@ -17,13 +17,14 @@ Press **d** to watch a recorded run. For live runs pick an engine in the New run
 
 ## What it does
 
-A run moves through five phases. Roles never share a context window; they hand work to each other through files in the workspace's `.reins/` folder.
+A run moves through six phases; contract, build and evaluate repeat once per work package. Roles never share a context window; they hand work to each other through files in the workspace's `.reins/` folder.
 
 | Phase | Who | What | Lesson |
 |---|---|---|---|
 | Plan | Planner | Expands a short task into `.reins/spec.md` and a feature list the builder may only mark done, never delete. | Effective harnesses for long-running agents |
+| Breakdown | Planner | Slices the feature list into work packages, each one reviewable pull request (under 400 changed lines, every feature in exactly one package, ordered by dependency). The harness refuses a bad slicing with reasons; you review the packages with the plan. | Redesigning source control; Claude Code best practices |
 | Contract | Builder, then Evaluator, then **you** | A definition of done: 4-12 criteria, each with an exact verification step. You edit and approve it inline. | Harness design for long-running application development |
-| Build | Builder | One feature at a time, session preamble first (progress notes, contract, baseline test run), self-verification before `finish`, commit per phase. | Effective harnesses; Claude Code best practices |
+| Build | Builder | Per package. One feature at a time, session preamble first (progress notes, contract, baseline test run), self-verification before `finish`, commit per phase. | Effective harnesses; Claude Code best practices |
 | Evaluate | Evaluator | Re-runs every verification step itself and reports pass/fail with evidence. Hard failures send the builder back for a fix round. | Harness design; Demystifying evals |
 | Wrap up | Harness | Progress notes appended so the next session starts informed. | Effective context engineering |
 

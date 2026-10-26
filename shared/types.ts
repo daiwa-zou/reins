@@ -7,7 +7,7 @@ export type RoleId = "planner" | "builder" | "evaluator" | "classifier" | "scout
 /** Roles every run config carries settings for. The librarian (lesson intake) borrows the planner's settings unless set. */
 export type RunRoleId = Exclude<RoleId, "librarian">;
 
-export type Phase = "plan" | "contract" | "build" | "evaluate" | "wrapup";
+export type Phase = "plan" | "breakdown" | "contract" | "build" | "evaluate" | "wrapup";
 
 export type RunStatus =
   | "queued"
@@ -20,6 +20,7 @@ export type RunStatus =
 
 export type ComponentId =
   | "planner"
+  | "workPackages"
   | "contracts"
   | "evaluator"
   | "progressFile"
@@ -260,6 +261,29 @@ export interface CriterionResult {
 
 export type EvaluationOrigin = "reported" | "forced" | "synthesised";
 
+/** A pull-request-sized slice of the feature list, cut by the breakdown stage (shared/packages.ts). */
+export interface WorkPackage {
+  id: string;
+  title: string;
+  /** Feature ids built by this package; every feature belongs to exactly one package. */
+  features: string[];
+  /** Why these features make one reviewable change. */
+  rationale: string;
+  /** The planner's estimate of changed lines; 0 when unknown (the implicit single package). */
+  estimatedLines: number;
+  /** Packages that must land before this one, all earlier in the list. */
+  dependsOn: string[];
+}
+
+/** Which package a contract, build or evaluate phase belongs to. */
+export interface PackageRef {
+  id: string;
+  title: string;
+  /** 1-based position and the number of packages. */
+  index: number;
+  total: number;
+}
+
 export interface FeatureItem {
   id: string;
   title: string;
@@ -319,11 +343,12 @@ export type RunEvent = Base &
     | { type: "run.created"; config: RunConfig }
     | { type: "run.status"; status: RunStatus; reason?: string }
     | { type: "run.summary"; summary: string; costUsd: number; durationMs: number }
-    | { type: "phase.started"; phase: Phase; round: number }
+    | { type: "phase.started"; phase: Phase; round: number; package?: PackageRef }
     | {
         type: "phase.finished";
         phase: Phase;
         round: number;
+        package?: PackageRef;
         summary: string;
         usage: Usage;
         costUsd: number;
@@ -367,6 +392,7 @@ export type RunEvent = Base &
     | { type: "approval.resolved"; approvalId: string; decision: "approve" | "reject"; note?: string }
     | { type: "contract.proposed"; by: RoleId; criteria: ContractCriterion[]; rationale: string }
     | { type: "contract.agreed"; criteria: ContractCriterion[] }
+    | { type: "breakdown.agreed"; packages: WorkPackage[]; rationale: string }
     | {
         type: "evaluation.result";
         round: number;

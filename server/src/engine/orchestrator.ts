@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
-import type { ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, Phase, RunConfig, Usage } from "../../../shared/types.js";
+import type { ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, RunConfig, Usage, WorkPackage } from "../../../shared/types.js";
 import { RunBus } from "./bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
@@ -9,7 +9,8 @@ import { loadSkills, skillsPromptSection } from "../skills.js";
 import { HARNESS_VERSION } from "../../../shared/components.js";
 import { checkRunConfig } from "../../../shared/config.js";
 import { addUsage, emptyUsage } from "./pricing.js";
-import { firstMessage, renderContract, systemPromptFor } from "../roles/prompts.js";
+import { firstMessage, renderContract, systemPromptFor, type PromptRole } from "../roles/prompts.js";
+import { packageLabel, packageRef, renderBreakdown, renderPackage, singlePackage, validateBreakdown, PACKAGE_MAX_LINES } from "../../../shared/packages.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
 import { runShell } from "../tools/registry.js";
 import { EFFORT_TABLE } from "../../../shared/components.js";
@@ -26,7 +27,7 @@ const READ_TOOLS = ["read_file", "list_files", "search", "think", "git_status", 
 const WRITE_TOOLS = ["write_file", "edit_file", "bash", "update_progress", "git_commit"];
 
 /**
- * The pipeline: Plan -> Contract -> Build -> Evaluate (-> Build ...) -> Wrap up.
+ * The pipeline: Plan -> Breakdown -> per work package [Contract -> Build -> Evaluate (-> Build ...)] -> Wrap up.
  * Roles hand work to each other through files in .reins/, never shared context.
  */
 export class Orchestrator {
@@ -89,15 +90,21 @@ export class Orchestrator {
     };
   }
 
+  /** The work package the current contract/build/evaluate phases belong to; unset outside the package loop and for an implicit single package. */
+  private pkg: PackageRef | undefined;
+  /** The agreed breakdown, or null when the run is one implicit package. */
+  private packages: WorkPackage[] | null = null;
+
   private async phase<T>(phase: Phase, round: number, body: () => Promise<{ result: LoopResult | null; summary: string; value: T }>): Promise<T> {
     const started = Date.now();
-    this.bus.emitEvent({ type: "phase.started", phase, round });
+    const pkgField = this.pkg ? { package: this.pkg } : {};
+    this.bus.emitEvent({ type: "phase.started", phase, round, ...pkgField });
     const { result, summary, value } = await body();
     const usage = result?.usage ?? emptyUsage();
     const cost = result?.costUsd ?? 0;
     this.totalUsage = addUsage(this.totalUsage, usage);
     this.totalCost += cost;
-    this.bus.emitEvent({ type: "phase.finished", phase, round, summary, usage, costUsd: cost, durationMs: Date.now() - started });
+    this.bus.emitEvent({ type: "phase.finished", phase, round, ...pkgField, summary, usage, costUsd: cost, durationMs: Date.now() - started });
     await this.emitChangedFiles();
     return value;
   }
@@ -111,7 +118,7 @@ export class Orchestrator {
     }
   }
 
-  private loop(role: "planner" | "builder" | "evaluator", promptRole: Parameters<typeof systemPromptFor>[0], tools: string[], terminal: string[], handlers: Record<string, any>, messages?: Anthropic.Beta.BetaMessageParam[]): { run: (first?: string) => Promise<LoopResult> } {
+  private loop(role: "planner" | "builder" | "evaluator", promptRole: PromptRole, tools: string[], terminal: string[], handlers: Record<string, any>, messages?: Anthropic.Beta.BetaMessageParam[]): { run: (first?: string) => Promise<LoopResult> } {
     const opts: LoopOptions = {
       role,
       system: systemPromptFor(promptRole, this.config),
@@ -173,15 +180,87 @@ export class Orchestrator {
         return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
       });
       if (stop) return this.finish(false, "Stopped during planning.");
+
+      // ---- Breakdown ----
+      if (this.config.components.workPackages) {
+        if (!this.features.length) this.bus.emitEvent({ type: "note", level: "warn", text: "The planner recorded no features, so there is nothing to slice: the breakdown stage is skipped and the run is one package." });
+        else {
+          const stop = await this.phase("breakdown", 0, async () => {
+            const state: { agreed: WorkPackage[] | null } = { agreed: null };
+            const r = await this.loop("planner", "breakdown_planner", READ_TOOLS, ["propose_breakdown"], {
+              propose_breakdown: (input: any) => {
+                const v = validateBreakdown(input?.packages, this.features);
+                if (v.problems.length) throw new Error(`Refused: ${v.problems.join(" ")} Fix these and call propose_breakdown again.`);
+                state.agreed = v.packages;
+                writeWorkspaceFile(ws, ".reins/packages.json", JSON.stringify(v.packages, null, 2));
+                this.bus.emitEvent({ type: "breakdown.agreed", packages: v.packages, rationale: String(input?.rationale ?? "") });
+                return `Agreed: ${v.packages.length} package${v.packages.length === 1 ? "" : "s"}.`;
+              },
+            }).run(
+              firstMessage("breakdown", this.config, {
+                ...this.projectContext(),
+                "Feature list": this.features.map((f) => `${f.id}: ${f.title}`).join("\n"),
+                Instructions: `Read the spec, group the features into work packages of at most ${PACKAGE_MAX_LINES} changed lines each, then call propose_breakdown.`,
+              }),
+            );
+            if (this.checkStop(r)) return { result: r, summary: "Stopped.", value: true };
+            const got = state.agreed;
+            if (got) this.packages = got;
+            else this.bus.emitEvent({ type: "note", level: "warn", text: "The planner did not propose a breakdown; the run continues as one package." });
+            return { result: r, summary: got ? `${got.length} packages: ${got.map((p) => p.id).join(", ")}.` : "No breakdown.", value: false };
+          });
+          if (stop) return this.finish(false, "Stopped during the breakdown.");
+        }
+      }
+
       if (this.config.pauses.afterPlan) {
         const spec = readWorkspaceFile(ws, ".reins/spec.md") ?? "(no spec written)";
-        const a = await this.control.requestPhaseApproval("Review the plan", "The planner wrote a spec and feature list. Continue to the contract stage?", { spec, features: this.features });
+        const pk = this.packages;
+        const detail = pk ? `The planner wrote a spec and feature list and cut them into ${pk.length} work packages. Continue to the first contract?` : "The planner wrote a spec and feature list. Continue to the contract stage?";
+        const a = await this.control.requestPhaseApproval("Review the plan", detail, { spec, features: this.features, ...(pk ? { packages: pk, breakdown: renderBreakdown(pk, this.features) } : {}) });
         if (!a.approved) return this.finish(false, `Plan rejected${a.note ? `: ${a.note}` : "."}`);
       }
     } else {
       writeWorkspaceFile(ws, ".reins/spec.md", `# Spec\n\n${this.config.task}\n\n(Planner disabled for this run; the task is the spec.)\n`);
     }
 
+    // ---- Per package: contract, build, evaluate ----
+    // Without a breakdown the whole run is one implicit package, and the phases carry no package.
+    const explicit = !!this.packages;
+    const list = this.packages ?? singlePackage(this.config.title, this.features);
+    let lastEval: Evaluation | null = null;
+    for (let pi = 0; pi < list.length; pi++) {
+      const pkg = list[pi];
+      this.pkg = explicit ? packageRef(list, pi) : undefined;
+      // A new package starts the builder from a fresh conversation; progress notes carry what it needs.
+      if (pi > 0) {
+        this.builderHistory = undefined;
+        this.builderSession = undefined;
+      }
+      const pkgBrief: Record<string, string> = this.pkg ? { "Work package": `${packageLabel(this.pkg)}\n${renderPackage(pkg, this.features)}` } : {};
+      const outcome = await this.runPackage(pkgBrief, pkg);
+      if (!outcome.ok) return this.finish(false, this.pkg ? `Package ${this.pkg.id} (${this.pkg.title}): ${outcome.summary}` : outcome.summary);
+      lastEval = outcome.ev;
+    }
+    this.pkg = undefined;
+
+    // ---- Wrap up ----
+    await this.phase("wrapup", 0, async () => {
+      const done = this.features.filter((f) => f.status === "done").length;
+      if (lastEval?.verdict === "pass" && done < this.features.length)
+        this.bus.emitEvent({ type: "note", level: "warn", text: `The evaluation passed but features.json still lists ${this.features.length - done} of ${this.features.length} features as not done: the builder did not keep the list current. The next session will re-read it, so check it before resuming.` });
+      if (this.config.components.progressFile) {
+        fs.appendFileSync(path.join(reinsDir(ws), "progress.md"), `\n## ${new Date().toISOString()} — run ${this.config.id} finished\nVerdict: ${lastEval?.verdict ?? "n/a"}. ${done}/${this.features.length} features done.\n`);
+      }
+      return { result: null, summary: `${done}/${this.features.length} features done.`, value: null };
+    });
+    return this.finish(true, lastEval ? lastEval.summary : "Build finished.");
+  }
+
+  /** One work package: contract, then build/evaluate rounds. Returns the last evaluation on success. */
+  private async runPackage(pkgBrief: Record<string, string>, pkg: WorkPackage): Promise<{ ok: true; ev: Evaluation | null } | { ok: false; summary: string }> {
+    const ws = this.config.workspace;
+    const label = this.pkg ? ` ${this.pkg.id}` : "";
     // ---- Contract ----
     if (this.config.components.contracts) {
       const stop = await this.phase("contract", 0, async () => {
@@ -195,7 +274,7 @@ export class Orchestrator {
             this.bus.emitEvent({ type: "contract.proposed", by: "builder", criteria: proposed, rationale });
             return "Proposed.";
           },
-        }).run(firstMessage("contract", this.config, { ...this.projectContext(), Instructions: "Read the spec and feature list, inspect the codebase, then call propose_contract." }));
+        }).run(firstMessage("contract", this.config, { ...this.projectContext(), ...pkgBrief, Instructions: `Read the spec and feature list, inspect the codebase, then call propose_contract${this.pkg ? " for this work package only" : ""}.` }));
         if (this.checkStop(r1)) return { result: r1, summary: "Stopped.", value: true };
         let usage = r1.usage;
         let cost = r1.costUsd;
@@ -207,7 +286,7 @@ export class Orchestrator {
               this.bus.emitEvent({ type: "contract.proposed", by: "evaluator", criteria: final, rationale: input.feedback });
               return "Reviewed.";
             },
-          }).run(firstMessage("contract review", this.config, { ...this.projectContext(), "Proposed contract": renderContract(proposed), Instructions: "Review and call review_contract with the final criteria." }));
+          }).run(firstMessage("contract review", this.config, { ...this.projectContext(), ...pkgBrief, "Proposed contract": renderContract(proposed), Instructions: "Review and call review_contract with the final criteria." }));
           usage = addUsage(usage, r2.usage);
           cost += r2.costUsd;
           if (this.checkStop(r2)) return { result: { ...r2, usage, costUsd: cost }, summary: "Stopped.", value: true };
@@ -223,7 +302,7 @@ export class Orchestrator {
         this.bus.emitEvent({ type: "contract.agreed", criteria: final });
         return { result: { ...r1, usage, costUsd: cost }, summary: `${final.length} criteria agreed (${final.filter((c) => c.hard).length} hard).`, value: false };
       });
-      if (stop) return this.finish(false, "Stopped at the contract stage.");
+      if (stop) return { ok: false, summary: "Stopped at the contract stage." };
     } else {
       this.contract = [{ id: "C1", text: "The task as described is complete and verified by running the result", verify: "Run the program / tests and inspect", hard: true }];
       writeWorkspaceFile(ws, ".reins/contract.json", JSON.stringify(this.contract, null, 2));
@@ -235,18 +314,18 @@ export class Orchestrator {
       await this.runInitScript();
       const stop = await this.phase("build", round, async () => {
         const ctx = this.projectContext();
-        const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : ctx), Contract: renderContract(this.contract) };
+        const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : { ...ctx, ...pkgBrief }), Contract: renderContract(this.contract) };
         if (lastEval) extra["Evaluation of the previous round"] = renderEvaluationForBuilder(lastEval);
-        else extra.Instructions = "Follow the session preamble, then implement the features. Call finish only when every hard criterion's verification step has been run and passed.";
+        else extra.Instructions = `Follow the session preamble, then implement the features${this.pkg ? ` of this package (${pkg.features.join(", ")}). Build only the features of this package; the others belong to later packages` : ""}. Call finish only when every hard criterion's verification step has been run and passed.`;
         if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";
         const loop = this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}, this.shouldResetBuilder() ? undefined : this.builderHistory);
         const r = await loop.run(firstMessage(lastEval ? `build (fix round ${round - 1})` : "build", this.config, extra));
         this.builderHistory = this.config.engine === "claude-code" ? (r.messages.length ? r.messages : [{ role: "user", content: "(claude-code session)" }]) : r.messages;
         return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
       });
-      if (stop) return this.finish(false, "Stopped while building.");
+      if (stop) return { ok: false, summary: "Stopped while building." };
 
-      if (this.config.components.gitCommits) await this.commit(`reins: ${lastEval ? `fix round ${round - 1}` : "build"} — ${this.config.title}`);
+      if (this.config.components.gitCommits) await this.commit(`reins: ${lastEval ? `fix round ${round - 1}` : "build"}${label} — ${this.pkg ? pkg.title : this.config.title}`);
 
       if (!this.config.components.evaluator) break;
 
@@ -268,6 +347,7 @@ export class Orchestrator {
         }).run(
           firstMessage("evaluate", this.config, {
             ...this.projectContext(),
+            ...pkgBrief,
             Contract: renderContract(this.contract),
             Instructions: `${rerunAll ? MAX_EFFORT_EVALUATE : "Verify every criterion yourself, then call report_evaluation."} You have at most ${this.config.maxTurnsPerPhase} turns in this phase: when an operator message says the budget is nearly spent, report at once and mark whatever is unchecked as unverified.`,
           }),
@@ -291,32 +371,22 @@ export class Orchestrator {
         this.bus.emitEvent({ type: "evaluation.result", round, results: ev.results, verdict: ev.verdict, summary: ev.summary, origin: ev.origin });
         return { result: r, summary: `${ev.verdict.toUpperCase()}${ev.origin === "reported" ? "" : ` (${ev.origin} report)`}: ${ev.summary}`, value: { stop: false, ev: ev as Evaluation | null } };
       });
-      if (result.stop || !result.ev) return this.finish(false, "Stopped while evaluating.");
+      if (result.stop || !result.ev) return { ok: false, summary: "Stopped while evaluating." };
       lastEval = result.ev;
       if (this.config.pauses.afterEvaluation) {
         const a = await this.control.requestPhaseApproval("Evaluation complete", `Verdict: ${lastEval.verdict}. Continue?`, lastEval);
-        if (!a.approved) return this.finish(false, "Stopped after evaluation.");
+        if (!a.approved) return { ok: false, summary: "Stopped after evaluation." };
       }
       if (lastEval.verdict === "pass") break;
       if (round === this.config.maxFixRounds + 1) {
         // A forced report says what the evaluator verified; the synthesised summary already says why there was no report.
         const why = lastEval.origin === "forced" ? `the evaluator ran out of turns (${this.config.maxTurnsPerPhase}) before reporting on its own; ${lastEval.verified} of ${this.contract.length} criteria were verified. ${TURNS_ADVICE} ` : "";
-        return this.finish(false, `Evaluation still failing after ${this.config.maxFixRounds} fix rounds: ${why}${lastEval.summary}`);
+        return { ok: false, summary: `Evaluation still failing after ${this.config.maxFixRounds} fix rounds: ${why}${lastEval.summary}` };
       }
     }
-
-    // ---- Wrap up ----
-    await this.phase("wrapup", 0, async () => {
-      const done = this.features.filter((f) => f.status === "done").length;
-      if (lastEval?.verdict === "pass" && done < this.features.length)
-        this.bus.emitEvent({ type: "note", level: "warn", text: `The evaluation passed but features.json still lists ${this.features.length - done} of ${this.features.length} features as not done: the builder did not keep the list current. The next session will re-read it, so check it before resuming.` });
-      if (this.config.components.progressFile) {
-        fs.appendFileSync(path.join(reinsDir(ws), "progress.md"), `\n## ${new Date().toISOString()} — run ${this.config.id} finished\nVerdict: ${lastEval?.verdict ?? "n/a"}. ${done}/${this.features.length} features done.\n`);
-      }
-      return { result: null, summary: `${done}/${this.features.length} features done.`, value: null };
-    });
-    return this.finish(true, lastEval ? lastEval.summary : "Build finished.");
+    return { ok: true, ev: lastEval };
   }
+
 
   /** A hard criterion that was not observed to pass (failed or unverified) fails the sprint. */
   private verdictFor(results: CriterionResult[]): "pass" | "fail" {

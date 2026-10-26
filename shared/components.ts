@@ -22,6 +22,18 @@ export const COMPONENTS: HarnessComponent[] = [
     tier: "effort",
   },
   {
+    id: "workPackages",
+    label: "Work packages",
+    short: "After the plan, the planner slices the feature list into pull-request-sized packages; contract, build and evaluate run once per package, in order.",
+    whenOff: "No breakdown phase: the feature list is built as one package, so one contract covers the whole run and a pull request would be as big as the task. (With the planner off there is no feature list to slice, so the run is one package as well.)",
+    engines: ["anthropic", "claude-code"],
+    assumption: "A change a reviewer can read in one sitting gets reviewed; a task-sized change gets rubber-stamped or abandoned.",
+    lessons: [],
+    defaultOn: true,
+    group: "roles",
+    tier: "always",
+  },
+  {
     id: "contracts",
     label: "Sprint contracts",
     short: "Builder and evaluator agree what 'done' means and how to verify it before any code is written.",

@@ -380,6 +380,11 @@ describe("Orchestrator", () => {
         return { content: [toolUse("p1", "write_file", { path: ".reins/spec.md", content: "# spec" }), toolUse("p2", "update_progress", { features, note: "planned" })], stop_reason: "tool_use" };
       },
       { content: [toolUse("p3", "finish", { summary: "planned", open_items: [] })], stop_reason: "tool_use" },
+      // breakdown: one package holds the only feature
+      (params) => {
+        expect(params.tools.map((t: any) => t.name)).toContain("propose_breakdown");
+        return { content: [toolUse("bd", "propose_breakdown", { packages: [{ id: "P1", title: "Greeting file", features: ["F1"], rationale: "one change", estimated_lines: 5, depends_on: [] }], rationale: "one package" })], stop_reason: "tool_use" };
+      },
       // contract: builder proposes, evaluator reviews
       (params) => {
         expect(params.tools.map((t: any) => t.name)).toContain("propose_contract");
@@ -413,7 +418,8 @@ describe("Orchestrator", () => {
     const r = await orch.run();
     expect(r.ok).toBe(true);
     expect(approvals).toEqual(["contract"]);
-    expect(events.filter((e) => e.type === "phase.started").map((e: any) => e.phase)).toEqual(["plan", "contract", "build", "evaluate", "wrapup"]);
+    expect(events.filter((e) => e.type === "phase.started").map((e: any) => e.phase)).toEqual(["plan", "breakdown", "contract", "build", "evaluate", "wrapup"]);
+    expect(JSON.parse(fs.readFileSync(path.join(ws, ".reins/packages.json"), "utf8"))).toHaveLength(1);
     expect(fs.readFileSync(path.join(ws, ".reins/contract.json"), "utf8")).toContain("C1");
     expect(fs.readFileSync(path.join(ws, ".reins/progress.md"), "utf8")).toContain("built");
     expect(JSON.parse(fs.readFileSync(path.join(ws, ".reins/features.json"), "utf8"))[0].status).toBe("done");

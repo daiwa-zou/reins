@@ -44,6 +44,8 @@ standing: bundled
   > The planner turns a 1-4 sentence prompt into a product spec
 - [stage:plan] Keep the spec high level on technical design so an early wrong decision does not cascade.
   > kept high-level on tech so early errors do not cascade
+- [stage:breakdown] Slice between features, never through one: a feature is built whole inside a single package.
+  > The generator works in sprints, one feature at a time
 - [stage:build] Work through the spec one feature at a time.
   > The generator works in sprints, one feature at a time
 - [component:compaction] Compaction keeps continuity but gives no clean slate.

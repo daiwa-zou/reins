@@ -171,7 +171,7 @@ function EndCard({ model }: { model: RunModel }) {
 
 function PhaseStepper({ model }: { model: RunModel }) {
   const cfg = model.config;
-  const enabled = PHASE_ORDER.filter((p) => (p === "plan" ? cfg?.components.planner !== false : p === "contract" ? cfg?.components.contracts !== false : p === "evaluate" ? cfg?.components.evaluator !== false : true));
+  const enabled = PHASE_ORDER.filter((p) => (p === "plan" ? cfg?.components.planner !== false : p === "breakdown" ? cfg?.components.planner !== false && cfg?.components.workPackages === true : p === "contract" ? cfg?.components.contracts !== false : p === "evaluate" ? cfg?.components.evaluator !== false : true));
   const latestByPhase = new Map<Phase, RunModel["phases"][number]>();
   for (const p of model.phases) latestByPhase.set(p.phase, p);
   const rounds = model.phases.filter((p) => p.phase === "build").length;
@@ -204,6 +204,7 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
           <div className="h-px flex-1 line border-t" />
           <div className="section-label" style={{ color: "var(--fg-muted)" }}>
             {PHASE_LABEL[item.phase]}
+            {item.package ? ` · ${item.package.id} of ${item.package.total}: ${item.package.title}` : ""}
             {item.round > 1 ? ` · round ${item.round}` : ""}
             {item.finished && <span className="normal-case tracking-normal font-normal"> — {item.finished.summary}</span>}
           </div>

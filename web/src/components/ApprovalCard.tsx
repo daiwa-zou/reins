@@ -113,6 +113,14 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
       {request.kind === "phase" && payload != null && (
         <div className="mt-3">
           <Pre max={1200}>{typeof payload === "string" ? payload : payload.spec ?? JSON.stringify(payload, null, 2)}</Pre>
+          {typeof payload?.breakdown === "string" && (
+            <div className="mt-2">
+              <div className="section-label" style={{ color: "var(--fg-muted)" }}>
+                Work packages ({payload.packages?.length ?? "?"}, one pull request each)
+              </div>
+              <Pre max={1200}>{payload.breakdown}</Pre>
+            </div>
+          )}
         </div>
       )}
 

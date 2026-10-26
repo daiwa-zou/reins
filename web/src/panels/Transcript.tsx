@@ -12,7 +12,7 @@ const GROUPS: { id: string; label: string; types: RunEventType[] }[] = [
   { id: "guard", label: "Guardrails", types: ["guardrail.decision", "approval.requested", "approval.resolved"] },
   { id: "context", label: "Context", types: ["context.snapshot", "context.compacted", "context.cleared", "context.reset", "tools.loaded"] },
   { id: "flow", label: "Phases & turns", types: ["phase.started", "phase.finished", "turn.started", "turn.finished", "run.status", "run.summary", "run.created"] },
-  { id: "artifacts", label: "Contract, evaluation, progress", types: ["contract.proposed", "contract.agreed", "evaluation.result", "progress.updated", "git.commit", "files.changed"] },
+  { id: "artifacts", label: "Contract, evaluation, progress", types: ["contract.proposed", "contract.agreed", "breakdown.agreed", "evaluation.result", "progress.updated", "git.commit", "files.changed"] },
   { id: "notes", label: "Notes & errors", types: ["note", "error", "steer.received", "steer.delivered"] },
 ];
 

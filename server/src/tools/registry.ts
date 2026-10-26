@@ -8,6 +8,7 @@ import { listLessons, getLesson } from "../lessons.js";
 import { filterLessons, lessonLine, type LessonFilter } from "../../../shared/lessons.js";
 import { loadSkills } from "../skills.js";
 import { sandboxArgs, sandboxAvailable } from "./sandbox.js";
+import { PACKAGE_MAX_LINES } from "../../../shared/packages.js";
 
 /** Tool results are capped so one noisy command cannot flood the context. */
 export const MAX_RESULT_CHARS = 24_000;
@@ -402,6 +403,43 @@ const proposeContract = tool(
   },
 );
 
+const proposeBreakdown = tool(
+  "propose_breakdown",
+  `Slice the feature list into work packages, each one reviewable pull request: a coherent change under ${PACKAGE_MAX_LINES} changed lines that can be verified on its own, ordered so each package builds on the merged ones before it. Every feature goes in exactly one package; never split a feature. A proposal that breaks these rules is refused with the reasons, so fix them and call again. This ends your turn.`,
+  {
+    packages: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "P1, P2, ..." },
+          title: { type: "string", description: "The pull request title" },
+          features: { type: "array", items: { type: "string" }, description: "Feature ids from features.json" },
+          rationale: { type: "string", description: "Why these features are one reviewable change" },
+          estimated_lines: { type: "integer", description: `Changed lines you expect, at most ${PACKAGE_MAX_LINES}` },
+          depends_on: { type: "array", items: { type: "string" }, description: "Earlier package ids this one builds on" },
+        },
+        required: ["id", "title", "features", "rationale", "estimated_lines", "depends_on"],
+        additionalProperties: false,
+      },
+    },
+    rationale: { type: "string", description: "How you cut the plan and why in this order" },
+  },
+  ["packages", "rationale"],
+  async (input, ctx) => ctx.handlers.propose_breakdown?.(input) ?? "Proposed.",
+  {
+    examples: [
+      {
+        packages: [
+          { id: "P1", title: "Health endpoint with its test", features: ["F1", "F2"], rationale: "The route and the test that proves it are one change a reviewer reads together.", estimated_lines: 120, depends_on: [] },
+          { id: "P2", title: "Document the health endpoint", features: ["F3"], rationale: "Docs follow the behaviour they describe.", estimated_lines: 30, depends_on: ["P1"] },
+        ],
+        rationale: "Two small pull requests: behaviour first, docs once it is merged.",
+      },
+    ],
+  },
+);
+
 const reviewContract = tool(
   "review_contract",
   "Accept the proposed contract or return a revised list. Reject vague criteria, add missing failure cases, tighten verification steps. This ends your turn.",
@@ -448,7 +486,7 @@ const implicationSchema = {
   type: "object",
   properties: {
     kind: { type: "string", enum: ["component", "stage", "skill", "foundation", "gap"] },
-    target: { type: "string", description: "A component id, a phase (plan, contract, build, evaluate, wrapup), a skill name or a foundation id. Empty for gap." },
+    target: { type: "string", description: "A component id, a phase (plan, breakdown, contract, build, evaluate, wrapup), a skill name or a foundation id. Empty for gap." },
     claim: { type: "string", description: "One sentence: what the harness should do." },
     quote: { type: "string", description: "Evidence: a passage copied verbatim from the source." },
     domains: { type: "array", items: { type: "string" }, description: "Optional domain tags, e.g. web, cli, golang" },
@@ -491,7 +529,7 @@ const proposeLesson = tool(
 );
 
 export const ALL_TOOLS: Record<string, ToolDef> = Object.fromEntries(
-  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeContract, reviewContract, reportEvaluation, finish, proposeLesson].map((t) => [
+  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeBreakdown, proposeContract, reviewContract, reportEvaluation, finish, proposeLesson].map((t) => [
     (t.schema as Anthropic.Beta.BetaTool).name,
     t,
   ]),
