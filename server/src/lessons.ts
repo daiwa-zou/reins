@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Lesson, LessonProblem } from "../../shared/types.js";
 import type { Standing } from "../../shared/types.js";
 import { LESSON_SLUG, parseLesson } from "../../shared/lessons.js";
-import { applyCatalogueLinks, catalogueProblems } from "../../shared/implications.js";
+import { applyCatalogueLinks } from "../../shared/implications.js";
 import { loadSkills } from "./skills.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -171,7 +171,6 @@ export function loadLessonLibrary(): LessonLibrary {
   const lessons = [...bySlug.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.slug.localeCompare(b.slug)));
   // One table, three views: component and foundation lesson lists come from the implications.
   applyCatalogueLinks(lessons);
-  problems.push(...catalogueProblems(lessons));
   const lib = { lessons, problems, dirs };
   cache = { key, lib };
   return lib;

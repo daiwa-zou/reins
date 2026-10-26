@@ -40,7 +40,7 @@ Each component states the assumption about the model it encodes, what the harnes
 - **Tools**: a think tool, tool search (rarely used tools stay out of the prompt until found), tool use examples, skills (`SKILL.md` folders with only the index in the prompt), self-verification, plain-language narration. Tool results are capped and tell the model how to narrow them.
 - **Safety**: hard denies, workspace confinement, a read-only allowlist that runs in parallel, an action classifier that sees only your task and the proposed command, a macOS Seatbelt sandbox for shell commands (writes only in the workspace and temp, no network unless allowed), credentials stripped from the agent's environment, and a sniff for instruction-shaped text in tool output.
 
-Decisions that are not switches (the append-only log, file handoff, owning the loop, capped tool output, secrets outside the sandbox, recorded effective config, cache hit rate as a signal, reliability over single runs, one declarative config, review intent not lines) are listed as **foundations** in `shared/components.ts`, each linked from the lessons behind it (a lesson's *Used by* badges filter the library by component or foundation). Every one of the 30 lessons informs at least one component or foundation.
+Decisions that are not switches (the append-only log, file handoff, owning the loop, capped tool output, secrets outside the sandbox, recorded effective config, cache hit rate as a signal, reliability over single runs, one declarative config, review intent not lines) are listed as **foundations** in `shared/components.ts`, each linked from the lessons behind it (a lesson's *Used by* badges filter the library by component or foundation).
 
 ## The UI
 

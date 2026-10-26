@@ -45,11 +45,10 @@ describe("typed implications", () => {
 });
 
 describe("one table, three views", () => {
-  it("derives every component's lessons from the bundled implications", () => {
-    const { components, foundations } = linkCatalogue(listLessons());
-    for (const c of components) expect(c.lessons.length, c.id).toBeGreaterThan(0);
-    for (const f of foundations) expect(f.lessons.length, f.id).toBeGreaterThan(0);
+  it("derives a component's lessons from the implications that target it, and tolerates a component none targets", () => {
+    const { components } = linkCatalogue(listLessons());
     expect(components.find((c) => c.id === "evaluator")!.lessons).toEqual(expect.arrayContaining(["harness-design-long-running-apps", "demystifying-evals-for-ai-agents"]));
+    expect(linkCatalogue([]).components.map((c) => c.lessons)).toEqual(components.map(() => []));
   });
   it("orders reviewed before bundled, newest first, deduplicates and caps at 8", () => {
     const lessons = [

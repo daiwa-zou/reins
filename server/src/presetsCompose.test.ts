@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Lesson, Preset } from "../../shared/types.js";
 import { defaultRunConfig } from "../../shared/components.js";
 import { applyPreset, checkRunConfig, diffFromDefaults, presetFromConfig, validatePresetConfig } from "../../shared/config.js";
-import { adaptPreset, composePreset, composeRun, compositionConfig, compositionLabel, compositionOf, inferComposition, migrateLegacy, runChipLabel, type PresetRecipe, PresetCompositionError, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
+import { adaptPreset, composePreset, composeRun, compositionConfig, compositionLabel, compositionOf, domainPresets, inferComposition, migrateLegacy, runChipLabel, type PresetRecipe, PresetCompositionError, generatedPresets, isGeneratedPresetName, PRESET_RECIPES, presetCompatibility, recipeFor } from "../../shared/presets.js";
+import { linkCatalogue } from "../../shared/implications.js";
 import { EFFORT_TABLE } from "../../shared/components.js";
 import { parseLesson } from "../../shared/lessons.js";
-import { catalogueProblems } from "../../shared/implications.js";
 import { systemPromptFor } from "./roles/prompts.js";
 
 // The retired built-in presets in migrated form (see shared/presets.ts migrateLegacy).
@@ -338,13 +338,13 @@ describe("legacy migration on read", () => {
 });
 
 describe("lessons check: tiers and effort recommendations", () => {
-  it("the always-tier no-trusted-backing warning fires for an always-tier component and not for an effort-tier one", () => {
-    const w = catalogueProblems([]).map((p) => p.message);
-    expect(w.some((m) => /"compaction" is always on \(always-tier\) but no bundled or reviewed implication/.test(m))).toBe(true);
-    expect(w.some((m) => /"planner" is always on/.test(m))).toBe(false);
-    // An unreviewed implication does not back the tier.
-    const weak = lesson("weak", "2026-01-01", { standing: "unreviewed", items: [{ id: "weak#1", lesson: "weak", date: "2026-01-01", kind: "component", target: "compaction", claim: "c", quote: "q", domains: [], standing: "unreviewed" }] });
-    expect(catalogueProblems([weak]).some((p) => /"compaction" is always on/.test(p.message))).toBe(true);
+  it("the catalogue stands without lessons: an empty library composes the default components and still offers the built-in domains", () => {
+    const c = composeRun({ effort: "medium", supervision: "check-in", domains: [] }, []);
+    expect(c.config.components).toEqual(compositionConfig("medium", "check-in").components);
+    expect(c.basis).toEqual([]);
+    expect(c.stageLessons).toEqual({});
+    expect(domainPresets([]).map((p) => p.id)).toEqual(PRESET_RECIPES.map((r) => r.id));
+    expect(linkCatalogue([]).components.every((x) => x.lessons.length === 0)).toBe(true);
   });
   it("parses [effort:<level>] domains: d Claim, and an unknown level is an error naming it", () => {
     const md = (head: string) => good.replace("- [stage:build] b", head);

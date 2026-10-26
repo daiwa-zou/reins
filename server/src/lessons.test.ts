@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseLesson } from "../../shared/lessons.js";
-import { catalogueProblems } from "../../shared/implications.js";
 import { getLesson, LESSONS_DIR, loadLessonLibrary } from "./lessons.js";
 
 const GOOD = `---
@@ -92,23 +91,9 @@ describe("lesson library", () => {
     // The five worked examples are fully typed, with every quote found in their Learnings.
     const worked = ["claude-code-best-practices", "demystifying-evals-for-ai-agents", "writing-tools-for-agents", "harness-design-long-running-apps", "effective-harnesses-for-long-running-agents"];
     expect(errs.filter((e) => worked.some((w) => e.startsWith(`${w}.md`)))).toEqual([]);
-    expect(catalogueProblems(loadLessonLibrary().lessons)).toEqual([]);
     expect(slugs.length).toBeGreaterThanOrEqual(30);
   });
 
-  it("flags a component no implication targets", () => {
-    const d = catalogueProblems([]);
-    expect(d.length).toBeGreaterThan(0);
-    expect(d[0]).toMatchObject({ file: "catalogue", level: "warn" });
-    // The bundled library targets every component and foundation; dropping the only lessons
-    // that target the evaluator flags exactly that component by id.
-    const lib = loadLessonLibrary().lessons;
-    expect(catalogueProblems(lib)).toEqual([]);
-    const without = lib.map((l) => ({ ...l, items: (l.items ?? []).filter((i) => !(i.kind === "component" && i.target === "evaluator")) }));
-    const msgs = catalogueProblems(without).map((p) => p.message);
-    expect(msgs.some((m) => m.includes('component "evaluator"'))).toBe(true);
-    expect(msgs.some((m) => m.includes('component "thinkTool"'))).toBe(false);
-  });
 });
 
 describe("user lessons ($REINS_HOME/lessons)", () => {

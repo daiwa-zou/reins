@@ -1,11 +1,12 @@
 // One table, three views. Every typed implication links a lesson to a
 // component, a stage, a skill or a foundation (or is a gap idea). From that
 // single table this module derives:
-//   - each component's and foundation's `lessons` list (the Harness section),
+//   - each component's and foundation's `lessons` list (which lessons back it; may be empty:
+//     the catalogue stands on its own and no lesson is required behind a component),
 //   - the "Lessons for this stage" block in each phase's first message,
 //   - the Ideas list (gaps, and anything not yet reviewed).
 // Pure: the server, the web UI, the lessons:check script and vitest share it.
-import type { ComponentId, Foundation, HarnessComponent, Implication, Lesson, LessonProblem, Phase, Standing } from "./types.js";
+import type { ComponentId, Foundation, HarnessComponent, Implication, Lesson, Phase, Standing } from "./types.js";
 import { COMPONENTS, FOUNDATIONS } from "./components.js";
 
 /** At most this many lines in one stage's "Lessons for this stage" block. */
@@ -36,19 +37,6 @@ export function applyCatalogueLinks(lessons: Lesson[]): void {
   const linked = linkCatalogue(lessons);
   linked.components.forEach((c, i) => (COMPONENTS[i].lessons = c.lessons));
   linked.foundations.forEach((f, i) => (FOUNDATIONS[i].lessons = f.lessons));
-}
-
-/** lessons:check findings for the catalogue: components and foundations no implication targets. */
-export function catalogueProblems(lessons: Lesson[]): LessonProblem[] {
-  const out: LessonProblem[] = [];
-  const { components, foundations } = linkCatalogue(lessons);
-  for (const c of components) if (!c.lessons.length) out.push({ file: "catalogue", source: "catalogue", level: "warn", message: `component "${c.id}" is targeted by no implication; add a [component:${c.id}] bullet to the lesson that justifies it` });
-  for (const f of foundations) if (!f.lessons.length) out.push({ file: "catalogue", source: "catalogue", level: "warn", message: `foundation "${f.id}" is targeted by no implication; add a [foundation:${f.id}] bullet` });
-  // The tier is a claim a lesson should back: an always-on component needs a trusted (bundled or reviewed) implication.
-  for (const c of COMPONENTS)
-    if (c.tier === "always" && !lessons.some((l) => l.standing !== "unreviewed" && (l.items ?? []).some((i) => i.kind === "component" && i.target === c.id && i.standing !== "unreviewed")))
-      out.push({ file: "catalogue", source: "catalogue", level: "warn", message: `component "${c.id}" is always on (always-tier) but no bundled or reviewed implication targets it; back the tier with a [component:${c.id}] bullet` });
-  return out;
 }
 
 const standingRank: Record<Standing, number> = { reviewed: 0, bundled: 1, unreviewed: 2 };

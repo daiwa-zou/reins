@@ -41,7 +41,7 @@ A pause turns on only if its gate exists at the chosen effort: no plan pause wit
 
 Every component has a `tier` in `shared/components.ts` that says who decides whether it is on:
 
-- **Always on** (`always`): the practices the lessons back and the audit marks implemented (feature list, progress notes, project memory, commit per phase, compaction, context editing, reset with handoff, self-verification, narration, stage lessons, tool search, tool examples, skills, OS sandbox). On at every effort and not shown in New run. A saved preset or a `POST /api/runs` body that sends `false` for one is a 400 naming the component. `lessons:check` warns when an always-tier component is targeted by no bundled or reviewed implication.
+- **Always on** (`always`): the practices the lessons back and the audit marks implemented (feature list, progress notes, project memory, commit per phase, compaction, context editing, reset with handoff, self-verification, narration, stage lessons, tool search, tool examples, skills, OS sandbox). On at every effort and not shown in New run. A saved preset or a `POST /api/runs` body that sends `false` for one is a 400 naming the component.
 - **Set by Effort** (`effort`): planner, contracts, evaluator, scouts, task budget, think tool. The Effort dial sets them; Customize may still override them.
 - **Follows settings** (`engine`): the action classifier, derived from Supervision (off in `ask` mode, where nothing reaches it).
 
@@ -250,7 +250,7 @@ Every bullet under `## Harness implications` is one implication: the atomic link
 - The indented `> quote` line is the evidence. For bundled lessons the quote must appear in the lesson's Learnings; for intake drafts it must appear verbatim in the fetched source.
 - A bullet without a prefix is still valid: it is a gap, and `npm run lessons:check` warns about it. An unknown kind or target is an error.
 - Frontmatter `components:` and `foundations:` lists still work; each entry counts as an implicit implication.
-- Each component's and foundation's lesson list (the *Used by* badges on a lesson, which filter the library) is derived from these implications; `lessons:check` warns about a component no implication targets.
+- Each component's and foundation's lesson list (the *Used by* badges on a lesson, which filter the library) is derived from these implications. The catalogue does not depend on the library: every component exists and is on by its tier whether or not any lesson targets it, and a library with no lessons composes the same default run.
 
 ### Provenance and standing
 
