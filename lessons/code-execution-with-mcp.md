@@ -26,10 +26,21 @@ foundations: toolHygiene
 - Framing: context management, tool composition, and state persistence have known software-engineering solutions, and code execution applies them to agents. The authors invite findings from the MCP community.
 
 ## Harness implications
-- Expose MCP servers to the agent as a generated, typed code API on a filesystem (`servers/<server>/<tool>`) so discovery is `ls`/`cat` and only used definitions enter context; optionally also offer `search_tools` with a detail-level parameter.
-- Provide a sandboxed code-execution runtime (resource limits, network policy, monitoring) in which tool results are data, not context; only explicit prints and returns reach the model. Default to showing a compact summary in the UI with the raw data available on demand.
-- Implement PII tokenization and detokenization at the harness boundary: the model sees placeholders, the tool bridge restores values; expose configurable data-flow rules (which sources may flow to which sinks) as deterministic policy, not model judgment.
-- Give the agent a persistent `workspace/` for intermediate files and a `skills/` directory where it can save reusable code plus `SKILL.md`; make saved skills browsable and editable by the user.
-- Allow polling, retry and loop logic to run inside the sandbox instead of through repeated model turns; the UI should display a single "running script" step with live logs rather than N tool-call rows.
-- Keep direct tool calling available for simple one-shot calls; choose code execution when results are large or chained, and show which mode is in use.
-- Audit code executions: log the code, tool invocations, byte sizes in and out, and what entered context, for both debugging and security review.
+- [component:toolSearch] Let the agent discover tool definitions on demand, reading only the ones it needs instead of loading every definition up front.
+  > The agent lists `./servers/` to discover servers and reads only the tool files it needs.
+- [component:osSandbox] Run agent-written code in a sandbox with resource limits, network policy and monitoring.
+  > It needs a secure execution environment with sandboxing, resource limits, and monitoring
+- [foundation:toolHygiene] Filter, aggregate and extract large results in code so only a compact summary reaches the model.
+  > code filters `Status == pending`, logs the count and the first 5 rows
+- [gap] Tokenize PII at the harness boundary so the model sees placeholders and data-flow rules are deterministic policy.
+  > The harness can tokenize PII automatically
+- [foundation:fileHandoff] Give the agent a persistent workspace for intermediate files so work can resume later.
+  > agents write intermediate results to files (`./workspace/leads.csv`) and resume later
+- [component:skills] Let the agent save reusable code with a SKILL.md as a skill the user can browse and edit.
+  > Adding a `SKILL.md` turns saved functions into a structured Agent Skill
+- [component:narration] Show a polling or retry script as one running step with live logs instead of one row per tool call.
+  > conditionals run in the sandbox without consulting the model
+- [gap] Keep direct tool calls for simple one-shot calls, use code execution for large or chained results, and show which mode is in use.
+  > Weigh token savings, latency, and composition gains against those costs
+- [foundation:eventLog] Log every code execution: the code, the tool calls it made, bytes in and out, and what entered context.
+  > sandboxing, resource limits, and monitoring

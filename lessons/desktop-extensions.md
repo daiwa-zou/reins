@@ -26,10 +26,19 @@ foundations: declarativeConfig
 - The recommended server shape is stdio transport, clear schemas and validation, consistent JSON responses, local execution, logging and debugging, and setup docs, then testing that tool calls return well-structured responses and the manifest loads. An internal example was the PyBoy GameBoy emulator packaged as an extension.
 
 ## Harness implications
-- Package harness integrations (tool servers, skills, agents) as single-file bundles with a declarative manifest; the only hard requirement should be the manifest, with runtimes bundled or supplied by the host.
-- Collect configuration declaratively (`user_config` with types, required/sensitive flags, defaults, min/max) and render a generated settings UI; refuse to enable until required values exist; store secrets in the OS keychain and inject via env or args, never into the model's context.
-- Declare capabilities (tools, prompts) in the manifest so the UI can show users what an integration can do, and what permissions it needs, before install.
-- Provide `init`/`pack`/validate CLI tooling and a drag-to-install flow; show human-readable metadata and permissions on the install screen.
-- Support enterprise controls from day one: allow and block lists by extension or publisher, pre-installed sets, private directories, and the ability to disable public discovery; make installed-extension audit a UI view.
-- Handle platform differences in the manifest (per-OS command/env overrides, template variables) rather than in code the user must edit.
-- Ship an open, versioned spec and reference tooling so third parties can target the harness; version at 0.x while gathering feedback.
+- [component:skills] Package an integration as a single bundle whose only hard requirement is a declarative manifest.
+  > `manifest.json` (the only required file)
+- [foundation:declarativeConfig] Collect configuration declaratively with types, required flags, defaults and ranges, render the form from it, and refuse to enable until required values exist.
+  > The host shows a configuration UI, validates inputs before enabling
+- [foundation:secretsOutside] Store secrets outside the agent and inject them through env or args, never into the model's context.
+  > the value is stored in the OS secret vault
+- [foundation:declarativeConfig] Declare an integration's tools and permissions in its manifest so the UI can show them before it is enabled.
+  > Declared `tools` and `prompts` tell users up front what the extension can do.
+- [gap] Provide init, pack and validate tooling and an install screen with readable metadata and permissions.
+  > `npx @anthropic-ai/mcpb pack` validates and builds the archive
+- [gap] Support allow and block lists by integration or publisher, private directories and an installed-integration audit view.
+  > blocklists for specific extensions or publishers
+- [foundation:declarativeConfig] Handle platform differences with per-OS overrides in the manifest rather than code the user must edit.
+  > a `platforms` object inside `mcp_config` overrides per OS
+- [foundation:declarativeConfig] Publish the config format as an open, versioned spec at 0.x while gathering feedback.
+  > it is versioned 0.1 deliberately, with community input invited

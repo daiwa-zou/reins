@@ -27,10 +27,17 @@ components: skills
 - Long-term goal: agents that create, edit, and evaluate their own skills, codifying behavior patterns into reusable capabilities. The format is deliberately simple to ease customization. On 2025-12-18 Agent Skills were published as an open standard (agentskills.io).
 
 ## Harness implications
-- Implement a skill loader with three disclosure levels: index only name and description into the system prompt, load `SKILL.md` on demand via a file read, and leave deeper files to the agent's own navigation; never pre-load bodies.
-- Keep the skill index token cost visible and bounded; lint `name` and `description` for triggering quality since they are the only always-resident text.
-- Treat bundled scripts as executable tools the agent can run without reading; distinguish "run this" from "read this" in skill metadata or conventions, and show script executions as tool calls in the UI.
-- Provide a skill-authoring loop: after a task, let the agent (or the user) distill successes and mistakes into a skill; support self-reflection prompts when a skill misfires; version skills.
-- Gate installation by trust: show provenance, list every bundled file, flag network access and code dependencies, and require explicit approval for skills from untrusted sources; sandbox skill scripts.
-- Adopt the open SKILL.md standard for portability across tools, and let skills and MCP servers coexist (skills describe workflows, MCP supplies tools).
-- Surface in the UI which skills are installed, which was triggered, and which files it loaded, so users can audit context growth and trigger behavior.
+- [component:skills] Keep only skill names and descriptions resident, read SKILL.md on demand, and leave deeper files to the agent's own navigation.
+  > At startup the agent pre-loads the `name` and `description` of every installed skill into its system prompt
+- [component:skills] Keep the skill index small and check each name and description for triggering quality, since they are the only always-resident text.
+  > pay special attention to `name` and `description`, which drive triggering
+- [gap] Let bundled skill scripts run as tools without being read, and mark whether a script is to be run or read.
+  > Claude runs it without loading the script or the PDF into context
+- [gap] After a task, distill successes and mistakes into a versioned skill, with self-reflection when a skill misfires.
+  > ask it to capture successful approaches and common mistakes into reusable context and code
+- [component:skills] Show a skill's provenance and every bundled file, and require approval before using a skill from an untrusted source.
+  > Install only from trusted sources, audit less-trusted skills thoroughly
+- [component:skills] Use the open SKILL.md format so skills port across tools and coexist with MCP servers.
+  > Agent Skills were published as an open standard (agentskills.io)
+- [component:skills] Show which skills are installed, which one triggered and which files it loaded.
+  > Claude triggers the skill by using Bash to read `pdf/SKILL.md`

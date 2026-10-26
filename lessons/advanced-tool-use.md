@@ -31,11 +31,21 @@ components: toolSearch, toolExamples
 - For PTC document return formats precisely (field names, types, enums, timestamp format) and opt in parallel-safe, idempotent tools. For examples use realistic data rather than "string"/"value", vary minimal/partial/full, give 1-5 per tool, and focus on ambiguity not evident from the schema. Inspirations cited: Joel Pobar's LLMVM, Cloudflare's Code Mode, Anthropic's code execution with MCP.
 
 ## Harness implications
-- Implement deferred tool loading natively: a small always-loaded core (3-5 hottest tools plus a search tool), everything else discoverable by regex, BM25 or embedding search over names and descriptions; expand only the matched definitions and keep the prompt-cache prefix stable.
-- Treat whole MCP servers as toolsets with a default `defer_loading` and per-tool overrides; show in the UI which tools are loaded vs. deferred and how many tokens they cost.
-- Provide a sandboxed code-execution channel in which tools are callable as functions and results bypass the model's context; only explicit stdout or returns enter the transcript. The UI should show code, the tool calls it made, and the summarized output as a collapsible group.
-- Mark tools with metadata the harness needs for PTC: idempotent/parallel-safe, precise return-format docs; refuse to expose non-idempotent or destructive tools to code execution without permission gating.
-- Support `input_examples` in the tool registry and lint for 1-5 realistic examples on tools with nested or many optional parameters.
-- Make tool-definition token budget a monitored metric; alert when more than 10K tokens of definitions are resident and suggest deferral.
-- Decide features by bottleneck with telemetry: track definition tokens, intermediate-result tokens, and parameter-validation error rates separately.
-- Keep the system prompt listing capability categories so the agent knows what it can search for even when tools are deferred.
+- [component:toolSearch] Keep a small always-loaded core of the hottest tools plus a search tool, and expand only the matched definitions on demand.
+  > those marked `defer_loading: true` are not in the prompt
+- [gap] Treat whole MCP servers as toolsets with a default of deferred loading and per-tool overrides.
+  > per-tool `configs` overrides (e.g. keep `search_files` loaded)
+- [component:toolSearch] Show which tools are loaded and which are deferred, and how many tokens the loaded definitions cost.
+  > Tool definitions plus results can eat 50K+ tokens before the agent reads a request.
+- [gap] Offer a sandboxed code-execution channel where tools are callable as functions and only explicit output enters the model's context.
+  > results go to the code environment and not Claude's context
+- [foundation:toolHygiene] Mark each tool as idempotent or parallel-safe and document its return format precisely.
+  > document return formats precisely (field names, types, enums, timestamp format) and opt in parallel-safe, idempotent tools
+- [component:toolExamples] Ship 1-5 realistic input examples with tools that have nested or many optional parameters.
+  > An `input_examples` array alongside `input_schema` fixes this.
+- [component:toolSearch] Monitor the tokens of resident tool definitions and defer tools once they pass about 10K tokens.
+  > Use it when definitions exceed 10K tokens
+- [foundation:ownedLoop] Measure definition tokens, intermediate-result tokens and parameter errors separately, and pick the remedy by the bottleneck they show.
+  > layer by bottleneck (context bloat gets Tool Search, large intermediate results get PTC, parameter errors get Examples; they compose)
+- [component:toolSearch] Name the capability categories in the system prompt so the agent knows what it can search for while tools are deferred.
+  > add system-prompt guidance naming capability categories
