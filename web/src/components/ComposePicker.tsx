@@ -48,7 +48,7 @@ export function ComposePicker({ lessons, value, suggestions, onChange, onOpenLes
   const error = active ? compositionError(cur, lessons) : null;
   const reason = (d: string) => suggestions.find((s) => s.domain === d)?.reason;
   const toggle = (d: string) => onChange({ ...cur, domains: picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d] });
-  const recs = effortRecommendations(lessons, picked).filter((r) => r.level !== cur.effort);
+  const recs = effortRecommendations(lessons, picked);
   return (
     <div className="flex flex-col gap-2 text-[12.5px]" data-compose-picker>
       <Segmented<HarnessEffort> name="effort" label="Effort" ids={EFFORT_LEVELS} value={active ? cur.effort : undefined} labelOf={(id) => EFFORT_TABLE[id].label} meaningOf={(id) => EFFORT_TABLE[id].meaning} onPick={(effort) => onChange({ ...cur, effort })} />
@@ -79,9 +79,13 @@ export function ComposePicker({ lessons, value, suggestions, onChange, onOpenLes
               ({r.slug})
             </button>
           </span>
-          <button type="button" className="btn btn-sm ml-auto" data-use-effort={r.level} onClick={() => onChange({ ...cur, effort: r.level })}>
-            Use {EFFORT_TABLE[r.level].label}
-          </button>
+          {r.level === cur.effort ? (
+            <span className="faint ml-auto">{EFFORT_TABLE[r.level].label} is selected</span>
+          ) : (
+            <button type="button" className="btn btn-sm ml-auto" data-use-effort={r.level} onClick={() => onChange({ ...cur, effort: r.level })}>
+              Use {EFFORT_TABLE[r.level].label}
+            </button>
+          )}
         </div>
       ))}
       {error && (

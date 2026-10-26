@@ -108,9 +108,9 @@ export function HarnessPanel({ model }: { model: RunModel }) {
                         <span className="faint text-[11px] w-3">{open ? "▾" : "▸"}</span>
                         <span className="font-semibold flex-1">{c.label}</span>
                         {cfg ? <Badge tone={enabled ? "ok" : "neutral"}>{enabled ? "on" : "off"}</Badge> : <Badge tone="neutral">{c.defaultOn ? "on by default" : "off by default"}</Badge>}
-                        <Badge tone="neutral" data-tier={c.tier} title={c.tier === "always" ? "On at every effort; only an experiment turns it off" : c.tier === "effort" ? "Set by the Effort dial; Customize may override it" : "Derived from Supervision and the engine"}>
+                        <span className="badge badge-neutral" data-tier={c.tier} title={c.tier === "always" ? "On at every effort; only an experiment turns it off" : c.tier === "effort" ? "Set by the Effort dial; Customize may override it" : "Derived from Supervision and the engine"}>
                           {TIER_LABEL[c.tier]}
-                        </Badge>
+                        </span>
                         {ignored && <Badge tone="warn">ignored here</Badge>}
                       </button>
                       <div className="text-[12.5px] leading-snug muted">{c.short}</div>
@@ -151,7 +151,7 @@ export function HarnessPanel({ model }: { model: RunModel }) {
                             </button>
                             {c.tier === "always" ? (
                               <button className="btn btn-ghost btn-sm" data-experiment={c.id} onClick={() => (cfg ? launchWithout(cfg, c.id) : openModal("newRun", { __compose: {}, ablated: [c.id], title: `Experiment: without ${c.label}` } as any))} title="An ablation experiment: start a run with this always-on component off, recorded on the run">
-                                {cfg && !enabled ? `Experiment: run with ${c.label}` : `Experiment: run without ${c.label}`} →
+                                {cfg?.ablated?.includes(c.id) ? `Experiment: run with ${c.label}` : `Experiment: run without ${c.label}`} →
                               </button>
                             ) : (
                               cfg &&

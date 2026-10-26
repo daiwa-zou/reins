@@ -393,6 +393,8 @@ export interface ChangedFile {
 export interface RunSummary {
   id: string;
   title: string;
+  /** The run title chip ("High · Check in · Go · CLI", or "Careful · Go · CLI" for older runs). */
+  chip?: string;
   status: RunStatus;
   phase?: Phase;
   round: number;
