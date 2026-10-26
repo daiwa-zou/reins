@@ -30,7 +30,7 @@ export interface NavState {
 export const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: "runs", label: "Runs", hint: "Watch and steer runs" },
   { id: "reliability", label: "Reliability", hint: "Repeat a task and see how often it passes" },
-  { id: "harness", label: "Harness", hint: "What each component does, presets and installed skills" },
+  { id: "harness", label: "Harness", hint: "Start a run from Effort, Supervision and domains; saved presets and installed skills" },
   { id: "lessons", label: "Lessons", hint: "The engineering posts behind each feature" },
 ];
 

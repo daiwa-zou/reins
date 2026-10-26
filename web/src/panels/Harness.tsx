@@ -3,212 +3,40 @@ import type { RunModel } from "../state/derive";
 import { useStore } from "../state/store";
 import { Badge } from "../components/ui";
 import { api } from "../lib/api";
-import type { ComponentId, HarnessComponent, RunConfig, SkillInfo } from "@shared/types";
+import type { SkillInfo } from "@shared/types";
 import { domainPresets, generatedPresets, presetChip } from "@shared/presets";
-import { EFFORT_LEVELS, EFFORT_TABLE, TIER_LABEL } from "@shared/components";
-import { ideas, lessonInDomain, linkCatalogue } from "@shared/implications";
-import { checkRunConfig, diffFromDefaults, ENGINE_LABEL } from "@shared/config";
-import { classifyPresets, startingPointFor } from "../state/startingPoint";
-
-export const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
+import { EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "@shared/components";
+import { ideas, lessonInDomain } from "@shared/implications";
+import { classifyPresets, effortSummary, startingPointFor, supervisionSummary } from "../state/startingPoint";
 
 /**
- * The harness, in the same words as New run: starting points (Profile,
- * Domains, Saved presets), then one compact card per component (expand for
- * what happens when it is off, what it assumes and which engines honour it),
- * then Foundations, Ideas and Skills, collapsed. With a run selected the cards
- * show that run's switches and offer "run with/without".
+ * The page you start runs from. A run is an Effort level (what runs), a
+ * Supervision level (when you are asked) and any domains, or one of your saved
+ * presets; each card says in plain words what it means and opens New run.
+ * Components are never listed here: Effort sets them, and the per-component
+ * table lives in docs/configuring.md. Skills and Ideas sit collapsed below.
  */
 export function HarnessPanel({ model }: { model: RunModel }) {
-  const components = useStore((s) => s.components);
   const lessons = useStore((s) => s.lessons);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
-  const navigate = useStore((s) => s.navigate);
-  const focus = useStore((s) => s.component);
   const focusSkill = useStore((s) => s.skill);
-  const openModal = useStore((s) => s.openModal);
-  const runs = useStore((s) => s.runs);
   const info = useStore((s) => s.info);
-  const availableEngine = useStore((s) => s.availableEngine);
   const cfg = model.config;
-  const on = cfg?.components;
-  // Foundation (and component) lesson lists come from the implications that target them.
-  const catalogue = React.useMemo(() => linkCatalogue(lessons), [lessons]);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(focus ? [focus] : []));
-  const isFoundation = (id: string | null | undefined) => !!id && catalogue.foundations.some((f) => f.id === id);
-  const [foundationsOpen, setFoundationsOpen] = useState(isFoundation(focus));
-
-  // Model-change nudge: compare the selected run's model to the most recent completed run before it.
-  const previous = cfg ? runs.filter((r) => r.id !== cfg.id && r.status === "completed" && Date.parse(r.createdAt) < Date.parse(cfg.createdAt))[0] : undefined;
-  const modelChanged = previous && cfg && previous.model !== cfg.roles.builder.model;
-
-  // Only reachable with a run selected: flip one component of that run's config.
-  const launchWithout = (run: RunConfig, id: ComponentId) => {
-    const comp = components.find((c) => c.id === id);
-    // Always-tier: the only way to turn one off is an experiment, recorded as `ablated`.
-    if (comp?.tier === "always") {
-      const ablated = run.ablated?.includes(id) ? run.ablated.filter((x) => x !== id) : [...(run.ablated ?? []), id];
-      return openModal("newRun", { ...run, id: undefined, createdAt: undefined, engine: run.engine === "replay" ? availableEngine() : run.engine, ablated, components: { ...run.components, [id]: !ablated.includes(id) ? true : false }, title: `${run.title} (experiment: without ${comp.label})` } as any);
-    }
-    openModal("newRun", { ...run, id: undefined, createdAt: undefined, engine: run.engine === "replay" ? availableEngine() : run.engine, components: { ...run.components, [id]: !run.components[id] }, __openHarness: true, title: `${run.title} (${run.components[id] ? "without" : "with"} ${components.find((c) => c.id === id)?.label ?? id})` } as any);
-  };
-
-  // ?component= scrolls to the card, highlights it and expands it (a foundation opens its section first).
-  useEffect(() => {
-    if (!focus) return;
-    setExpanded((s) => new Set([...s, focus]));
-    if (isFoundation(focus)) setFoundationsOpen(true);
-    const t = setTimeout(() => document.getElementById(`component-${focus}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, catalogue]);
-  const toggleCard = (id: string) => setExpanded((s) => (s.has(id) ? new Set([...s].filter((x) => x !== id)) : new Set([...s, id])));
-
-  const groups = [...new Set(components.map((c) => c.group))];
-  const runEngine = cfg && cfg.engine !== "replay" ? cfg.engine : null;
-
   return (
     <div className="h-full overflow-auto p-4">
       <div className="max-w-4xl mx-auto flex flex-col gap-4">
-        <div className="card p-4">
-          <div className="text-[16px] font-semibold tracking-tight">Every component is an assumption about the model.</div>
-          <p className="muted mt-1 leading-relaxed text-[12.5px]" data-harness-intro>
-            Pick a starting point below to open New run, where Customize switches single components on or off. Change one thing at a time and compare runs, so you can see which pieces still matter.
-          </p>
-          {cfg && (
-            <div className="muted mt-1 text-[12px]">
-              The cards show the switches of <b>{cfg.title}</b>; use <i>run with/without</i> on an expanded card to try one flipped.
-            </div>
-          )}
-          {modelChanged && (
-            <div className="mt-3 rounded-lg p-3 text-[12.5px]" style={{ background: "var(--warn-soft)", color: "var(--warn)" }}>
-              <b>Model changed</b> since your last completed run ({previous.model} → {cfg!.roles.builder.model}). This is the moment to re-examine the harness: try the same task with one component off.
-            </div>
-          )}
-        </div>
-
-        {cfg ? <EffectiveConfig cfg={cfg} /> : null}
-
         <StartingPoints />
-
-        {groups.map((g) => (
-          <div key={g}>
-            <div className="section-label mb-2">{GROUP_LABEL[g]}</div>
-            <div className="grid md:grid-cols-2 gap-2 items-start">
-              {components
-                .filter((c) => c.group === g)
-                .map((c) => {
-                  const enabled = on ? on[c.id] : c.defaultOn;
-                  const ignored = enabled && runEngine && !c.engines.includes(runEngine);
-                  const unmet = enabled && on ? (c.requires ?? []).filter((r) => !on[r.id]) : [];
-                  const open = expanded.has(c.id);
-                  return (
-                    <div key={c.id} id={`component-${c.id}`} className={`card p-3 flex flex-col gap-1.5 ${enabled ? "" : "opacity-80"}`} style={focus === c.id ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}>
-                      <button type="button" className="flex items-center gap-2 text-left" aria-expanded={open} aria-controls={`component-body-${c.id}`} onClick={() => toggleCard(c.id)}>
-                        <span className="faint text-[11px] w-3">{open ? "▾" : "▸"}</span>
-                        <span className="font-semibold flex-1">{c.label}</span>
-                        {cfg ? <Badge tone={enabled ? "ok" : "neutral"}>{enabled ? "on" : "off"}</Badge> : <Badge tone="neutral">{c.defaultOn ? "on by default" : "off by default"}</Badge>}
-                        <span className="badge badge-neutral" data-tier={c.tier} title={c.tier === "always" ? "On at every effort; only an experiment turns it off" : c.tier === "effort" ? "Set by the Effort dial; Customize may override it" : "Derived from Supervision and the engine"}>
-                          {TIER_LABEL[c.tier]}
-                        </span>
-                        {ignored && <Badge tone="warn">ignored here</Badge>}
-                      </button>
-                      <div className="text-[12.5px] leading-snug muted">{c.short}</div>
-                      {open && (
-                        <div id={`component-body-${c.id}`} className="flex flex-col gap-1.5 fade-in">
-                          <div className="text-[12px] muted leading-relaxed">
-                            <span className="faint">When off:</span> {c.whenOff}
-                          </div>
-                          <div className="text-[11.5px] muted leading-relaxed">
-                            <span className="faint">assumes:</span> {c.assumption}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1 text-[11px]">
-                            <span className="faint">engines:</span>
-                            {(["anthropic", "claude-code"] as const).map((e) => (
-                              <Badge key={e} tone={c.engines.includes(e) ? "ok" : "neutral"} title={c.engines.includes(e) ? `Honoured on ${ENGINE_LABEL[e]}` : `Ignored on ${ENGINE_LABEL[e]}`}>
-                                {c.engines.includes(e) ? "" : "not "}
-                                {ENGINE_LABEL[e]}
-                              </Badge>
-                            ))}
-                            {(c.requires ?? []).map((r) => (
-                              <Badge key={r.id} tone={unmet.some((u) => u.id === r.id) ? "warn" : "neutral"} title={r.reason}>
-                                needs {components.find((x) => x.id === r.id)?.label ?? r.id}
-                              </Badge>
-                            ))}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                            {c.lessons.map((slug) => {
-                              const l = lessons.find((x) => x.slug === slug);
-                              return (
-                                <button key={slug} className="badge badge-accent hover:brightness-95" onClick={() => setLessonFilter(slug)} title={l?.takeaway}>
-                                  {l?.title.split(":")[0].slice(0, 40) ?? slug}
-                                </button>
-                              );
-                            })}
-                            <span className="flex-1" />
-                            <button className="btn btn-ghost btn-sm" onClick={() => navigate({ section: "lessons", component: c.id, lesson: null })} title="Open Lessons filtered to this component">
-                              lessons →
-                            </button>
-                            {c.tier === "always" ? (
-                              <button className="btn btn-ghost btn-sm" data-experiment={c.id} onClick={() => (cfg ? launchWithout(cfg, c.id) : openModal("newRun", { __compose: {}, ablated: [c.id], title: `Experiment: without ${c.label}` } as any))} title="An ablation experiment: start a run with this always-on component off, recorded on the run">
-                                {cfg?.ablated?.includes(c.id) ? `Experiment: run with ${c.label}` : `Experiment: run without ${c.label}`} →
-                              </button>
-                            ) : (
-                              cfg &&
-                              c.tier === "effort" && (
-                                <button className="btn btn-ghost btn-sm" onClick={() => launchWithout(cfg, c.id)} title="Start a new run with this component flipped">
-                                  run {enabled ? "without" : "with"} →
-                                </button>
-                              )
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        ))}
-
-        <details className="card p-4" open={foundationsOpen} onToggle={(e) => setFoundationsOpen((e.target as HTMLDetailsElement).open)} data-foundations>
-          <summary className="cursor-pointer font-semibold">
-            Foundations · {catalogue.foundations.length} <span className="faint font-normal text-[12px]">practices that are not switches</span>
-          </summary>
-          {foundationsOpen && (
-          <div className="grid md:grid-cols-2 gap-2 mt-2">
-            {catalogue.foundations.map((f) => (
-              <div key={f.id} id={`component-${f.id}`} className="rounded-lg border line p-3 flex flex-col gap-1" style={focus === f.id ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}>
-                <div className="font-semibold">{f.label}</div>
-                <div className="text-[12.5px] leading-relaxed muted">{f.short}</div>
-                <div className="flex flex-wrap gap-1 mt-0.5">
-                  {f.lessons.map((slug) => {
-                    const l = lessons.find((x) => x.slug === slug);
-                    return (
-                      <button key={slug} className="badge badge-neutral hover:brightness-95" onClick={() => setLessonFilter(slug)} title={l?.takeaway}>
-                        {l?.title.split(":")[0].slice(0, 40) ?? slug}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-          )}
-        </details>
-
-        <IdeasList lessons={lessons} onOpen={setLessonFilter} />
-
         <SkillsList workspace={cfg && cfg.engine !== "replay" ? cfg.workspace : info?.defaultWorkspace} focus={focusSkill} />
+        <IdeasList lessons={lessons} onOpen={setLessonFilter} />
       </div>
     </div>
   );
 }
 
 /**
- * Starting points, in New run's words: 3 profiles, the domains (with the
- * lessons that shape each) and your saved presets. This is the one place to
- * manage saved presets and the New run default.
+ * Starting points, in New run's words: Effort, Supervision, the domains (with
+ * the lessons that shape each) and your saved presets. This is the one place
+ * to manage saved presets and the New run default.
  */
 function StartingPoints() {
   const lessons = useStore((s) => s.lessons);
@@ -263,28 +91,74 @@ function StartingPoints() {
   );
 
   return (
-    <div className="card p-4 flex flex-col gap-3" data-starting-points>
-      <div className="flex items-center gap-2">
-        <div className="font-semibold flex-1">Starting points</div>
-        <a className="text-small underline muted" href="/api/docs/configuring.md" target="_blank" rel="noreferrer">
-          docs/configuring.md
-        </a>
-      </div>
-      <div className="muted text-small -mt-2">A run starts from an Effort, a Supervision level and any domains, or from one of your saved presets.</div>
+    <div className="card p-4 flex flex-col gap-4" data-starting-points>
       <div>
-        <div className="section-label mb-1.5">Effort · what the harness spends on the task</div>
+        <div className="flex items-center gap-2">
+          <div className="text-[16px] font-semibold tracking-tight flex-1">Start a run</div>
+          <a className="text-small underline muted" href="/api/docs/configuring.md" target="_blank" rel="noreferrer">
+            docs/configuring.md
+          </a>
+        </div>
+        <p className="muted text-[12.5px] leading-relaxed mt-1" data-harness-intro>
+          A run is an <b>Effort</b> level (what the harness does), a <b>Supervision</b> level (when it asks you) and any <b>domains</b> (what kind of project), or one of your saved presets. Pick one to open New run with it filled in; everything else is set for you.
+        </p>
+      </div>
+
+      <div>
+        <div className="section-label mb-1.5">Effort · what runs</div>
         <ul className="grid md:grid-cols-4 gap-2">
-          {EFFORT_LEVELS.map((id) => (
-            <li key={id} className="card p-2.5 flex flex-col gap-1" data-start-effort={id}>
-              <div className="font-semibold">{EFFORT_TABLE[id].label}</div>
-              <div className="muted text-[12px] leading-snug flex-1">{EFFORT_TABLE[id].meaning}</div>
-              <button type="button" className="btn btn-sm self-start" onClick={() => openModal("newRun", { __compose: { effort: id } } as any)}>
-                Start a run →
-              </button>
-            </li>
-          ))}
+          {EFFORT_LEVELS.map((id) => {
+            const s = effortSummary(id);
+            return (
+              <li key={id} className="card p-2.5 flex flex-col gap-1.5" data-start-effort={id}>
+                <div className="font-semibold">{EFFORT_TABLE[id].label}</div>
+                <div className="muted text-[12px] leading-snug">{EFFORT_TABLE[id].meaning}</div>
+                <div className="text-[11.5px] leading-snug flex-1">
+                  <div>
+                    <span className="faint">Stages: </span>
+                    {s.stages.join(" → ")}
+                  </div>
+                  {s.extras.length > 0 && (
+                    <div>
+                      <span className="faint">Also: </span>
+                      {s.extras.join(", ")}
+                    </div>
+                  )}
+                  <div className="faint">
+                    {s.fixRounds} fix round{s.fixRounds === 1 ? "" : "s"} · {s.turns} turns per phase · ${s.budgetUsd}
+                  </div>
+                </div>
+                <button type="button" className="btn btn-sm self-start" onClick={() => openModal("newRun", { __compose: { effort: id } } as any)}>
+                  Start a run →
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
+
+      <div>
+        <div className="section-label mb-1.5">Supervision · when it asks you</div>
+        <ul className="grid md:grid-cols-3 gap-2">
+          {SUPERVISION_LEVELS.map((id) => {
+            const pauses = supervisionSummary(id);
+            return (
+              <li key={id} className="card p-2.5 flex flex-col gap-1.5" data-start-supervision={id}>
+                <div className="font-semibold">{SUPERVISION_TABLE[id].label}</div>
+                <div className="muted text-[12px] leading-snug">{SUPERVISION_TABLE[id].meaning}</div>
+                <div className="text-[11.5px] leading-snug flex-1">
+                  <span className="faint">Pauses: </span>
+                  {pauses.length ? pauses.join(", ") : "none"}
+                </div>
+                <button type="button" className="btn btn-sm self-start" onClick={() => openModal("newRun", { __compose: { supervision: id } } as any)}>
+                  Start a run →
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
       <div>
         <div className="section-label mb-1.5">Domains · what kind of project (layered over Effort and Supervision)</div>
         <ul className="grid md:grid-cols-2 gap-2">
@@ -311,6 +185,7 @@ function StartingPoints() {
           })}
         </ul>
       </div>
+
       <div>
         <div className="section-label mb-1.5">Your saved presets · {saved.length}</div>
         {saved.length === 0 ? (
@@ -326,59 +201,6 @@ function StartingPoints() {
             ))}
           </ul>
         )}
-      </div>
-    </div>
-  );
-}
-
-function EffectiveConfig({ cfg }: { cfg: RunConfig }) {
-  const diff = diffFromDefaults(cfg);
-  const warnings = checkRunConfig(cfg);
-  return (
-    <div className="card p-4 flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <div className="font-semibold flex-1">Effective configuration</div>
-        {cfg.preset ? <Badge tone="accent">preset: {cfg.preset}</Badge> : <Badge>no preset recorded</Badge>}
-      </div>
-      <div>
-        <div className="section-label mb-1">Changes from defaults · {diff.length}</div>
-        {diff.length ? (
-          <ul className="text-small flex flex-col gap-0.5">
-            {diff.map((d) => (
-              <li key={d.path} className="mono text-[11.5px]">
-                {d.text}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="muted text-small">Same as the defaults.</div>
-        )}
-      </div>
-      <div>
-        <div className="section-label mb-1">Config check · {warnings.length}</div>
-        {warnings.length ? (
-          <ul className="text-small flex flex-col gap-1">
-            {warnings.map((w, i) => (
-              <li key={i} className="flex gap-2 items-start">
-                <Badge tone={w.level === "warn" ? "warn" : "neutral"}>{w.level}</Badge>
-                <span>{w.message}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="muted text-small">No warnings: nothing in this config is ignored or contradictory.</div>
-        )}
-      </div>
-      <div className="grid md:grid-cols-2 gap-x-6 gap-y-1 text-[12.5px]">
-        {(["planner", "builder", "evaluator", "classifier", "scout"] as const).map((r) => (
-          <Row key={r} k={r} v={cfg.roles?.[r] ? `${cfg.roles[r].model} · effort ${cfg.roles[r].effort}` : "default"} />
-        ))}
-        <Row k="budget" v={`$${cfg.budgetUsd} · ${cfg.maxTurnsPerPhase} turns/phase · ${cfg.maxFixRounds} fix rounds`} />
-        {cfg.context && <Row k="context" v={`compact ${cfg.context.compactAtTokens.toLocaleString()} · clear keep ${cfg.context.clearToolResultsAfterTurns} · reset ${cfg.context.resetAtTokens.toLocaleString()}`} />}
-        {cfg.guardrail && <Row k="guardrail" v={`${cfg.guardrail.mode} · network ${cfg.guardrail.allowNetwork ? "on" : "off"}`} />}
-        <Row k="pauses" v={Object.entries(cfg.pauses ?? {}).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"} />
-        <Row k="engine" v={cfg.engine} />
-        <Row k="workspace" v={cfg.workspace} />
       </div>
     </div>
   );
@@ -414,50 +236,38 @@ function SkillsList({ workspace, focus }: { workspace?: string; focus?: string |
         Skills · {skills ? skills.length : 0} <span className="faint font-normal text-[12px]">{skills ? "installed for this workspace" : "loading"}</span>
       </summary>
       {open && (
-      <>
-      <p className="muted text-small mt-1">
-        Installed skills for <code className="mono">{workspace || "the server's default workspace"}</code>. Only names and descriptions go in the prompt; a role reads the body with read_skill. Workspace skills override yours, which
-        override the bundled ones.
-      </p>
-      {error && <div className="text-[var(--bad)] text-small mt-2">Could not list skills: {error}</div>}
-      {skills && !skills.length && <div className="muted text-small mt-2">No skills installed.</div>}
-      {focus && skills && !skills.some((s) => s.name === focus) && <div className="text-small mt-2 muted">The skill “{focus}” a lesson names is not installed for this workspace.</div>}
-      {skills && skills.length > 0 && (
-        <ul className="mt-2 flex flex-col gap-1.5">
-          {skills.map((s, i) => (
-            <li
-              key={`${s.source}-${s.name}`}
-              // The first row with a name owns the anchor (a workspace skill overrides a bundled one of the same name).
-              id={skills.findIndex((x) => x.name === s.name) === i ? `skill-${s.name}` : undefined}
-              className="flex gap-2 items-start text-small rounded"
-              style={focus === s.name ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}
-            >
-              <Badge tone={s.source === "bundled" ? "neutral" : "accent"}>{s.source}</Badge>
-              <div className="min-w-0">
-                <div className="font-medium">{s.name}</div>
-                <div className="muted leading-snug">{s.description || <i>no description: the agents cannot tell when to use it</i>}</div>
-                <div className="faint mono text-[11px] truncate" title={s.dir}>
-                  {s.dir}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      </>
+        <>
+          <p className="muted text-small mt-1">
+            Installed skills for <code className="mono">{workspace || "the server's default workspace"}</code>. Only names and descriptions go in the prompt; a role reads the body with read_skill. Workspace skills override yours, which override the bundled ones.
+          </p>
+          {error && <div className="text-[var(--bad)] text-small mt-2">Could not list skills: {error}</div>}
+          {skills && !skills.length && <div className="muted text-small mt-2">No skills installed.</div>}
+          {focus && skills && !skills.some((s) => s.name === focus) && <div className="text-small mt-2 muted">The skill “{focus}” a lesson names is not installed for this workspace.</div>}
+          {skills && skills.length > 0 && (
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {skills.map((s, i) => (
+                <li
+                  key={`${s.source}-${s.name}`}
+                  // The first row with a name owns the anchor (a workspace skill overrides a bundled one of the same name).
+                  id={skills.findIndex((x) => x.name === s.name) === i ? `skill-${s.name}` : undefined}
+                  className="flex gap-2 items-start text-small rounded"
+                  style={focus === s.name ? { boxShadow: "0 0 0 2px var(--accent)" } : undefined}
+                >
+                  <Badge tone={s.source === "bundled" ? "neutral" : "accent"}>{s.source}</Badge>
+                  <div className="min-w-0">
+                    <div className="font-medium">{s.name}</div>
+                    <div className="muted leading-snug">{s.description || <i>no description: the agents cannot tell when to use it</i>}</div>
+                    <div className="faint mono text-[11px] truncate" title={s.dir}>
+                      {s.dir}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </details>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex gap-2 min-w-0">
-      <span className="faint w-20 shrink-0">{k}</span>
-      <span className="mono text-[11.5px] truncate" title={v}>
-        {v}
-      </span>
-    </div>
   );
 }
 
@@ -473,35 +283,35 @@ function IdeasList({ lessons, onOpen }: { lessons: import("@shared/types").Lesso
   return (
     <details className="card p-4" data-ideas open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary className="cursor-pointer font-semibold">
-        Ideas · {all.length} <span className="faint font-normal text-[12px]">claims no switch implements yet</span>
+        Ideas · {all.length} <span className="faint font-normal text-[12px]">claims from the lessons that nothing implements yet</span>
       </summary>
       {open && (
-      <>
-      <div className="muted text-[12px] my-2">Claims from the lessons that no switch or stage implements yet (gaps), and implications still unreviewed. Review a user lesson in Lessons to promote it.</div>
-      {all.length === 0 ? (
-        <div className="faint text-[12px]">No ideas: every implication has a target and a standing.</div>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {shown.map((i, n) => (
-            <li key={`${i.lesson}-${n}`} className="card p-2.5 text-[12.5px] flex flex-col gap-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge tone={i.kind === "gap" ? "neutral" : "warn"}>{i.kind === "gap" ? "gap" : `${i.kind}:${i.target ?? ""} · ${i.standing}`}</Badge>
-                <span className="flex-1 min-w-0">{i.claim}</span>
-                <button className="badge badge-neutral hover:brightness-95" onClick={() => onOpen(i.lesson)} title={`Open ${i.lessonTitle} in Lessons`} data-idea-lesson={i.lesson}>
-                  {i.lessonTitle.split(":")[0].slice(0, 40)}
-                </button>
-              </div>
-              {i.quote && <blockquote className="muted text-[11.5px] border-l-2 line pl-2 italic">“{i.quote}”</blockquote>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {all.length > 12 && (
-        <button className="btn btn-ghost btn-sm mt-1" onClick={() => setShowAll(!showAll)}>
-          {showAll ? "Show fewer" : `Show all ${all.length}`}
-        </button>
-      )}
-      </>
+        <>
+          <div className="muted text-[12px] my-2">Claims from the lessons that no switch or stage implements yet (gaps), and implications still unreviewed. Review a user lesson in Lessons to promote it.</div>
+          {all.length === 0 ? (
+            <div className="faint text-[12px]">No ideas: every implication has a target and a standing.</div>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {shown.map((i, n) => (
+                <li key={`${i.lesson}-${n}`} className="card p-2.5 text-[12.5px] flex flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge tone={i.kind === "gap" ? "neutral" : "warn"}>{i.kind === "gap" ? "gap" : `${i.kind}:${i.target ?? ""} · ${i.standing}`}</Badge>
+                    <span className="flex-1 min-w-0">{i.claim}</span>
+                    <button className="badge badge-neutral hover:brightness-95" onClick={() => onOpen(i.lesson)} title={`Open ${i.lessonTitle} in Lessons`} data-idea-lesson={i.lesson}>
+                      {i.lessonTitle.split(":")[0].slice(0, 40)}
+                    </button>
+                  </div>
+                  {i.quote && <blockquote className="muted text-[11.5px] border-l-2 line pl-2 italic">“{i.quote}”</blockquote>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {all.length > 12 && (
+            <button className="btn btn-ghost btn-sm mt-1" onClick={() => setShowAll(!showAll)}>
+              {showAll ? "Show fewer" : `Show all ${all.length}`}
+            </button>
+          )}
+        </>
       )}
     </details>
   );

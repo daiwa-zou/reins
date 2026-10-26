@@ -48,7 +48,7 @@ Engine support is separate from the tier: a component the run's engine does not 
 
 ## Ablation
 
-The only way to turn an always-tier component off is an experiment. The Harness card's **Experiment: run without Compaction** opens New run with an experiment banner, and `POST /api/runs` accepts `ablated: ComponentId[]`: every id must be always-tier (otherwise a 400 naming it), each listed id is set off, and `ablated` is recorded on the config. A `components: { compaction: false }` is accepted only when `compaction` is also in `ablated`. The title chip ends with "Experiment: without Compaction". On effort-tier cards the button flips the component as an override; engine-tier cards have none. `POST /api/runs/:id/repeat` reuses the recorded config verbatim, `ablated` included, so a trial set has identical configs.
+The only way to turn an always-tier component off is an experiment: `POST /api/runs` accepts `ablated: ComponentId[]` (New run shows an experiment banner when a body carries it): every id must be always-tier (otherwise a 400 naming it), each listed id is set off, and `ablated` is recorded on the config. A `components: { compaction: false }` is accepted only when `compaction` is also in `ablated`. The title chip ends with "Experiment: without Compaction". An effort-tier component is flipped as an override in New run › Customize; engine-tier components follow the settings. `POST /api/runs/:id/repeat` reuses the recorded config verbatim, `ablated` included, so a trial set has identical configs.
 
 ## Migration
 
@@ -62,7 +62,7 @@ The retired care profiles and the old Claude Code preset are read, never written
 | "Claude Code" | `medium` + `check-in`, engine `claude-code` |
 | "Web app", "CLI / tool", "Go", "Python" | `medium` + `check-in` + that domain |
 
-- **Old runs** keep their `config.json` untouched and their old chip text ("Careful · Go · CLI"). Run again maps them onto the dials; always-tier offs they recorded are kept on, with the notice "kept on; use Harness › Experiment to run without". Repeat reuses them as recorded.
+- **Old runs** keep their `config.json` untouched and their old chip text ("Careful · Go · CLI"). Run again maps them onto the dials; always-tier offs they recorded are kept on, with the notice "kept on; run an ablation experiment to run without". Repeat reuses them as recorded.
 - **Saved presets** in `$REINS_HOME/presets.json` are read as `{ effort, supervision, domains }` plus their overrides. A legacy entry gets an inferred composition (mode `ask` → ask-every-write; all pauses off → unattended; otherwise check-in; contracts on → high; planner and evaluator off → low; otherwise medium), and its always-tier `false` values are dropped. A `default` naming "Full", "Careful", "Minimal", "Claude Code" or a generated preset resolves to the migrated composition (`GET /api/presets` returns it as `defaultComposition`).
 - **A legacy body** `POST /api/runs {"presets": ["careful","golang","cli"]}` is accepted, migrated and recorded as `effort`, `supervision` and `domains`.
 
@@ -85,7 +85,7 @@ Reins composes a preset per domain (`shared/presets.ts`, `composePreset`), recom
 
 - **Recipes.** `web` is **Web app**, `cli` is **CLI / tool**, `golang` is **Go** and `python` is **Python**. Both start from the Full config with no engine and add verify-like-a-user guidance: Web app starts the dev server with a timeout and makes real HTTP requests; CLI / tool runs `--help`, one happy path, and bad input expecting a non-zero exit code and a message on stderr. A domain only lessons name (e.g. `domains: games`) gets a generic preset named after it ("Games") on the same Full base.
 - **Composition order.** Matching lessons apply oldest `date` first, then by slug, so a newer lesson wins a conflict. Guidance lines are the recipe's plus one per lesson, deduplicated, at most 10.
-- **Basis.** Each generated preset lists the lessons it was built from with what each contributed (`on: …; off: …; guidance`), and a lesson that lost a conflict says `overridden by <slug>`. New run and Harness show this as "Built from N lessons", each linking to the lesson; a lesson with domains shows "Shapes presets: …".
+- **Basis.** Each generated preset lists the lessons it was built from with what each contributed (`on: …; off: …; guidance`), and a lesson that lost a conflict says `overridden by <slug>`. New run shows this as "Built from N lessons", and the Harness page's domain cards list them, each linking to the lesson; a lesson with domains shows "Shapes presets: …".
 - **Engine adaptation.** Generated presets are *adaptive*: on Claude Code they switch off the components only Direct API honours (Scouts, Compaction, Context editing, Task budget, Tool search, Tool examples) instead of being unavailable, and New run says "adapted for Claude Code: N switches off (…)".
 - In Lessons, select lessons (or use the current filter) and click **Build a preset from these** to open New run prefilled with the composition; **Save as preset…** stores it with its `lessons` list.
 
@@ -174,7 +174,7 @@ With `publish` on (always, on both engines) the harness carries every package to
 - settings that do nothing: fix rounds or the after-evaluation pause with the evaluator off, the contract pause with contracts off, the plan pause with the planner off, the commit pause with commits off, the merge pause with publish off;
 - suspicious numbers: `context.resetAtTokens <= context.compactAtTokens`, `budgetUsd < 1`, `maxTurnsPerPhase < 5`.
 
-New run shows the warnings live, and the Harness section shows them for the selected run. At run start the orchestrator writes each one to the run log as a `note` with level `warn`, before the first phase. Warnings never block a run.
+New run shows the warnings live, and a run's Details tab shows them for the selected run. At run start the orchestrator writes each one to the run log as a `note` with level `warn`, before the first phase. Warnings never block a run.
 
 ## The turn budget: nudge, forced report, synthesised report
 
@@ -244,12 +244,12 @@ Every bullet under `## Harness implications` is one implication: the atomic link
   > A quote from the source, verbatim.
 ```
 
-- The prefix is `[kind:target]`. Kinds: `component` (a component id from the table above), `stage` (`plan`, `contract`, `build`, `evaluate`, `wrapup`), `skill` (a skill name; the SKILL.md links back with a `lessons:` frontmatter line), `foundation` (a foundation id), and `gap` (no target: an idea the harness does not implement, shown on the Ideas list of the Harness section).
+- The prefix is `[kind:target]`. Kinds: `component` (a component id from the table above), `stage` (`plan`, `contract`, `build`, `evaluate`, `wrapup`), `skill` (a skill name; the SKILL.md links back with a `lessons:` frontmatter line), `foundation` (a foundation id), and `gap` (no target: an idea the harness does not implement, shown on the Ideas list at the bottom of the Harness page).
 - The indented `domains:` line tags the implication; a lesson-level `domains:` tags every implication in the file.
 - The indented `> quote` line is the evidence. For bundled lessons the quote must appear in the lesson's Learnings; for intake drafts it must appear verbatim in the fetched source.
 - A bullet without a prefix is still valid: it is a gap, and `npm run lessons:check` warns about it. An unknown kind or target is an error.
 - Frontmatter `components:` and `foundations:` lists still work; each entry counts as an implicit implication.
-- Each component's and foundation's lesson list on the Harness section is derived from these implications; `lessons:check` warns about a component no implication targets.
+- Each component's and foundation's lesson list (the *Used by* badges on a lesson, which filter the library) is derived from these implications; `lessons:check` warns about a component no implication targets.
 
 ### Provenance and standing
 
@@ -286,4 +286,4 @@ A skill is a folder with a `SKILL.md` (frontmatter `name` and `description`, the
 2. yours: `$REINS_HOME/skills/<name>/SKILL.md`;
 3. the workspace: `<workspace>/.reins/skills/<name>/SKILL.md`, then `<workspace>/.claude/skills/` for names not already taken.
 
-The Harness section's **Skills** list (from `GET /api/skills?workspace=<dir>`) shows what a run in that workspace would get, with each skill's source and directory. Without a `workspace` it uses the server's default workspace. A folder that does not exist simply contributes no workspace skills.
+The Harness page's **Skills** list (from `GET /api/skills?workspace=<dir>`) shows what a run in that workspace would get, with each skill's source and directory. Without a `workspace` it uses the server's default workspace. A folder that does not exist simply contributes no workspace skills.

@@ -6,6 +6,7 @@
 // in old defaults and runs, and mapped onto a composition by startingPointFor().
 import type { EngineId, HarnessEffort, Preset, Supervision } from "@shared/types";
 import { compositionLabel, parseComposition, PRESET_RECIPES, type PresetRecipe } from "@shared/presets";
+import { EFFORT_TABLE, PAUSE_KEYS, SUPERVISION_TABLE, type PauseKey } from "@shared/components";
 
 type Listed = Pick<Preset, "name" | "builtIn"> & Partial<Pick<Preset, "id" | "layer" | "generated" | "domain">>;
 
@@ -63,4 +64,33 @@ export function describeStart(sp: StartingPoint): string {
   if (sp.kind === "saved") return `your saved preset “${sp.name}”`;
   if (sp.kind === "compose") return compositionLabel(sp);
   return "custom settings";
+}
+
+// ---- Plain-words summaries for the Harness page ----------------------------
+
+export interface EffortSummary {
+  /** The pipeline stages that run at this effort, in order. */
+  stages: string[];
+  /** Effort-tier extras beyond the stages (scouts, task budget, think tool, max's re-run rule). */
+  extras: string[];
+  fixRounds: number;
+  turns: number;
+  budgetUsd: number;
+}
+
+/** What an Effort level turns on, as a person reads it: stages, extras, fix rounds, turns and budget. */
+export function effortSummary(effort: HarnessEffort): EffortSummary {
+  const row = EFFORT_TABLE[effort];
+  const on = row.components;
+  const stages = [on.planner ? "Plan" : "", on.planner ? "Breakdown" : "", on.contracts ? "Contract" : "", "Tests", "Build", on.evaluator ? "Evaluate" : "", "Publish"].filter(Boolean);
+  const extras = [on.scouts ? "Scout subagents" : "", on.taskBudget ? "Task budget" : "", on.thinkTool ? "Think tool" : "", row.rerunEveryCriterion ? "Evaluator re-runs every criterion" : ""].filter(Boolean);
+  return { stages, extras, fixRounds: row.maxFixRounds, turns: row.maxTurnsPerPhase, budgetUsd: row.budgetUsd };
+}
+
+const PAUSE_WORDS: Record<PauseKey, string> = { afterPlan: "after the plan", afterContract: "to approve each contract", beforeCommit: "before each commit", afterEvaluation: "after each evaluation", beforeMerge: "before each merge" };
+
+/** The pauses a Supervision level turns on, in pipeline order. */
+export function supervisionSummary(supervision: Supervision): string[] {
+  const p = SUPERVISION_TABLE[supervision].pauses;
+  return PAUSE_KEYS.filter((k) => p[k]).map((k) => PAUSE_WORDS[k]);
 }

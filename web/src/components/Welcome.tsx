@@ -59,7 +59,7 @@ export function Welcome() {
         </ol>
 
         <button className="mt-10 text-small muted hover:text-[var(--fg)] inline-flex items-center gap-1" onClick={() => navigate({ section: "harness" })}>
-          What’s inside: the harness components and the lessons behind them <ArrowRight size={13} aria-hidden />
+          Start a run from an Effort level, a Supervision level and your project's domains <ArrowRight size={13} aria-hidden />
         </button>
       </div>
     </div>

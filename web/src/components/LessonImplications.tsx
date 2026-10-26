@@ -15,14 +15,13 @@ export function ImplicationsByKind({ lesson }: { lesson: Lesson }) {
   const target = (i: Implication) => {
     if (!i.target) return null;
     const label = i.kind === "component" ? (components.find((c) => c.id === i.target)?.label ?? i.target) : i.target;
-    // Where each kind lives on Harness: components and foundations have cards (#component-<id>),
-    // skills have a row in the installed skills list (#skill-<name>), and a stage's lessons
-    // reach its prompt through the "Lessons for this stage" component (#component-stageLessons).
+    // A skill has a row in the installed skills list on Harness (#skill-<name>); a component,
+    // foundation or stage target filters the library to the lessons behind it.
     const go = () => {
       const t = i.target!;
       if (i.kind === "skill") navigate({ section: "harness", skill: t, component: null });
-      else if (i.kind === "stage") navigate({ section: "harness", component: "stageLessons", skill: null });
-      else navigate({ section: "harness", component: t, skill: null });
+      else if (i.kind === "stage") navigate({ section: "lessons", component: "stageLessons", skill: null, lesson: null });
+      else navigate({ section: "lessons", component: t, skill: null, lesson: null });
     };
     const title =
       i.kind === "stage"

@@ -11,7 +11,8 @@ import { adaptPreset, composeRun, compositionOf, generatedPresets, presetCompati
 import { ComposePicker } from "./ComposePicker";
 import { compositionError } from "../state/runChip";
 import { classifyPresets, describeStart, startingPointFor, type StartingPoint } from "../state/startingPoint";
-import { GROUP_LABEL } from "../panels/Harness";
+
+const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -105,7 +106,7 @@ export function NewRun() {
       const offs = alwaysTierOffs(cfg.components, cfg.ablated ?? []);
       if (offs.length) {
         cfg = { ...cfg, components: { ...cfg.components, ...Object.fromEntries(offs.map((id) => [id, true])) } };
-        note = `${offs.map((id) => components.find((c) => c.id === id)?.label ?? id).join(", ")} kept on; use Harness › Experiment to run without.`;
+        note = `${offs.map((id) => components.find((c) => c.id === id)?.label ?? id).join(", ")} kept on; an ablation experiment (POST /api/runs with ablated) is the only way to run without.`;
       }
       return { cfg, notice: note, customize: !!prefill?.__openHarness };
     }

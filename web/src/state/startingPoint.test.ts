@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generatedPresets } from "../../../shared/presets";
 import type { Preset } from "../../../shared/types";
-import { classifyPresets, describeStart, startingPointFor } from "./startingPoint";
+import { classifyPresets, describeStart, effortSummary, startingPointFor, supervisionSummary } from "./startingPoint";
 
 const mine: Preset = { name: "mine", description: "", builtIn: false, config: {} };
 // The retired built-ins as an old server would still list them.
@@ -52,3 +52,18 @@ describe("startingPointFor", () => {
     expect(describeStart({ kind: "compose", effort: "high", supervision: "ask-every-write", domains: ["web"] })).toBe("High · Ask every write · Web");
   });
 });
+
+describe("effortSummary: what an Effort level turns on, in plain words for the Harness page", () => {
+  it("names the stages that run, the fix rounds, the turn cap and the budget", () => {
+    expect(effortSummary("low")).toEqual({ stages: ["Tests", "Build", "Publish"], extras: [], fixRounds: 0, turns: 30, budgetUsd: 3 });
+    expect(effortSummary("medium")).toEqual({ stages: ["Plan", "Breakdown", "Tests", "Build", "Evaluate", "Publish"], extras: ["Task budget"], fixRounds: 1, turns: 60, budgetUsd: 10 });
+    expect(effortSummary("high")).toEqual({ stages: ["Plan", "Breakdown", "Contract", "Tests", "Build", "Evaluate", "Publish"], extras: ["Scout subagents", "Task budget"], fixRounds: 2, turns: 90, budgetUsd: 20 });
+    expect(effortSummary("max")).toEqual({ stages: ["Plan", "Breakdown", "Contract", "Tests", "Build", "Evaluate", "Publish"], extras: ["Scout subagents", "Task budget", "Think tool", "Evaluator re-runs every criterion"], fixRounds: 3, turns: 120, budgetUsd: 40 });
+  });
+  it("supervisionSummary lists the pauses a level turns on, in pipeline order", () => {
+    expect(supervisionSummary("unattended")).toEqual([]);
+    expect(supervisionSummary("check-in")).toEqual(["after the plan", "to approve each contract", "after each evaluation", "before each merge"]);
+    expect(supervisionSummary("ask-every-write")).toEqual(["after the plan", "to approve each contract", "before each commit", "after each evaluation", "before each merge"]);
+  });
+});
+

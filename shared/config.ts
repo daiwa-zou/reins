@@ -228,7 +228,7 @@ export function validatePresetConfig(raw: unknown, opts: { legacy?: boolean } = 
               dropped.push(`components.${id} (always on)`);
               continue;
             }
-            throw new PresetValidationError(`components.${id} is always on and cannot be turned off in a preset (use Harness › Experiment to run without ${label(id as ComponentId)})`);
+            throw new PresetValidationError(`components.${id} is always on and cannot be turned off in a preset (run an ablation experiment, POST /api/runs with ablated, to run without ${label(id as ComponentId)})`);
           }
           c[id as ComponentId] = on as boolean;
         }

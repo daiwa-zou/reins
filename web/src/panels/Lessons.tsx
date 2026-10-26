@@ -235,12 +235,12 @@ export function LessonsPanel() {
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="faint">Components:</span>
                             {informs.map((c) => (
-                              <button key={c.id} className="badge badge-accent hover:brightness-95" onClick={() => navigate({ section: "harness", component: c.id })} title={`Open the ${c.label} card in Harness`}>
+                              <button key={c.id} className="badge badge-accent hover:brightness-95" onClick={() => navigate({ section: "lessons", component: c.id, lesson: null })} title={`Show every lesson behind ${c.label}`}>
                                 {c.label} →
                               </button>
                             ))}
                             {founds.map((f) => (
-                              <button key={f.id} className="badge badge-neutral hover:brightness-95" onClick={() => navigate({ section: "harness", component: f.id })} title={`Open the ${f.label} foundation in Harness`}>
+                              <button key={f.id} className="badge badge-neutral hover:brightness-95" onClick={() => navigate({ section: "lessons", component: f.id, lesson: null })} title={`Show every lesson behind ${f.label}`}>
                                 {f.label} →
                               </button>
                             ))}
