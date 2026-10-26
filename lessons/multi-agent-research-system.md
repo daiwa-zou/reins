@@ -63,5 +63,5 @@ foundations: fileHandoff
   > About 20 representative real queries suffice early
 - [gap] Let an agent test a tool and rewrite its description from the failures it sees.
   > rewrote its description, cutting later task completion time by 40%
-- [component:thinkTool] Let workers reason after each tool result to assess its quality and find gaps.
+- [foundation:ownedLoop] Keep thinking on between tool calls so workers can assess each tool result and find gaps.
   > use interleaved thinking after each tool result to assess quality
