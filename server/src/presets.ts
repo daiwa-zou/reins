@@ -8,6 +8,8 @@ import { alwaysTierOffs, applyPreset, RETIRED_PRESET_NAMES } from "../../shared/
 import { ALWAYS_IDS, DEFAULT_COMPOSITION, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE, tierOf } from "../../shared/components.js";
 import type { RunConfig } from "../../shared/types.js";
 import { listLessons } from "./lessons.js";
+import { listDomains } from "./domains.js";
+import { tagUserDomains } from "../../shared/domains.js";
 import { FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
 
 /**
@@ -66,7 +68,7 @@ function write(f: PresetFile) {
 
 function resolveDefault(f: PresetFile): string | null {
   if (!f.default) return null;
-  const all = [...generatedPresets(listLessons()).map((p) => p.name), ...f.presets.map((p) => p.name)];
+  const all = [...generatedPresets(listLessons(), listDomains()).map((p) => p.name), ...f.presets.map((p) => p.name)];
   return all.find((n) => n.toLowerCase() === f.default!.toLowerCase()) ?? null;
 }
 
@@ -75,7 +77,7 @@ function defaultComposition(f: PresetFile): Composition & { engine?: EngineId } 
   const name = f.default ?? "";
   const user = f.presets.find((p) => p.name.toLowerCase() === name.toLowerCase());
   if (user) return { effort: user.config.effort ?? DEFAULT_COMPOSITION.effort, supervision: user.config.supervision ?? DEFAULT_COMPOSITION.supervision, domains: user.config.domains ?? [], ...(user.config.engine && user.config.engine !== "replay" ? { engine: user.config.engine } : {}) };
-  const recipe = generatedPresets(listLessons()).find((p) => p.name.toLowerCase() === name.toLowerCase());
+  const recipe = generatedPresets(listLessons(), listDomains()).find((p) => p.name.toLowerCase() === name.toLowerCase());
   if (recipe?.domain) return { ...DEFAULT_COMPOSITION, domains: [recipe.domain] };
   return migrateLegacy(name);
 }
@@ -87,7 +89,7 @@ export function listPresets(): { presets: ListedPreset[]; default: string | null
   const f = read();
   const def = resolveDefault(f);
   const user: Preset[] = f.presets.map((p) => ({ name: p.name, description: p.description, builtIn: false, config: p.config, ...(p.lessons ? { lessons: p.lessons } : {}) }));
-  const presets = [...generatedPresets(listLessons()), ...user].map((p) => ({ ...p, isDefault: p.name === def, compatibility: compatibilityByEngine(p) }));
+  const presets = [...generatedPresets(listLessons(), listDomains()), ...user].map((p) => ({ ...p, isDefault: p.name === def, compatibility: compatibilityByEngine(p) }));
   return { presets, default: def, defaultComposition: defaultComposition(f), file: presetsFile() };
 }
 
@@ -169,7 +171,8 @@ export class PresetNotFound extends Error {}
  */
 export function resolveRunInput<T extends Partial<RunConfig> & { task: string; workspace: string }>(input: T, opts: { verbatim?: boolean } = {}): T {
   const lessons = listLessons();
-  if (opts.verbatim) return { ...input, stageLessons: input.stageLessons ?? stageLessonsFor(lessons, input.domains ?? []) } as T;
+  const userDomains = listDomains();
+  if (opts.verbatim) return { ...input, stageLessons: input.stageLessons ?? stageLessonsFor(tagUserDomains(lessons, userDomains), input.domains ?? []) } as T;
   const raw = input as any;
   let ablated: ComponentId[] = [];
   if (raw.ablated !== undefined && raw.ablated !== null) {
@@ -193,7 +196,7 @@ export function resolveRunInput<T extends Partial<RunConfig> & { task: string; w
     legacyEngine = m.engine;
   }
   const engine = (input.engine ?? legacyEngine ?? "anthropic") as RunConfig["engine"];
-  const composed = composeRun(comp, lessons, PRESET_RECIPES, engine === "replay" ? undefined : engine);
+  const composed = composeRun(comp, lessons, PRESET_RECIPES, engine === "replay" ? undefined : engine, userDomains);
   const label = compositionLabel(composed, ablated);
   const base = applyPreset(defaultRunConfig({ task: input.task, workspace: input.workspace }), { name: label, config: composed.config });
   const out: any = { ...base, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== null)) };
@@ -224,6 +227,7 @@ export function composablePresets() {
   return {
     efforts: EFFORT_LEVELS.map((id) => ({ id, ...EFFORT_TABLE[id] })),
     supervisions: SUPERVISION_LEVELS.map((id) => ({ id, ...SUPERVISION_TABLE[id] })),
-    domains: domainPresets(lessons),
+    domains: domainPresets(lessons, listDomains()),
+    userDomains: listDomains(),
   };
 }

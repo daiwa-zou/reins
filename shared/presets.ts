@@ -5,8 +5,9 @@
 // A recipe names a domain (web, cli...) and its base guidance. composePreset()
 // starts from the Full config and folds in every lesson whose `domains:` names
 // that domain, oldest first (then by slug), so a newer lesson wins a conflict.
-import type { ComponentId, Composition, EngineId, GuardrailMode, HarnessEffort, Lesson, Phase, Preset, PresetBasis, PresetCompatibility, PresetConfig, RunConfig, Supervision } from "./types.js";
+import type { ComponentId, Composition, EngineId, GuardrailMode, HarnessEffort, Lesson, Phase, Preset, PresetBasis, PresetCompatibility, PresetConfig, RunConfig, Supervision, UserDomain } from "./types.js";
 import { lessonInDomain, namedDomains, stageLessonsFor } from "./implications.js";
+import { domainEffects, tagUserDomains } from "./domains.js";
 import { cleanGuidance, COMPONENTS, DEFAULT_COMPOSITION, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, type EffortComponentId, GUIDANCE_MAX_LINES, isEffort, isSupervision, PAUSE_GATE, PAUSE_KEYS, type PauseKey, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "./components.js";
 import { ENGINE_LABEL, sanitizePresetName } from "./config.js";
 
@@ -150,16 +151,38 @@ export function composePreset(recipe: PresetRecipe, lessons: Lesson[], opts: { m
   return { name: opts.name ?? recipe.name, description: recipe.description, builtIn: true, generated: true, adaptive: true, domain: recipe.id, basis, config };
 }
 
-/** Domains named by the lessons, plus the built-in recipes, in a stable order. */
+/** A recipe per user-built domain: its label and description, no base guidance (the implications carry it). */
+export function userRecipes(domains: UserDomain[]): PresetRecipe[] {
+  return domains.map((d) => ({ id: d.id, name: d.label, description: d.description || `Built from ${d.implications.length} implication${d.implications.length === 1 ? "" : "s"}.`, guidance: [] }));
+}
+
+/** Domains named by the lessons, plus the built-in recipes (and any user-built ones passed as recipes), in a stable order. */
 export function presetDomains(lessons: Lesson[], recipes: PresetRecipe[] = PRESET_RECIPES): string[] {
   const out = recipes.map((r) => r.id);
   for (const d of namedDomains(lessons.filter((l) => l.standing !== "unreviewed"))) if (isDomain(d) && !out.includes(d)) out.push(d);
   return out;
 }
 
-/** Every generated preset for this lesson library: Web app, CLI / tool, and one per lesson-only domain. */
-export function generatedPresets(lessons: Lesson[]): Preset[] {
-  return presetDomains(lessons).map((d) => composePreset(recipeFor(d), lessons));
+/** composePreset for a user-built domain: the Full base plus what its implications do, with one basis line per source lesson. */
+function composeUserPreset(domain: UserDomain, lessons: Lesson[]): Preset {
+  const base = composePreset(userRecipes([domain])[0], []);
+  const fx = domainEffects(domain, lessons);
+  const components = { ...base.config.components } as Partial<Record<ComponentId, boolean>>;
+  for (const id of fx.enables) components[id] = true;
+  const basis: PresetBasis[] = fx.lessons.map((slug) => {
+    const n = fx.items.filter((i) => i.lesson === slug).length;
+    return { slug, title: lessons.find((l) => l.slug === slug)?.title ?? slug, effect: `${n} implication${n === 1 ? "" : "s"}` };
+  });
+  return { ...base, user: true, basis, config: { ...base.config, components, guidance: cleanGuidance(fx.guidance).lines.slice(0, GUIDANCE_MAX_LINES) } };
+}
+
+/** Every generated preset for this lesson library: Web app, CLI / tool, one per lesson-only domain, and one per user-built domain. */
+export function generatedPresets(lessons: Lesson[], userDomains: UserDomain[] = []): Preset[] {
+  const lib = tagUserDomains(lessons, userDomains);
+  return presetDomains(lib, [...PRESET_RECIPES, ...userRecipes(userDomains)]).map((d) => {
+    const u = userDomains.find((x) => x.id === d);
+    return u ? composeUserPreset(u, lessons) : composePreset(recipeFor(d), lib);
+  });
 }
 
 /** Names a user preset may not take: the recipes' (and any generated preset's) names. */
@@ -266,7 +289,11 @@ export interface ComposedRun {
  * - roles / context: later wins per key; engine: never set by a domain.
  * `recipes` defaults to PRESET_RECIPES; tests pass their own to exercise the rules.
  */
-export function composeRun(input: Partial<Composition> | null | undefined, lessons: Lesson[], recipes: PresetRecipe[] = PRESET_RECIPES, engine?: EngineId): ComposedRun {
+export function composeRun(input: Partial<Composition> | null | undefined, rawLessons: Lesson[], baseRecipes: PresetRecipe[] = PRESET_RECIPES, engine?: EngineId, userDomains: UserDomain[] = []): ComposedRun {
+  // Picked implications are tagged with their user domain, so stage blocks and "lessons in this
+  // domain" see them; the lessons' own enables/disables/guidance stay tied to the domains they name.
+  const lessons = tagUserDomains(rawLessons, userDomains);
+  const recipes = [...baseRecipes, ...userRecipes(userDomains.filter((u) => !baseRecipes.some((r) => r.id === u.id)))];
   const raw = (input ?? {}) as Record<string, unknown>;
   const effort = raw.effort === undefined || raw.effort === null ? DEFAULT_COMPOSITION.effort : raw.effort;
   const supervision = raw.supervision === undefined || raw.supervision === null ? DEFAULT_COMPOSITION.supervision : raw.supervision;
@@ -344,7 +371,25 @@ export function composeRun(input: Partial<Composition> | null | undefined, lesso
     for (const k of ["askPatterns", "denyPatterns"] as const) if (g[k]?.length) guardrail[k] = [...new Set([...(guardrail[k] ?? []), ...g[k]!])];
     if (rfx.length) basis.push({ slug: `recipe:${d}`, title: recipe.name, effect: `[${d}] ${rfx.join("; ")}` });
 
-    for (const l of lessons.filter((x) => x.standing !== "unreviewed" && lessonInDomain(x, d)).sort(byAge)) {
+    const user = userDomains.find((u) => u.id === d);
+    if (user) {
+      // A user-built domain is exactly its implications: components on, guidance lines, stage lines (via tagging).
+      const fx = domainEffects(user, rawLessons);
+      const ufx: string[] = [`${fx.items.length} implication${fx.items.length === 1 ? "" : "s"} from ${fx.lessons.join(", ") || "no lesson"}`];
+      const on = fx.enables.map((id) => trySet(id, true, user.label)).filter((t) => t.startsWith("on:"));
+      if (on.length) ufx.push(`on: ${fx.enables.map(label).join(", ")}`);
+      const stageN = Object.values(fx.stages).reduce((n, a) => n + (a?.length ?? 0), 0);
+      if (stageN) ufx.push(`${stageN} stage line${stageN === 1 ? "" : "s"}`);
+      if (fx.guidance.length) {
+        guidance.push(...fx.guidance);
+        ufx.push(`${fx.guidance.length} guidance line${fx.guidance.length === 1 ? "" : "s"}`);
+      }
+      if (fx.ignored.length) ufx.push(`ignored: ${fx.ignored.join("; ")}`);
+      basis.push({ slug: `domain:${d}`, title: user.label, effect: `[${d}] ${ufx.join("; ")}` });
+      continue;
+    }
+
+    for (const l of rawLessons.filter((x) => x.standing !== "unreviewed" && lessonInDomain(x, d)).sort(byAge)) {
       const fx: string[] = [];
       for (const id of l.enables ?? []) fx.push(trySet(id, true, l.slug));
       for (const id of l.disables ?? []) fx.push(trySet(id, false, l.slug));
@@ -466,9 +511,6 @@ export function presetsLabel(ids: string[] | undefined): string {
 }
 
 /** Domain presets for the picker: built-in recipes plus every domain a trusted lesson or implication names. */
-export function domainPresets(lessons: Lesson[]): Preset[] {
-  return presetDomains(lessons).map((d) => {
-    const p = composePreset(recipeFor(d), lessons);
-    return { ...p, id: d, layer: "domain" as const, short: presetChip(d) };
-  });
+export function domainPresets(lessons: Lesson[], userDomains: UserDomain[] = []): Preset[] {
+  return generatedPresets(lessons, userDomains).map((p) => ({ ...p, id: p.domain!, layer: "domain" as const, short: presetChip(p.domain!) }));
 }

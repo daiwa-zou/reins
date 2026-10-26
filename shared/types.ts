@@ -221,8 +221,22 @@ export interface Preset {
   domain?: string;
   /** The lessons it was built from, with what each contributed. */
   basis?: PresetBasis[];
+  /** A domain the user built from implications (domains.json), not one lessons name. */
+  user?: boolean;
   /** Lesson slugs a user preset was built from (kept for traceability). */
   lessons?: string[];
+}
+
+/** A domain a person built from implications in the library (shared/domains.ts), stored in $REINS_HOME/domains.json. */
+export interface UserDomain {
+  /** The domain id used in a run's `domains`; a slug. */
+  id: string;
+  /** The chip text. */
+  label: string;
+  description: string;
+  /** Implication ids (<lesson-slug>#<n>); only bundled or reviewed ones take effect. */
+  implications: string[];
+  createdAt?: string;
 }
 
 /** One lesson's contribution to a generated preset. */

@@ -16,6 +16,7 @@ import { IntakeManager, IntakeRefused, isIntakeId } from "./intake/intake.js";
 import { suggestDomains } from "./workspace.js";
 import { composablePresets, deletePreset, listPresets, PresetCompositionError, PresetNotFound, savePreset, setDefaultPreset } from "./presets.js";
 import { PresetValidationError } from "../../shared/config.js";
+import { deleteDomain, DomainNotFound, DomainValidationError, listDomains, saveDomain } from "./domains.js";
 import { loadSkills } from "./skills.js";
 import { changedFiles, fileDiff, headSha } from "./workspace.js";
 import { loadDemoEvents } from "./engine/replay.js";
@@ -141,6 +142,30 @@ app.delete("/api/presets/:name", (c) => {
     return c.json({ ok: true });
   } catch (e) {
     return presetError(c, e);
+  }
+});
+
+// User-built domains: named sets of implications from the library ($REINS_HOME/domains.json).
+const domainError = (c: any, e: unknown) => {
+  if (e instanceof DomainValidationError) return c.json({ error: e.message }, 400);
+  if (e instanceof DomainNotFound) return c.json({ error: e.message }, 404);
+  throw e;
+};
+app.get("/api/domains", (c) => c.json(listDomains()));
+app.post("/api/domains", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  try {
+    return c.json(saveDomain(body), 201);
+  } catch (e) {
+    return domainError(c, e);
+  }
+});
+app.delete("/api/domains/:id", (c) => {
+  try {
+    deleteDomain(c.req.param("id"));
+    return c.json({ ok: true });
+  } catch (e) {
+    return domainError(c, e);
   }
 });
 
