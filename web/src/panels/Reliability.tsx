@@ -76,7 +76,7 @@ export function ReliabilityPanel() {
                   <div className="font-semibold leading-snug line-clamp-2">{set.task}</div>
                   <div className="muted text-[11.5px] mt-0.5 truncate">{tilde(set.workspace, info?.home)}</div>
                 </div>
-                <Stat label="pass rate" value={set.n ? pct(set.passRate) : "—"} sub={`${set.passes}/${set.n} finished`} />
+                <Stat label="pass rate" value={set.n ? pct(set.passRate) : "—"} sub={`${set.passes}/${set.n} finished${set.infra ? ` · ${set.infra} infra (not counted)` : ""}`} />
                 {set.n >= set.k ? (
                   <>
                     <Stat label={`pass^${set.k}`} value={pct(set.passPowK)} tone={set.passPowK >= 0.8 ? "ok" : set.passPowK >= 0.5 ? "warn" : "bad"} />

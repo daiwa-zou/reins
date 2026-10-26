@@ -199,6 +199,9 @@ export function rovingTabs(e: React.KeyboardEvent, ids: string[], current: strin
   else if (e.key === "End") next = ids.length - 1;
   if (next < 0) return;
   e.preventDefault();
+  // Move focus first: a re-render after select() must not leave it on the old tab.
+  const tabs = (e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="tab"]');
+  tabs[next]?.focus();
   select(ids[next]);
-  requestAnimationFrame(() => (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`[role="tab"][aria-selected="true"]`)?.focus());
+  requestAnimationFrame(() => tabs[next]?.focus());
 }

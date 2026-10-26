@@ -26,6 +26,7 @@ const trial = (id: string, verdict: Trial["verdict"], status: Trial["status"] = 
   createdAt: `2026-01-0${id}T00:00:00Z`,
   engine: "anthropic",
   model: "m",
+  failureKind: verdict === "pass" && status === "completed" ? "none" : "agent",
 });
 
 describe("trial rates", () => {
@@ -57,6 +58,16 @@ describe("groupTrials", () => {
     expect(w.passRate).toBe(0.5);
     expect(w.passPowK).toBe(0.25);
     expect(w.passAtK).toBe(0.75);
+  });
+  it("keeps infrastructure failures out of the rate and groups fresh-worktree trials with their origin", () => {
+    const runs = [run("1"), run("2"), run("3", "/w-trial-3")];
+    const t2 = { ...trial("2", "none", "failed"), failureKind: "infra" as const };
+    const t3 = { ...trial("3", "pass"), originWorkspace: "/w", fresh: true };
+    const sets = groupTrials(runs, new Map<string, Trial>([["1", trial("1", "pass")], ["2", t2], ["3", t3]]), 2);
+    expect(sets).toHaveLength(1);
+    expect(sets[0].n).toBe(2);
+    expect(sets[0].passes).toBe(2);
+    expect(sets[0].infra).toBe(1);
   });
   it("treats whitespace variants of the same task as one set", () => {
     const runs = [run("1"), run("2")];

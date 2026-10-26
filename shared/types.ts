@@ -134,6 +134,8 @@ export interface RunConfig {
   maxTurnsPerPhase: number;
   maxFixRounds: number;
   createdAt: string;
+  /** Set on a trial that runs in a fresh git worktree cut from another workspace, so trial sets still group by the original. */
+  origin?: { workspace: string; fresh: true };
   /** Name of the preset the run was started from, recorded for traceability. Absent on older runs. */
   preset?: string;
   /** Extra one-line instructions appended to every role's system prompt ("Guidance for this run"). */
@@ -499,6 +501,11 @@ export interface Trial {
   engine: RunConfig["engine"];
   model: string;
   harnessVersion?: string;
+  /** What ended a non-passing trial: the agent's work, or the infrastructure (API, server restart, timeouts). */
+  failureKind: "none" | "agent" | "infra";
+  /** The workspace the trial set is keyed by (the original one for fresh-worktree trials). */
+  originWorkspace?: string;
+  fresh?: boolean;
 }
 
 export interface TrialSet {
@@ -506,9 +513,11 @@ export interface TrialSet {
   task: string;
   workspace: string;
   trials: Trial[];
-  /** Finished trials only. */
+  /** Finished trials only, infra failures excluded. */
   n: number;
   passes: number;
+  /** Trials that ended on infrastructure (not counted in n). */
+  infra: number;
   /** Observed pass rate over finished trials. */
   passRate: number;
   /** Probability that ALL of k trials pass (consistency), from the observed rate. */

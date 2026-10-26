@@ -1,3 +1,5 @@
+import path from "node:path";
+import fs from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
@@ -6,6 +8,7 @@ import { defaultRunConfig } from "../../../shared/components.js";
 import { RunBus } from "./bus.js";
 import { Orchestrator, type OrchestratorControl } from "./orchestrator.js";
 import { listRunIds, loadConfig, readEvents, saveConfig, summarize, deleteRun as deleteRunDir } from "../store/runStore.js";
+import { REINS_HOME } from "../store/runStore.js";
 import { startReplay } from "./replay.js";
 import { execFileSync } from "node:child_process";
 import { resolveRunInput } from "../presets.js";
@@ -289,13 +292,28 @@ export class RunManager extends EventEmitter {
   }
 
   /** Launch k more runs with the same config, one after another (never in parallel on one workspace). */
-  async repeat(runId: string, k: number): Promise<string[]> {
+  async repeat(runId: string, k: number, fresh = false): Promise<string[]> {
     const base = loadConfig(runId);
     if (!base) throw new Error("No such run.");
     const ids: string[] = [];
     for (let i = 0; i < k; i++) {
+      // Fresh trials are isolated: a detached git worktree of the original at HEAD with an empty .reins/,
+      // so one trial cannot read the previous one's notes (the evals lesson). Grouped under the origin.
+      let workspace = base.workspace;
+      let origin: RunConfig["origin"];
+      if (fresh) {
+        const dir = path.join(REINS_HOME, "worktrees", `${runId}-${nanoid(6)}`);
+        fs.mkdirSync(path.dirname(dir), { recursive: true });
+        try {
+          execFileSync("git", ["worktree", "add", "--detach", dir, "HEAD"], { cwd: base.workspace, stdio: "pipe", timeout: 60_000 });
+          workspace = dir;
+          origin = { workspace: base.origin?.workspace ?? base.workspace, fresh: true };
+        } catch (e) {
+          throw new Error(`Could not create a fresh worktree from ${base.workspace}: ${(e as Error).message.slice(0, 200)}`);
+        }
+      }
       // Verbatim: a trial set needs identical configs, ablations (and a legacy run's offs) included.
-      const cfg = this.createRun({ ...base, id: undefined as any, createdAt: undefined as any, title: base.title }, { verbatim: true });
+      const cfg = this.createRun({ ...base, id: undefined as any, createdAt: undefined as any, title: base.title, workspace, origin }, { verbatim: true });
       ids.push(cfg.id);
       await new Promise<void>((resolve) => {
         const check = () => (this.active.has(cfg.id) ? setTimeout(check, 1000) : resolve());

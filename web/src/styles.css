@@ -25,6 +25,7 @@
   --line: #e4e1db;
   --line-strong: #8d877f;
   --accent: #b35609;
+  --accent-text: #8f4407;
   --on-accent: #ffffff;
   --accent-soft: #fbe9d7;
   --ok: #1f7a4a;
@@ -52,6 +53,7 @@
   --line: #2a2d34;
   --line-strong: #6b707b;
   --accent: #f0963c;
+  --accent-text: #f0963c;
   --on-accent: #15161a;
   --accent-soft: #3a2a1a;
   --ok: #4cc27f;
@@ -127,7 +129,7 @@ pre { white-space: pre-wrap; word-break: break-word; }
 .badge-warn { background: var(--warn-soft); color: var(--warn); }
 .badge-bad { background: var(--bad-soft); color: var(--bad); }
 .badge-neutral { background: var(--bg-sunk); color: var(--fg-muted); }
-.badge-accent { background: var(--accent-soft); color: var(--accent); }
+.badge-accent { background: var(--accent-soft); color: var(--accent-text); }
 
 .role-planner { color: var(--planner); }
 .role-builder { color: var(--builder); }

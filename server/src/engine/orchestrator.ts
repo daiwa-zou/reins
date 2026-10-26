@@ -232,6 +232,7 @@ export class Orchestrator {
     // ---- Build / Evaluate rounds ----
     let lastEval: Evaluation | null = null;
     for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
+      await this.runInitScript();
       const stop = await this.phase("build", round, async () => {
         const ctx = this.projectContext();
         const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : ctx), Contract: renderContract(this.contract) };
@@ -320,6 +321,14 @@ export class Orchestrator {
   /** A hard criterion that was not observed to pass (failed or unverified) fails the sprint. */
   private verdictFor(results: CriterionResult[]): "pass" | "fail" {
     return this.contract.some((c) => c.hard && results.find((r) => r.id === c.id)?.pass !== true) ? "fail" : "pass";
+  }
+
+  /** `.reins/init.sh` is a harness-known artifact: run before every build phase so the builder starts from a known-good state. */
+  private async runInitScript() {
+    const ws = this.config.workspace;
+    if (!readWorkspaceFile(ws, ".reins/init.sh")) return;
+    const r = await runShell("/bin/zsh .reins/init.sh 2>&1 | tail -40", ws, this.control.signal, 180_000, undefined, this.config.components.osSandbox ? { workspace: ws, allowNetwork: this.config.guardrail.allowNetwork } : undefined);
+    this.bus.emitEvent({ type: "note", level: r.code === 0 && !r.timedOut ? "info" : "warn", text: `init.sh ${r.timedOut ? "timed out" : r.code === 0 ? "succeeded" : `exited ${r.code}`}${r.out.trim() ? `:\n${r.out.trim().slice(0, 1500)}` : ""}` });
   }
 
   private shouldResetBuilder(): boolean {

@@ -292,6 +292,7 @@ const updateProgress = tool(
   },
   ["features", "note"],
   async (input, ctx) => (ctx.handlers.update_progress ? ctx.handlers.update_progress(input) : "Progress recorded."),
+  { examples: [{ features: [{ id: "F1", title: "GET /health route", status: "done", note: "verified with curl" }, { id: "F2", title: "Test coverage", status: "in_progress" }], note: "F1 done and verified; starting F2. Next session: run npm test first." }] }
 );
 
 const gitStatus = tool("git_status", "Show git status and the last 5 commits of the workspace.", {}, [], async (_i, ctx) => {
@@ -407,6 +408,7 @@ const reviewContract = tool(
   { accept: { type: "boolean" }, criteria: { type: "array", items: criterionSchema, description: "The final criteria (revised if not accepting as-is)" }, feedback: { type: "string" } },
   ["accept", "criteria", "feedback"],
   async (input, ctx) => ctx.handlers.review_contract?.(input) ?? "Reviewed.",
+  { examples: [{ accept: false, criteria: [{ id: "C1", text: "GET /health responds 200 with JSON containing status and uptime", verify: "curl -s localhost:3000/health | jq 'has(\"status\") and has(\"uptime\")'", hard: true }, { id: "C2", text: "Without a .git directory the endpoint still returns 200", verify: "copy the repo without .git to /tmp, start it, curl /health", hard: true }], feedback: "Added C2: the spec names the no-.git fallback and it is the realistic deployment failure." }] }
 );
 
 const reportEvaluation = tool(
@@ -431,6 +433,7 @@ const reportEvaluation = tool(
   },
   ["results", "summary"],
   async (input, ctx) => ctx.handlers.report_evaluation?.(input) ?? "Reported.",
+  { examples: [{ results: [{ id: "C1", pass: true, evidence: "curl localhost:3000/health -> 200 {\"status\":\"ok\",\"uptime\":3}" }, { id: "C2", pass: false, evidence: "Started from / with an absolute path: sha is \"unknown\" although .git exists; execSync inherits cwd." }], summary: "1 of 2 criteria pass; C2 fails because the sha lookup depends on the working directory." }] }
 );
 
 const finish = tool(
@@ -470,6 +473,21 @@ const proposeLesson = tool(
   },
   ["slug", "title", "date", "url", "source", "takeaway", "tags", "learnings", "implications"],
   async (input, ctx) => ctx.handlers.propose_lesson?.(input) ?? "Lesson proposed.",
+  {
+    examples: [
+      {
+        slug: "claude-think-tool",
+        title: "The \"think\" tool",
+        date: "2025-03-20",
+        url: "https://www.anthropic.com/engineering/claude-think-tool",
+        source: "post",
+        takeaway: "A no-op think tool gives the model a place to pause mid tool chain; on current models extended thinking usually covers it.",
+        tags: ["tools", "coding-agents"],
+        learnings: ["τ-bench airline pass^1 rose from 0.332 to 0.584 with think plus an optimised prompt."],
+        implications: [{ kind: "component", target: "thinkTool", claim: "Offer a no-op think tool as a per-run switch, off by default on current models.", quote: "the think tool is a simple addition that can improve performance", domains: [] }],
+      },
+    ],
+  },
 );
 
 export const ALL_TOOLS: Record<string, ToolDef> = Object.fromEntries(

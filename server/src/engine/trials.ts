@@ -19,7 +19,10 @@ export function trialFromEvents(config: RunConfig, events: RunEvent[]): Trial {
   // A run killed by a server restart says nothing about the agent; count it like a cancel, not a failure.
   const last = [...events].reverse().find((e) => e.type === "run.status") as Extract<RunEvent, { type: "run.status" }> | undefined;
   const status = s.status === "failed" && /^Interrupted/.test(last?.reason ?? "") ? "cancelled" : s.status;
-  return { runId: config.id, title: config.task, status, verdict, costUsd: s.costUsd, durationMs, fixRounds, createdAt: config.createdAt, engine: config.engine, model: config.roles.builder.model, harnessVersion };
+  const errors = events.filter((e): e is Extract<RunEvent, { type: "error" }> => e.type === "error").map((e) => e.message);
+  const infra = /Interrupted|Model call failed|engine failed|rate limit|overloaded|connection|timed out|Transient API error/i;
+  const failureKind: Trial["failureKind"] = status === "completed" && verdict === "pass" ? "none" : errors.some((m) => infra.test(m)) || /^Interrupted/.test(last?.reason ?? "") ? "infra" : "agent";
+  return { runId: config.id, title: config.task, status, verdict, costUsd: s.costUsd, durationMs, fixRounds, createdAt: config.createdAt, engine: config.engine, model: config.roles.builder.model, harnessVersion, failureKind, originWorkspace: config.origin?.workspace, fresh: config.origin?.fresh };
 }
 
 export function allTrialSets(k = 3): TrialSet[] {

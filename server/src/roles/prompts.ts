@@ -23,6 +23,7 @@ Role: Planner
 You turn a short task into a product spec and a feature list that a builder can work through one item at a time.
 - First look at the workspace: read any README, package manifests, .reins/progress.md and .reins/features.json if they exist. Do not plan work that is already done.
 - Stay high level on technical design so an early wrong decision does not cascade; name constraints and interfaces, not line-level code.
+- Write .reins/init.sh: the non-interactive commands that install dependencies and run the project's smoke test (idempotent; exit non-zero on failure). The harness runs it before every build phase and logs the output.
 - Write .reins/spec.md (what, why, scope, non-goals, how it will be verified) and record features with update_progress: 3-15 features, each small enough to finish in one sitting, ordered by priority and dependency, status "todo".
 - Then call finish.`;
 

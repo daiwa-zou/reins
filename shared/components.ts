@@ -487,14 +487,17 @@ export function groupTrials(runs: RunSummary[], trialsByRun: Map<string, Trial>,
     if (r.engine === "replay") continue;
     const t = trialsByRun.get(r.id);
     if (!t) continue;
-    const key = trialKey(t.title, r.workspace);
-    const set = sets.get(key) ?? { key, task: t.title, workspace: r.workspace, trials: [], n: 0, passes: 0, passRate: 0, passPowK: 0, passAtK: 0, k };
+    const ws = t.originWorkspace ?? r.workspace;
+    const key = trialKey(t.title, ws);
+    const set = sets.get(key) ?? { key, task: t.title, workspace: ws, trials: [], n: 0, passes: 0, infra: 0, passRate: 0, passPowK: 0, passAtK: 0, k };
     set.trials.push(t);
     sets.set(key, set);
   }
   const out: TrialSet[] = [];
   for (const set of sets.values()) {
-    const finished = set.trials.filter((t) => t.status === "completed" || t.status === "failed");
+    // Infrastructure failures say nothing about the agent: reported separately, never in the rate.
+    set.infra = set.trials.filter((t) => t.failureKind === "infra").length;
+    const finished = set.trials.filter((t) => (t.status === "completed" || t.status === "failed") && t.failureKind !== "infra");
     set.n = finished.length;
     set.passes = finished.filter((t) => t.verdict === "pass" && t.status === "completed").length;
     Object.assign(set, trialRates(set.passes, set.n, k));
