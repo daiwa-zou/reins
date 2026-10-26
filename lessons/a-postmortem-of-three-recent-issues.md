@@ -31,12 +31,23 @@ foundations: effectiveConfig
 - Planned changes: more sensitive evaluations that distinguish working from broken implementations, continuous quality evaluations on real production systems, privacy-preserving debugging infrastructure and bespoke tooling to shorten remediation, and feedback channels (`/bug` in Claude Code, thumbs-down in Claude apps, feedback@anthropic.com).
 
 ## Harness implications
-- Continuous production quality monitoring, not just pre-release evals: sample live traffic through cheap canary checks (unexpected-character detectors, syntax validity of code outputs, language-mismatch detectors) and alert on deviation.
-- Segment every quality signal by serving platform, hardware, model version, context-window class, and routing target; aggregate metrics hid a 16%-of-requests problem because it was confined to one slice and one hour.
-- Record routing and serving metadata (which server pool, which configuration, which compiler or runtime flags) in each request trace so a report can be joined to the exact deployment that produced it.
-- Correlate user-report volume with the deployment timeline automatically: a spike in negative feedback within hours of a change should surface that change as a suspect.
-- Sticky failures mean per-user impact is far worse than per-request rates; show both request-level and user-level affected fractions.
-- Make evals sensitive enough to see single-token errors; because the model recovers from isolated mistakes, outcome-only graders miss corruption. Add transcript-level checks (token-level anomalies, non-target-language characters, syntax errors) alongside outcome checks.
-- Removing a workaround is a risky change: track known workarounds with the bug they mask and require a reproducer that fails without them before removal.
-- Build privacy-preserving debug tooling in advance: opt-in session capture, redacted trace export with `/bug`, and a way to attach the config and trace to a report.
-- Any infra change must be validated across every platform and configuration before rollout; a cross-platform equivalence suite belongs in CI.
+- [gap] Monitor live output continuously with cheap canary checks such as unexpected-character, syntax and language-mismatch detectors.
+  > detection tests for unexpected character outputs were added to the deployment process
+- [foundation:reliability] Segment every quality signal by platform, model, version and configuration, because an aggregate hides a problem confined to one slice.
+  > the worst hour (Aug 31) affected 16% of Sonnet 4 requests
+- [foundation:effectiveConfig] Record serving and configuration metadata in every trace so a report can be joined to the exact deployment that produced it.
+  > there was no clear way to tie online reports to specific recent changes
+- [gap] Correlate user-report volume with the deployment timeline so a recent change surfaces as a suspect.
+  > Reports spiked Aug 29 but were not immediately linked to the load-balancing change
+- [gap] Show both request-level and user-level affected fractions, since sticky failures hit some users far harder.
+  > some users were far more affected than others
+- [component:narration] Narrate every action so a person actually reads the transcript, because outcome-only checks miss errors the model recovers from.
+  > Claude often recovers from isolated mistakes, which masked the problem
+- [gap] Add automated transcript-level checks for token anomalies, wrong-language characters and syntax errors alongside outcome checks.
+  > relied too heavily on noisy evaluations.
+- [gap] Track each workaround with the bug it masks and require a failing reproducer before removing it.
+  > That workaround had been masking a deeper bug in approximate top-k
+- [foundation:eventLog] Build privacy-preserving debug tooling in advance, with redacted trace export and the config attached to each report.
+  > privacy-preserving debugging infrastructure and bespoke tooling to shorten remediation
+- [gap] Validate every infrastructure change across all platforms and configurations with an equivalence suite in CI.
+  > any infrastructure change must be validated across all platforms and configurations

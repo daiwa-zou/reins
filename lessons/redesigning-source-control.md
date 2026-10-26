@@ -31,11 +31,23 @@ foundations: reviewIntent
 - Prior art credited: Google's Piper and Meta's Sapling (its server Mononoke and the Bonsai data model pioneered many techniques). Scion is not a general git replacement and will not be released; Anthropic hopes git adopts server-side RPCs, better-composing sparse and shallow features, and a different negotiation protocol, working with GitHub, GitLab, and the community.
 
 ## Harness implications
-- Assume agents are always-online clients: a harness can fetch code, history, diffs, and blame via an API or service rather than materializing full checkouts; make working copies optional and sparse per task.
-- Make commits cheap and server-side or lock-free from the agent's perspective: cost should scale with the change, not the repo, and the harness should avoid creating long-lived refs and branches as global state.
-- Build automated bisect and revert pipelines on top of the source-control API; the harness should be able to trigger and consume them as tools.
-- Prefer post-merge and pre-deploy testing plus fast agent conflict resolution over a globally serialized merge queue at high merge rates; the UI should show post-merge health, not just pre-merge gates.
-- Give human reviewers intent-level review aids: semantic approval rules that separate trivial (comment-only) from consequential changes, and summaries of what a change is for.
-- Encode architectural constraints the agent must not violate (e.g. "ask the service, do not scan the log") as explicit, checkable rules, since the human's main job becomes saying "no" to constraint violations. Guard against over-engineering from adversarial review: red-team findings should be weighed against trust boundaries, and the UI should let a human dismiss a finding with a recorded reason.
-- Use per-component monitoring agents ("superfans") with telemetry access as a harness feature alongside traditional alerts, and apply per-directory permissions and access control at the repo layer so agent blast radius is bounded by path.
-- Use content-addressed, immutable, cacheable data everywhere the harness stores artifacts (logs, blobs, snapshots) so caches need no coordination and tiers isolate failures.
+- [gap] Treat agents as always-online clients that fetch code, history and blame through a service, making full working copies optional.
+  > clients are always online and fetch on demand from a reachable server
+- [component:gitCommits] Keep commits cheap and avoid creating long-lived refs and branches as global state.
+  > refs are discouraged except main and release branches (global state is a scaling problem)
+- [gap] Offer automated bisect and revert pipelines the agent can trigger as tools.
+  > automated bisect and revert pipelines depend on this
+- [foundation:reliability] Prefer post-merge and pre-deploy testing over a serialized merge queue, and show post-merge health.
+  > invested in post-merge and pre-deploy testing
+- [foundation:reviewIntent] Give reviewers intent-level aids, such as summaries of what a change is for and rules separating trivial from consequential changes.
+  > Reviewers now focus on the intent of a change, not every line
+- [stage:plan] Write the architectural constraints the builder must not violate into the spec as explicit, checkable rules.
+  > often their job was to say "no" to agent-proposed patterns that violated core constraints
+- [stage:evaluate] Weigh each finding against the trust boundary, and do not demand extra hardening or validation where the input is already trusted.
+  > adversarial review can over-engineer
+- [gap] Run per-component monitoring agents with telemetry access alongside traditional alerts.
+  > one Claude per component
+- [component:osSandbox] Bound an agent's blast radius by path with per-directory permissions.
+  > repo-level access control and per-directory permissions
+- [foundation:eventLog] Store run artifacts as content-addressed, immutable data so caches need no coordination.
+  > all data is content-addressed and immutable so any server can cache without coordination
