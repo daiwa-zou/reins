@@ -1,4 +1,4 @@
-import { createSdkMcpServer, query, tool, type CanUseTool, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool, type CanUseTool, type HookCallback, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { RoleId, RunConfig, Usage } from "../../../shared/types.js";
 import { CONTEXT_LIMIT_TOKENS } from "../../../shared/components.js";
@@ -9,6 +9,7 @@ import { addUsage, costUsd, emptyUsage } from "./pricing.js";
 import { ALL_TOOLS, scrubbedEnv, truncate } from "../tools/registry.js";
 import { classifyBash, confinePath, mentionsOutsidePaths } from "../guardrails/policy.js";
 import { sniffInjection } from "../guardrails/classifier.js";
+import { TURNS_REMAINING_NUDGE_AT, forcedCallNote, forcedTerminalMessage, turnsRemainingNote, turnsRemainingNudge } from "./turnBudget.js";
 import path from "node:path";
 
 /**
@@ -32,6 +33,10 @@ export class ClaudeCodeLoop {
   /** Running totals of what this session has put into its context (for the composition estimate). */
   private seen = { toolResultChars: 0, historyChars: 0, thinkingChars: 0 };
   private denials = { consecutive: 0, total: 0 };
+  /** The turn a turns-remaining nudge was last delivered for (through the PostToolBatch hook). */
+  private nudgedTurn = 0;
+  /** How often the Stop hook has sent the model back to call its terminal tool (at most twice, as in the direct engine). */
+  private stopNudges = 0;
 
   /** Deny-and-continue with escalation, as in the direct engine: 3 in a row or 20 total pause for a human. */
   private async noteDenial(): Promise<void> {
@@ -58,13 +63,15 @@ export class ClaudeCodeLoop {
     return this.sessionId;
   }
 
-  private mcpServer() {
+  /** The Reins tools as an in-process MCP server; `only` narrows it to the named tools (the forced call offers just the terminal tool). */
+  private mcpServer(only?: string[]) {
     const role = this.opts.role;
     const defs = [];
     const structured = ["propose_contract", "review_contract", "report_evaluation", "finish", "update_progress", "think", "list_lessons", "read_lesson", "read_skill", "delegate_scout", "propose_lesson"];
     for (const name of structured) {
       // Terminal tools arrive in opts.terminal, not opts.tools; both must be exposed.
       if (!this.opts.tools.includes(name) && !this.opts.terminal.includes(name)) continue;
+      if (only && !only.includes(name)) continue;
       const def = ALL_TOOLS[name];
       if (!def) continue;
       if (name === "think" && !this.config.components.thinkTool) continue;
@@ -190,6 +197,29 @@ export class ClaudeCodeLoop {
     return { behavior: "allow", updatedInput: input };
   };
 
+  /**
+   * Time awareness for the turn cap, as in the direct engine: once
+   * TURNS_REMAINING_NUDGE_AT turns or fewer remain, the context handed to the
+   * model before its next request says how many are left and that it must call
+   * its terminal tool now with what it has. PostToolBatch fires once per batch
+   * of tool results, right before the next model request.
+   */
+  private turnBudgetHook: HookCallback = async () => {
+    if (!this.opts.terminal.length || this.terminal) return {};
+    const remaining = this.opts.maxTurns - this.turn;
+    if (remaining > TURNS_REMAINING_NUDGE_AT || remaining < 1 || this.nudgedTurn === this.turn) return {};
+    this.nudgedTurn = this.turn;
+    this.bus.emitEvent({ type: "note", level: "warn", text: turnsRemainingNote(this.opts.role, remaining, this.opts.terminal) });
+    return { hookSpecificOutput: { hookEventName: "PostToolBatch", additionalContext: turnsRemainingNudge(remaining, this.opts.terminal) } };
+  };
+
+  /** The model ended its turn with plain text: send it back to its terminal tool, twice at most (the direct engine's "Please finish" nudge). */
+  private stopHook: HookCallback = async () => {
+    if (!this.opts.terminal.length || this.terminal || this.stopNudges >= 2 || this.turn >= this.opts.maxTurns) return {};
+    this.stopNudges++;
+    return { hookSpecificOutput: { hookEventName: "Stop", additionalContext: `Please finish by calling ${this.opts.terminal.join(" or ")}. If you are blocked, call it and say why.` } };
+  };
+
   async run(firstUserMessage?: string): Promise<LoopResult> {
     const role = this.opts.role;
     const s = this.config.roles[role as "planner"] ?? this.config.roles.planner;
@@ -230,6 +260,7 @@ export class ClaudeCodeLoop {
       permissionMode: "default",
       canUseTool: this.canUseTool,
       mcpServers: { reins: this.mcpServer() },
+      hooks: this.opts.terminal.length ? { PostToolBatch: [{ hooks: [this.turnBudgetHook] }], Stop: [{ hooks: [this.stopHook] }] } : undefined,
       // Only Reins' own server: the user's MCP servers, connectors and hooks stay out of the harness.
       settingSources: [],
       strictMcpConfig: true,
@@ -279,8 +310,50 @@ export class ClaudeCodeLoop {
       this.closeTurn();
       this.control.signal.removeEventListener("abort", onAbort);
     }
+    let forced = false;
+    if (!this.terminal && (reason === "max_turns" || reason === "end_turn") && this.opts.terminal.length && this.sessionId && !this.control.signal.aborted) {
+      finalText = (await this.forcedTerminal(options)) ?? finalText;
+      forced = Boolean(this.terminal);
+    }
     if (this.terminal) reason = "terminal";
-    return { reason, terminalTool: this.terminal?.name, terminalInput: this.terminal?.input, messages: [], usage: this.usage, costUsd: this.cost, turns: this.turn, finalText };
+    return { reason, terminalTool: this.terminal?.name, terminalInput: this.terminal?.input, ...(forced ? { forced } : {}), messages: [], usage: this.usage, costUsd: this.cost, turns: this.turn, finalText };
+  }
+
+  /**
+   * The phase ended without its structured tool. One more single-turn query on
+   * the same session, with every built-in tool off and only the terminal tool
+   * on the Reins server, so the phase still hands something on. Returns the
+   * text of that turn, if any; the caller checks `this.terminal`.
+   */
+  private async forcedTerminal(base: Options): Promise<string | undefined> {
+    const role = this.opts.role;
+    this.bus.emitEvent({ type: "note", level: "warn", text: forcedCallNote(role, this.opts.maxTurns, this.opts.terminal) });
+    const options: Options = {
+      ...base,
+      resume: this.sessionId,
+      maxTurns: 1,
+      tools: [],
+      disallowedTools: [],
+      hooks: undefined,
+      mcpServers: { reins: this.mcpServer(this.opts.terminal) },
+      abortController: new AbortController(),
+    };
+    const onAbort = () => options.abortController?.abort();
+    this.control.signal.addEventListener("abort", onAbort, { once: true });
+    let text: string | undefined;
+    try {
+      for await (const msg of query({ prompt: forcedTerminalMessage(this.opts.maxTurns, this.opts.terminal), options }) as AsyncIterable<SDKMessage>) {
+        if (this.control.signal.aborted) break;
+        this.handle(msg, (t) => (text = t));
+        if (msg.type === "result") break;
+      }
+    } catch (err) {
+      if (!this.control.signal.aborted) this.bus.emitEvent({ type: "note", level: "warn", text: `The forced ${this.opts.terminal.join(" or ")} call failed (${(err as Error).message.slice(0, 200)}); the phase ends without a report.` });
+    } finally {
+      this.closeTurn();
+      this.control.signal.removeEventListener("abort", onAbort);
+    }
+    return text;
   }
 
   /** Emit turn.finished and the context snapshot for the API response being streamed, priced from its usage. */

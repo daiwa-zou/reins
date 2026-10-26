@@ -4,6 +4,7 @@ import type {
   ContextSnapshot,
   ContractCriterion,
   CriterionResult,
+  EvaluationOrigin,
   FeatureItem,
   GuardrailDecision,
   Phase,
@@ -31,7 +32,7 @@ export type FeedItem =
   | { kind: "turn"; seq: number; ts: string; role: RoleId; turn: number; thinking?: string; text?: string; calls: ToolCall[]; usage?: Usage; costUsd?: number; stopReason?: string; finishedTs?: string }
   | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
-  | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string }
+  | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }
   | { kind: "context"; seq: number; ts: string; what: "compacted" | "cleared" | "reset"; role: RoleId; detail: string }
   | { kind: "steer"; seq: number; ts: string; text: string; delivered: boolean }
   | { kind: "commit"; seq: number; ts: string; sha: string; message: string; files: number }
@@ -59,7 +60,7 @@ export interface RunModel {
   calls: ToolCall[];
   contract: ContractCriterion[];
   contractHistory: { by: RoleId; criteria: ContractCriterion[]; rationale: string }[];
-  evaluations: { round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string }[];
+  evaluations: { round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }[];
   features: FeatureItem[];
   snapshots: (ContextSnapshot & { seq: number })[];
   latestSnapshot: Partial<Record<RoleId, ContextSnapshot>>;
@@ -221,8 +222,8 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         currentTurn = null;
         break;
       case "evaluation.result":
-        m.evaluations.push({ round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary });
-        m.feed.push({ kind: "evaluation", seq: ev.seq, ts: ev.ts, round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary });
+        m.evaluations.push({ round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
+        m.feed.push({ kind: "evaluation", seq: ev.seq, ts: ev.ts, round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
         currentTurn = null;
         break;
       case "progress.updated":

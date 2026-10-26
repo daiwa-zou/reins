@@ -143,7 +143,19 @@ function EndCard({ model }: { model: RunModel }) {
   const title = status === "completed" ? "Run complete" : status === "cancelled" ? "Run stopped" : status === "failed" ? "Run failed" : `Run ${status}`;
   const interrupted = /interrupted|restart/i.test(reason);
   const budget = /budget/i.test(reason);
-  const next = status === "completed" ? "Review the changes and the evaluator's evidence on the Contract tab. Use Run again to see whether it passes consistently." : interrupted ? "Use Run again to retry; progress notes in .reins/ carry over to the next session." : budget ? "Raise the budget in New run (Run again keeps every other setting)." : status === "cancelled" ? "Files the agent already changed are still in the workspace; check Changes." : "Read the last turns above and Details › Guardrails; then use Run again, possibly with a component turned off in Harness.";
+  const turns = /ran out of turns/i.test(reason);
+  const next =
+    status === "completed"
+      ? "Review the changes and the evaluator's evidence on the Contract tab. Use Run again to see whether it passes consistently."
+      : interrupted
+        ? "Use Run again to retry; progress notes in .reins/ carry over to the next session."
+        : budget
+          ? "Raise the budget in New run (Run again keeps every other setting)."
+          : turns
+            ? "Raise Max turns per phase in New run (Run again keeps every other setting), or agree a contract with fewer criteria; the Contract tab shows which criteria went unverified."
+            : status === "cancelled"
+              ? "Files the agent already changed are still in the workspace; check Changes."
+              : "Read the last turns above and Details › Guardrails; then use Run again, possibly with a component turned off in Harness.";
   const dur = runElapsed(model, 0, false);
   return (
     <div className="card p-4 border-l-4 fade-in" style={{ borderLeftColor: tone }} role="status">
@@ -221,8 +233,14 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
             <Badge tone={item.verdict === "pass" ? "ok" : "bad"}>
               round {item.round}: {item.verdict}
             </Badge>
+            {item.origin && item.origin !== "reported" && (
+              <Badge tone="warn" title={item.origin === "forced" ? "The evaluator ran out of turns and reported in a final forced call." : "The evaluator never reported; the harness wrote this report with every criterion unverified."}>
+                {item.origin} report
+              </Badge>
+            )}
             <span className="muted">
               {item.results.filter((r) => r.pass).length}/{item.results.length} criteria pass
+              {item.results.some((r) => r.unverified) ? `, ${item.results.filter((r) => r.unverified).length} unverified` : ""}
             </span>
           </div>
           <div className="leading-relaxed">{item.summary}</div>
@@ -232,7 +250,9 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
                 .filter((r) => !r.pass)
                 .map((r) => (
                   <li key={r.id} className="text-small flex gap-2">
-                    <span className="text-[var(--bad)] font-bold shrink-0">✕ {r.id}</span>
+                    <span className={`${r.unverified ? "text-[var(--warn)]" : "text-[var(--bad)]"} font-bold shrink-0`}>
+                      {r.unverified ? "?" : "✕"} {r.id}
+                    </span>
                     <span className="muted">{r.evidence}</span>
                   </li>
                 ))}

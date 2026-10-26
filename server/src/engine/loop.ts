@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { REINS_HOME } from "../store/runStore.js";
+import { TURNS_REMAINING_NUDGE_AT, forcedCallNote, forcedTerminalMessage, turnsRemainingNote, turnsRemainingNudge } from "./turnBudget.js";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
 
@@ -43,6 +44,8 @@ export interface LoopResult {
   reason: "terminal" | "end_turn" | "max_turns" | "aborted" | "budget" | "refusal" | "error";
   terminalTool?: string;
   terminalInput?: any;
+  /** The terminal tool was only called in the forced final call at the turn cap, so the report covers what the role had by then. */
+  forced?: boolean;
   messages: Msg[];
   usage: Usage;
   costUsd: number;
@@ -68,6 +71,8 @@ export class AgentLoop {
   private examplesFailed = false;
   private taskBudgetFailed = false;
   private denials = { consecutive: 0, total: 0 };
+  /** The turn a turns-remaining nudge was last injected for, so a retried call does not get it twice. */
+  private nudgedTurn = 0;
 
   constructor(
     private client: Anthropic,
@@ -168,17 +173,39 @@ export class AgentLoop {
   private deliverSteer() {
     const notes = this.control.drainSteer();
     if (!notes.length) return;
-    const text = notes.map((n) => `Operator note: ${n}`).join("\n");
+    this.injectOperatorMessage(notes.map((n) => `Operator note: ${n}`).join("\n"));
+    for (const n of notes) this.bus.emitEvent({ type: "steer.delivered", text: n, role: this.opts.role });
+  }
+
+  /** Put an operator-authority message in front of the next model call. */
+  private injectOperatorMessage(text: string) {
+    const last = this.messages[this.messages.length - 1] as any;
     // Mid-conversation system message keeps the cached prefix and carries
     // operator authority; fall back to a user block on models without it.
-    if (!this.systemRoleFailed && this.messages.length && this.messages[this.messages.length - 1].role === "user") {
+    if (!this.systemRoleFailed && last && last.role === "system" && typeof last.content === "string") {
+      last.content += `\n${text}`;
+    } else if (!this.systemRoleFailed && last && last.role === "user") {
       this.messages.push({ role: "system", content: text } as any);
+    } else if (last && last.role === "user" && Array.isArray(last.content)) {
+      (last.content as any[]).push({ type: "text", text: `<operator_note>${text}</operator_note>` });
     } else {
-      const last = this.messages[this.messages.length - 1];
-      if (last && last.role === "user" && Array.isArray(last.content)) (last.content as any[]).push({ type: "text", text: `<operator_note>${text}</operator_note>` });
-      else this.messages.push({ role: "user", content: `<operator_note>${text}</operator_note>` });
+      this.messages.push({ role: "user", content: `<operator_note>${text}</operator_note>` });
     }
-    for (const n of notes) this.bus.emitEvent({ type: "steer.delivered", text: n, role: this.opts.role });
+  }
+
+  /**
+   * Time awareness for the turn cap: once TURNS_REMAINING_NUDGE_AT turns or
+   * fewer remain in a phase that must end with a structured tool, every model
+   * call is preceded by an operator message saying how many are left and
+   * that it must report now with what it has.
+   */
+  private deliverTurnBudget() {
+    if (!this.opts.terminal.length) return;
+    const remaining = this.opts.maxTurns - this.turn + 1;
+    if (remaining > TURNS_REMAINING_NUDGE_AT || remaining < 1 || this.nudgedTurn === this.turn) return;
+    this.nudgedTurn = this.turn;
+    this.injectOperatorMessage(turnsRemainingNudge(remaining, this.opts.terminal));
+    this.bus.emitEvent({ type: "note", level: "warn", text: turnsRemainingNote(this.opts.role, remaining, this.opts.terminal) });
   }
 
   async run(firstUserMessage?: string): Promise<LoopResult> {
@@ -193,10 +220,11 @@ export class AgentLoop {
         this.bus.emitEvent({ type: "error", message: `Budget of $${this.config.budgetUsd} exhausted`, recoverable: false });
         return this.result("budget", finalText);
       }
-      if (this.turn >= this.opts.maxTurns) return this.result("max_turns", finalText);
+      if (this.turn >= this.opts.maxTurns) return this.forcedTerminal("max_turns", finalText);
 
       this.deliverSteer();
       this.turn++;
+      this.deliverTurnBudget();
       if (this.turn === 1) {
         // Joinable trace of what the request looked like: a prompt edit or a dropped beta shows up next to a quality change.
         const cm = this.contextManagement();
@@ -278,6 +306,7 @@ export class AgentLoop {
             this.messages.push({ role: "user", content: `Please finish by calling ${this.opts.terminal.join(" or ")}. If you are blocked, call it and say why.` });
             continue;
           }
+          return this.forcedTerminal("end_turn", finalText);
         }
         return this.result("end_turn", finalText);
       }
@@ -312,20 +341,73 @@ export class AgentLoop {
     }
   }
 
-  private result(reason: LoopResult["reason"], finalText: string, terminal?: { name: string; input: any } | null): LoopResult {
-    return { reason, terminalTool: terminal?.name, terminalInput: terminal?.input, messages: this.messages, usage: this.usage, costUsd: this.cost, turns: this.turn, finalText };
+  private result(reason: LoopResult["reason"], finalText: string, terminal?: { name: string; input: any } | null, forced = false): LoopResult {
+    return { reason, terminalTool: terminal?.name, terminalInput: terminal?.input, ...(forced ? { forced } : {}), messages: this.messages, usage: this.usage, costUsd: this.cost, turns: this.turn, finalText };
   }
 
-  private async callModel(): Promise<Anthropic.Beta.BetaMessage> {
+  /**
+   * The phase ended (turn cap, or plain text twice after being asked to finish)
+   * without its structured tool. One more call, offering only that tool and
+   * requiring a tool call, so the phase still hands something on. If even that
+   * does not report, the caller gets `reason` as before and synthesises.
+   */
+  private async forcedTerminal(reason: "max_turns" | "end_turn", finalText: string): Promise<LoopResult> {
+    if (!this.opts.terminal.length || this.control.signal.aborted) return this.result(reason, finalText);
+    const role = this.opts.role;
+    this.bus.emitEvent({ type: "note", level: "warn", text: forcedCallNote(role, this.opts.maxTurns, this.opts.terminal) });
+    this.messages.push({ role: "user", content: forcedTerminalMessage(this.opts.maxTurns, this.opts.terminal) });
+    this.turn++;
+    this.bus.emitEvent({ type: "turn.started", role, turn: this.turn });
+    let message: Anthropic.Beta.BetaMessage;
+    try {
+      message = await this.callModel(true);
+    } catch (err) {
+      this.bus.emitEvent({ type: "note", level: "warn", text: `The forced ${this.opts.terminal.join(" or ")} call failed (${(err as Error).message.slice(0, 200)}); the phase ends without a report.` });
+      return this.result(reason, finalText);
+    }
+    const u: Usage = { input: message.usage.input_tokens, output: message.usage.output_tokens, cacheRead: message.usage.cache_read_input_tokens ?? 0, cacheWrite: message.usage.cache_creation_input_tokens ?? 0 };
+    this.usage = addUsage(this.usage, u);
+    const turnCost = costUsd(message.model, u);
+    this.cost += turnCost;
+    this.bus.emitEvent({ type: "turn.finished", role, turn: this.turn, usage: u, costUsd: turnCost, stopReason: message.stop_reason ?? "", model: this.settings().model });
+    this.bus.emitEvent({ type: "context.snapshot", snapshot: this.snapshot(u.input + u.cacheRead + u.cacheWrite) });
+    for (const b of message.content) {
+      if (b.type === "text" && b.text.trim()) {
+        finalText = b.text;
+        this.bus.emitEvent({ type: "text", role, text: b.text });
+      }
+    }
+    this.messages.push({ role: "assistant", content: message.content as any });
+    const toolUses = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
+    if (!toolUses.length) return this.result(reason, finalText);
+    let terminal: { name: string; input: any } | null = null;
+    const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+    for (const t of toolUses) {
+      if (!this.opts.terminal.includes(t.name)) {
+        results.push({ type: "tool_result", tool_use_id: t.id, content: `Only ${this.opts.terminal.join(" or ")} is available now.`, is_error: true });
+        continue;
+      }
+      const r = await this.execute(t);
+      results.push(r.block);
+      if (r.ok && !terminal) terminal = { name: t.name, input: t.input };
+    }
+    this.messages.push({ role: "user", content: results });
+    return terminal ? this.result("terminal", finalText, terminal, true) : this.result(reason, finalText);
+  }
+
+  private async callModel(forced = false): Promise<Anthropic.Beta.BetaMessage> {
     const s = this.settings();
+    const tools = this.toolSchemas();
     const params: Anthropic.Beta.MessageCreateParamsStreaming = {
       model: s.model,
       max_tokens: 32_000,
       stream: true,
       system: [{ type: "text", text: this.opts.system, cache_control: { type: "ephemeral" } }],
       messages: this.messages,
-      tools: this.toolSchemas(),
-      thinking: { type: "adaptive", display: "summarized" } as any,
+      // The forced call offers only the terminal tool and requires a tool call; a
+      // forced tool_choice is not allowed with thinking, so that call thinks silently.
+      tools: forced ? tools.filter((t) => this.opts.terminal.includes((t as any).name)) : tools,
+      ...(forced ? { tool_choice: { type: "any" } } : { thinking: { type: "adaptive", display: "summarized" } as any }),
       output_config: {
         effort: s.effort,
         ...(this.config.components.taskBudget && !this.taskBudgetFailed ? { task_budget: { type: "tokens", total: this.taskBudgetTokens() } } : {}),

@@ -411,13 +411,18 @@ const reviewContract = tool(
 
 const reportEvaluation = tool(
   "report_evaluation",
-  "Report the result of checking every contract criterion. Provide concrete evidence (command output, observed behaviour) per criterion. This ends your turn.",
+  "Report the result of checking every contract criterion. Provide concrete evidence (command output, observed behaviour) per criterion. A criterion you did not get to check is reported with pass false and unverified true, not as a failure. This ends your turn.",
   {
     results: {
       type: "array",
       items: {
         type: "object",
-        properties: { id: { type: "string" }, pass: { type: "boolean" }, evidence: { type: "string" } },
+        properties: {
+          id: { type: "string" },
+          pass: { type: "boolean" },
+          evidence: { type: "string" },
+          unverified: { type: "boolean", description: "True when you could not check this criterion (out of turns, blocked); pass must then be false." },
+        },
         required: ["id", "pass", "evidence"],
         additionalProperties: false,
       },

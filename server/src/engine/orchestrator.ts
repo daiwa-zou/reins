@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
-import type { ContractCriterion, CriterionResult, FeatureItem, Phase, RunConfig, Usage } from "../../../shared/types.js";
+import type { ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, Phase, RunConfig, Usage } from "../../../shared/types.js";
 import { RunBus } from "./bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
@@ -230,12 +230,12 @@ export class Orchestrator {
     }
 
     // ---- Build / Evaluate rounds ----
-    let lastEval: { results: CriterionResult[]; verdict: "pass" | "fail"; summary: string } | null = null;
+    let lastEval: Evaluation | null = null;
     for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
       const stop = await this.phase("build", round, async () => {
         const ctx = this.projectContext();
         const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : ctx), Contract: renderContract(this.contract) };
-        if (lastEval) extra["Evaluation of the previous round"] = `${lastEval.summary}\n\n${lastEval.results.filter((r) => !r.pass).map((r) => `- ${r.id} FAILED: ${r.evidence}`).join("\n")}\n\nFix the failures, re-run the verification steps, update progress, then call finish.`;
+        if (lastEval) extra["Evaluation of the previous round"] = renderEvaluationForBuilder(lastEval);
         else extra.Instructions = "Follow the session preamble, then implement the features. Call finish only when every hard criterion's verification step has been run and passed.";
         if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";
         const loop = this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}, this.shouldResetBuilder() ? undefined : this.builderHistory);
@@ -251,33 +251,57 @@ export class Orchestrator {
 
       const rerunAll = !!this.config.effort && EFFORT_TABLE[this.config.effort].rerunEveryCriterion;
       const result = await this.phase("evaluate", round, async () => {
-        let ev: typeof lastEval = null;
+        let reported: { results: CriterionResult[]; summary: string } | null = null;
         const r = await this.loop("evaluator", "evaluator", [...READ_TOOLS, "bash"], ["report_evaluation"], {
           report_evaluation: (input: any) => {
-            const results: CriterionResult[] = Array.isArray(input.results) ? input.results : [];
+            // An unverified criterion is never a pass, whatever the model put in `pass`.
+            const results: CriterionResult[] = (Array.isArray(input.results) ? input.results : []).map((x: any) => ({ ...x, pass: x.unverified ? false : x.pass === true }));
             if (rerunAll) {
               // Max effort: an evaluation that leaves out a criterion is refused, so the evaluator reports again.
               const missing = this.contract.filter((c) => !results.some((x) => x.id === c.id)).map((c) => c.id);
               if (missing.length) throw new Error(`Refused at max effort: the report omits criteria ${missing.join(", ")}. Run their verification steps afresh and call report_evaluation again with every criterion.`);
             }
-            const hardFail = this.contract.some((c) => c.hard && results.find((r) => r.id === c.id)?.pass !== true);
-            ev = { results, verdict: hardFail ? "fail" : "pass", summary: input.summary };
-            writeWorkspaceFile(ws, ".reins/evaluation.md", `# Evaluation round ${round}\n\n${input.summary}\n\n${results.map((x) => `- ${x.id}: ${x.pass ? "PASS" : "FAIL"} — ${x.evidence}`).join("\n")}\n`);
-            this.bus.emitEvent({ type: "evaluation.result", round, results, verdict: ev.verdict, summary: input.summary });
-            return `Recorded: ${ev.verdict}.`;
+            reported = { results, summary: String(input.summary ?? "") };
+            return `Recorded: ${this.verdictFor(results)}.`;
           },
-        }).run(firstMessage("evaluate", this.config, { ...this.projectContext(), Contract: renderContract(this.contract), Instructions: rerunAll ? MAX_EFFORT_EVALUATE : "Verify every criterion yourself, then call report_evaluation." }));
-        const verdict = ev ? (ev as any).verdict : "fail";
-        return { result: r, summary: ev ? `${verdict.toUpperCase()}: ${(ev as any).summary}` : "Evaluator did not report.", value: { stop: this.checkStop(r), ev } };
+        }).run(
+          firstMessage("evaluate", this.config, {
+            ...this.projectContext(),
+            Contract: renderContract(this.contract),
+            Instructions: `${rerunAll ? MAX_EFFORT_EVALUATE : "Verify every criterion yourself, then call report_evaluation."} You have at most ${this.config.maxTurnsPerPhase} turns in this phase: when an operator message says the budget is nearly spent, report at once and mark whatever is unchecked as unverified.`,
+          }),
+        );
+        if (this.checkStop(r)) return { result: r, summary: "Stopped.", value: { stop: true, ev: null as Evaluation | null } };
+        let ev: Evaluation;
+        if (reported) {
+          const { results, summary } = reported as { results: CriterionResult[]; summary: string };
+          ev = { results, verdict: this.verdictFor(results), summary, origin: r.forced ? "forced" : "reported", verified: verifiedCount(results) };
+          if (r.forced) this.bus.emitEvent({ type: "note", level: "warn", text: `The evaluator reported only in the forced final call: ${ev.verified} of ${this.contract.length} criteria verified, the rest unverified. ${TURNS_ADVICE}` });
+        } else {
+          // Neither the nudges nor the forced call produced a report: the harness writes one, so the fix round has something to work from.
+          const why = r.reason === "max_turns" ? `the evaluator ran out of turns (${this.config.maxTurnsPerPhase}) before reporting` : `the evaluator ended its turn (${r.reason}) without reporting`;
+          const results: CriterionResult[] = this.contract.map((c) => ({ id: c.id, pass: false, unverified: true, evidence: `Not verified: ${why}.` }));
+          const last = r.finalText.trim();
+          const summary = `No evaluation report: ${why}; 0 of ${this.contract.length} criteria were verified. ${TURNS_ADVICE}${last ? `\n\nThe evaluator's last words: ${last.slice(0, 2000)}` : ""}`;
+          ev = { results, verdict: this.verdictFor(results), summary, origin: "synthesised", verified: 0 };
+          this.bus.emitEvent({ type: "note", level: "warn", text: `The evaluator did not call report_evaluation even in the forced final call; a report was synthesised with every criterion unverified. ${TURNS_ADVICE}` });
+        }
+        writeWorkspaceFile(ws, ".reins/evaluation.md", `# Evaluation round ${round}${ev.origin === "reported" ? "" : ` (${ev.origin} report)`}\n\n${ev.summary}\n\n${ev.results.map((x) => `- ${x.id}: ${x.pass ? "PASS" : x.unverified ? "UNVERIFIED" : "FAIL"} — ${x.evidence}`).join("\n")}\n`);
+        this.bus.emitEvent({ type: "evaluation.result", round, results: ev.results, verdict: ev.verdict, summary: ev.summary, origin: ev.origin });
+        return { result: r, summary: `${ev.verdict.toUpperCase()}${ev.origin === "reported" ? "" : ` (${ev.origin} report)`}: ${ev.summary}`, value: { stop: false, ev: ev as Evaluation | null } };
       });
-      if (result.stop) return this.finish(false, "Stopped while evaluating.");
-      lastEval = result.ev ?? { results: [], verdict: "fail", summary: "No evaluation report." };
+      if (result.stop || !result.ev) return this.finish(false, "Stopped while evaluating.");
+      lastEval = result.ev;
       if (this.config.pauses.afterEvaluation) {
         const a = await this.control.requestPhaseApproval("Evaluation complete", `Verdict: ${lastEval.verdict}. Continue?`, lastEval);
         if (!a.approved) return this.finish(false, "Stopped after evaluation.");
       }
       if (lastEval.verdict === "pass") break;
-      if (round === this.config.maxFixRounds + 1) return this.finish(false, `Evaluation still failing after ${this.config.maxFixRounds} fix rounds: ${lastEval.summary}`);
+      if (round === this.config.maxFixRounds + 1) {
+        // A forced report says what the evaluator verified; the synthesised summary already says why there was no report.
+        const why = lastEval.origin === "forced" ? `the evaluator ran out of turns (${this.config.maxTurnsPerPhase}) before reporting on its own; ${lastEval.verified} of ${this.contract.length} criteria were verified. ${TURNS_ADVICE} ` : "";
+        return this.finish(false, `Evaluation still failing after ${this.config.maxFixRounds} fix rounds: ${why}${lastEval.summary}`);
+      }
     }
 
     // ---- Wrap up ----
@@ -291,6 +315,11 @@ export class Orchestrator {
       return { result: null, summary: `${done}/${this.features.length} features done.`, value: null };
     });
     return this.finish(true, lastEval ? lastEval.summary : "Build finished.");
+  }
+
+  /** A hard criterion that was not observed to pass (failed or unverified) fails the sprint. */
+  private verdictFor(results: CriterionResult[]): "pass" | "fail" {
+    return this.contract.some((c) => c.hard && results.find((r) => r.id === c.id)?.pass !== true) ? "fail" : "pass";
   }
 
   private shouldResetBuilder(): boolean {
@@ -325,6 +354,33 @@ export class Orchestrator {
     this.bus.emitEvent({ type: "run.summary", summary, costUsd: this.totalCost, durationMs: Date.now() - this.startedAt });
     return { ok, summary };
   }
+}
+
+interface Evaluation {
+  results: CriterionResult[];
+  verdict: "pass" | "fail";
+  summary: string;
+  origin: EvaluationOrigin;
+  /** Criteria the evaluator actually checked (pass or fail), as opposed to left unverified. */
+  verified: number;
+}
+
+const TURNS_ADVICE = "Raise maxTurnsPerPhase for the evaluate phase or reduce the number of contract criteria.";
+
+function verifiedCount(results: CriterionResult[]): number {
+  return results.filter((r) => !r.unverified).length;
+}
+
+/** The previous round's verdict as the builder's fix-round brief: failures to fix, unverified criteria to re-verify, never an empty list. */
+export function renderEvaluationForBuilder(ev: { results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }): string {
+  const open = ev.results.filter((r) => !r.pass);
+  const lines = open.map((r) => `- ${r.id} ${r.unverified ? "UNVERIFIED" : "FAILED"}: ${r.evidence}`);
+  const unverified = open.some((r) => r.unverified);
+  const note = ev.origin && ev.origin !== "reported" ? `(This report was ${ev.origin === "forced" ? "forced out of the evaluator at its turn cap" : "synthesised by the harness because the evaluator ran out of turns without reporting"}.)\n\n` : "";
+  const todo = unverified
+    ? "Criteria marked UNVERIFIED were not checked, because the evaluator ran out of turns; nothing is known to be wrong with them. Fix the failures, then run the verification step of every failed or unverified criterion yourself and record the observed result, update progress, then call finish."
+    : "Fix the failures, re-run the verification steps, update progress, then call finish.";
+  return `${note}${ev.summary}\n\n${lines.join("\n")}\n\n${todo}`;
 }
 
 export function mergeFeatures(existing: FeatureItem[], incoming: FeatureItem[]): FeatureItem[] {

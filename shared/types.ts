@@ -252,7 +252,11 @@ export interface CriterionResult {
   id: string;
   pass: boolean;
   evidence: string;
+  /** The evaluator ran out of turns before checking this criterion: not verified, as opposed to observed to fail. */
+  unverified?: boolean;
 }
+
+export type EvaluationOrigin = "reported" | "forced" | "synthesised";
 
 export interface FeatureItem {
   id: string;
@@ -367,6 +371,12 @@ export type RunEvent = Base &
         results: CriterionResult[];
         verdict: "pass" | "fail";
         summary: string;
+        /**
+         * How the report came about: reported by the evaluator on its own (absent or "reported"),
+         * "forced" by the final turn-budget call that offers only report_evaluation, or
+         * "synthesised" by the harness when even that call did not report (every criterion unverified).
+         */
+        origin?: EvaluationOrigin;
       }
     | { type: "progress.updated"; features: FeatureItem[]; note: string }
     | { type: "context.snapshot"; snapshot: ContextSnapshot }

@@ -2,6 +2,26 @@ import React from "react";
 import type { RunModel } from "../state/derive";
 import { Badge, Empty, RoleChip } from "../components/ui";
 
+/** How a round's report came about, when the evaluator did not report on its own (forced at the turn cap, or synthesised by the harness). */
+function OriginBadge({ origin }: { origin?: "reported" | "forced" | "synthesised" }) {
+  if (!origin || origin === "reported") return null;
+  const title = origin === "forced" ? "The evaluator ran out of turns and reported in a final forced call; criteria it did not reach are unverified." : "The evaluator never called report_evaluation, so the harness wrote this report with every criterion unverified.";
+  return (
+    <Badge tone="warn" title={title}>
+      {origin === "forced" ? "forced report" : "synthesised report"}
+    </Badge>
+  );
+}
+
+/** ✓ pass, ✕ fail, ? unverified (not checked: the evaluator ran out of turns). */
+function Mark({ pass, unverified }: { pass: boolean; unverified?: boolean }) {
+  return pass ? <>✓</> : unverified ? <>?</> : <>✕</>;
+}
+
+function markClass(r: { pass: boolean; unverified?: boolean }) {
+  return r.pass ? "bg-[var(--ok-soft)] text-[var(--ok)]" : r.unverified ? "bg-[var(--warn-soft)] text-[var(--warn)]" : "bg-[var(--bad-soft)] text-[var(--bad)]";
+}
+
 /** Criteria × evaluation rounds. A contract is only useful if you can see it being enforced. */
 export function ContractPanel({ model }: { model: RunModel }) {
   if (!model.contract.length && !model.contractHistory.length)
@@ -19,8 +39,9 @@ export function ContractPanel({ model }: { model: RunModel }) {
                   <th className="px-3 py-2">criterion</th>
                   <th className="px-3 py-2 w-16">weight</th>
                   {rounds.map((r) => (
-                    <th key={r.round} className="px-3 py-2 w-24 text-center">
+                    <th key={r.round} className="px-3 py-2 w-24 text-center" title={r.origin && r.origin !== "reported" ? `${r.origin} report` : undefined}>
                       round {r.round}
+                      {r.origin && r.origin !== "reported" ? <span className="block normal-case tracking-normal text-[var(--warn)]">{r.origin}</span> : null}
                     </th>
                   ))}
                 </tr>
@@ -39,8 +60,8 @@ export function ContractPanel({ model }: { model: RunModel }) {
                       return (
                         <td key={r.round} className="px-3 py-2 text-center">
                           {res ? (
-                            <span title={res.evidence} className={`inline-flex items-center justify-center w-6 h-6 rounded-md font-bold ${res.pass ? "bg-[var(--ok-soft)] text-[var(--ok)]" : "bg-[var(--bad-soft)] text-[var(--bad)]"}`}>
-                              {res.pass ? "✓" : "✕"}
+                            <span title={res.unverified ? `Unverified: ${res.evidence}` : res.evidence} className={`inline-flex items-center justify-center w-6 h-6 rounded-md font-bold ${markClass(res)}`}>
+                              <Mark pass={res.pass} unverified={res.unverified} />
                             </span>
                           ) : (
                             <span className="faint">—</span>
@@ -62,13 +83,15 @@ export function ContractPanel({ model }: { model: RunModel }) {
               <Badge tone={r.verdict === "pass" ? "ok" : "bad"}>
                 round {r.round} · {r.verdict}
               </Badge>
+              <OriginBadge origin={r.origin} />
+              {r.results.some((x) => x.unverified) && <span className="muted text-[12px]">{r.results.filter((x) => x.unverified).length} unverified</span>}
             </div>
             <div className="leading-relaxed mb-3">{r.summary}</div>
             <div className="flex flex-col gap-1.5">
               {r.results.map((x) => (
                 <div key={x.id} className="flex gap-2 text-[12.5px]">
-                  <span className={`font-bold shrink-0 w-12 ${x.pass ? "text-[var(--ok)]" : "text-[var(--bad)]"}`}>
-                    {x.pass ? "✓" : "✕"} {x.id}
+                  <span className={`font-bold shrink-0 w-12 ${x.pass ? "text-[var(--ok)]" : x.unverified ? "text-[var(--warn)]" : "text-[var(--bad)]"}`}>
+                    <Mark pass={x.pass} unverified={x.unverified} /> {x.id}
                   </span>
                   <span className="muted">{x.evidence}</span>
                 </div>
