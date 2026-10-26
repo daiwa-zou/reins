@@ -55,10 +55,10 @@ describe("startingPointFor", () => {
 
 describe("effortSummary: what an Effort level turns on, in plain words for the Harness page", () => {
   it("names the stages that run, the fix rounds, the turn cap and the budget", () => {
-    expect(effortSummary("low")).toEqual({ stages: ["Tests", "Build", "Publish"], extras: [], fixRounds: 0, turns: 30, budgetUsd: 3 });
-    expect(effortSummary("medium")).toEqual({ stages: ["Plan", "Breakdown", "Tests", "Build", "Evaluate", "Publish"], extras: ["Task budget"], fixRounds: 1, turns: 60, budgetUsd: 10 });
-    expect(effortSummary("high")).toEqual({ stages: ["Plan", "Breakdown", "Contract", "Tests", "Build", "Evaluate", "Publish"], extras: ["Scout subagents", "Task budget"], fixRounds: 2, turns: 90, budgetUsd: 20 });
-    expect(effortSummary("max")).toEqual({ stages: ["Plan", "Breakdown", "Contract", "Tests", "Build", "Evaluate", "Publish"], extras: ["Scout subagents", "Task budget", "Think tool", "Evaluator re-runs every criterion"], fixRounds: 3, turns: 120, budgetUsd: 40 });
+    expect(effortSummary("low")).toEqual({ stages: ["Tests", "Build", "Publish"], extras: [], fixRounds: 0, turns: 30, budgetUsd: 3, budgetTokens: 300_000 });
+    expect(effortSummary("medium")).toEqual({ stages: ["Plan", "Breakdown", "Tests", "Build", "Evaluate", "Publish"], extras: ["Task budget"], fixRounds: 1, turns: 60, budgetUsd: 10, budgetTokens: 1_000_000 });
+    expect(effortSummary("high")).toEqual({ stages: ["Plan", "Breakdown", "Contract", "Tests", "Build", "Evaluate", "Publish"], extras: ["Scout subagents", "Task budget"], fixRounds: 2, turns: 90, budgetUsd: 20, budgetTokens: 2_000_000 });
+    expect(effortSummary("max")).toEqual({ stages: ["Plan", "Breakdown", "Contract", "Tests", "Build", "Evaluate", "Publish"], extras: ["Scout subagents", "Task budget", "Think tool", "Evaluator re-runs every criterion"], fixRounds: 3, turns: 120, budgetUsd: 40, budgetTokens: 4_000_000 });
   });
   it("supervisionSummary lists the pauses a level turns on, in pipeline order", () => {
     expect(supervisionSummary("unattended")).toEqual([]);

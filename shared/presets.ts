@@ -25,7 +25,7 @@ export interface PresetRecipe {
    * An `engine` here is ignored by composeRun. Components, pauses and budgets may only raise effort and tighten
    * supervision; anything else is refused and recorded in the basis.
    */
-  config?: Pick<PresetConfig, "roles" | "context" | "guardrail" | "engine" | "components" | "pauses" | "maxFixRounds" | "maxTurnsPerPhase" | "budgetUsd">;
+  config?: Pick<PresetConfig, "roles" | "context" | "guardrail" | "engine" | "components" | "pauses" | "maxFixRounds" | "maxTurnsPerPhase" | "budgetUsd" | "budgetTokens">;
 }
 
 export const PRESET_RECIPES: PresetRecipe[] = [
@@ -226,6 +226,7 @@ export function compositionConfig(effort: HarnessEffort, supervision: Supervisio
     context: d.context,
     guardrail: { ...d.guardrail, mode: s.mode },
     budgetUsd: e.budgetUsd,
+    budgetTokens: e.budgetTokens,
     maxTurnsPerPhase: e.maxTurnsPerPhase,
     maxFixRounds: e.maxFixRounds,
   };
@@ -312,7 +313,7 @@ export function composeRun(input: Partial<Composition> | null | undefined, rawLe
   const roles = { ...(base.roles ?? {}) } as NonNullable<PresetConfig["roles"]>;
   const context = { ...(base.context ?? {}) };
   const guardrail = { ...(base.guardrail ?? {}) } as NonNullable<PresetConfig["guardrail"]>;
-  const nums = { maxFixRounds: base.maxFixRounds!, maxTurnsPerPhase: base.maxTurnsPerPhase!, budgetUsd: base.budgetUsd! };
+  const nums = { maxFixRounds: base.maxFixRounds!, maxTurnsPerPhase: base.maxTurnsPerPhase!, budgetUsd: base.budgetUsd!, budgetTokens: base.budgetTokens! };
   const guidance: string[] = [];
   const basis: PresetBasis[] = [];
   const dialName = `${EFFORT_TABLE[effort].label} effort`;
@@ -348,7 +349,7 @@ export function composeRun(input: Partial<Composition> | null | undefined, rawLe
         rfx.push(`pause ${k} on`);
       }
     }
-    for (const k of ["maxFixRounds", "maxTurnsPerPhase", "budgetUsd"] as const) {
+    for (const k of ["maxFixRounds", "maxTurnsPerPhase", "budgetUsd", "budgetTokens"] as const) {
       const v = rc[k];
       if (typeof v !== "number") continue;
       if (v < nums[k]) rfx.push(`refused: ${k} ${v} (would lower effort below ${nums[k]})`);

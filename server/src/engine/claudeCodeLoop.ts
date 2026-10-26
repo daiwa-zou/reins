@@ -10,6 +10,7 @@ import { ALL_TOOLS, scrubbedEnv, truncate } from "../tools/registry.js";
 import { classifyBash, confinePath, mentionsOutsidePaths } from "../guardrails/policy.js";
 import { sniffInjection } from "../guardrails/classifier.js";
 import { TURNS_REMAINING_NUDGE_AT, forcedCallNote, forcedTerminalMessage, turnsRemainingNote, turnsRemainingNudge } from "./turnBudget.js";
+import { budgetExhaustedMessage, budgetOf, countedTokens } from "../../../shared/budget.js";
 import path from "node:path";
 
 /**
@@ -246,7 +247,8 @@ export class ClaudeCodeLoop {
       model: s.model,
       effort: s.effort,
       maxTurns: this.opts.maxTurns,
-      maxBudgetUsd: Math.max(0.01, this.control.remainingBudget()),
+      // Dollars only mean something on a per-token bill; on a subscription the harness counts tokens itself.
+      ...(budgetOf(this.config).kind === "usd" ? { maxBudgetUsd: Math.max(0.01, this.control.remainingBudget()) } : {}),
       systemPrompt:
         this.opts.system +
         (canWrite ? "" : "\n\nYou may read" + (canShell ? " and run commands" : "") + " but must not create or edit files in this phase.") +
@@ -293,8 +295,10 @@ export class ClaudeCodeLoop {
           else if (msg.subtype !== "success") reason = "error";
           break;
         }
-        if (this.control.remainingBudget() <= 0) {
-          this.bus.emitEvent({ type: "error", message: `Budget of $${this.config.budgetUsd} exhausted`, recoverable: false });
+        // The control knows what earlier phases spent; this phase's own spend is counted here, in the engine's unit.
+        const spentHere = budgetOf(this.config).kind === "tokens" ? countedTokens(this.open ? addUsage(this.usage, this.open.usage) : this.usage) : this.cost;
+        if (this.control.remainingBudget() - spentHere <= 0) {
+          this.bus.emitEvent({ type: "error", message: budgetExhaustedMessage(this.config), recoverable: false });
           reason = "budget";
           await q.interrupt().catch(() => {});
           break;
@@ -457,7 +461,7 @@ export class ClaudeCodeLoop {
         const r = msg as any;
         if (r.is_error && r.subtype !== "error_max_turns" && r.subtype !== "error_max_budget_usd")
           this.bus.emitEvent({ type: "error", message: `Claude Code ended with ${r.subtype}: ${String(r.result ?? r.errors?.join?.("; ") ?? "").slice(0, 300)}`, recoverable: true });
-        if (r.subtype === "error_max_budget_usd") this.bus.emitEvent({ type: "error", message: `Budget of $${this.config.budgetUsd} exhausted`, recoverable: false });
+        if (r.subtype === "error_max_budget_usd") this.bus.emitEvent({ type: "error", message: budgetExhaustedMessage(this.config), recoverable: false });
         break;
       }
       default:

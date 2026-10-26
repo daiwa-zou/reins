@@ -8,6 +8,7 @@ import { domainPresets, generatedPresets, presetChip } from "@shared/presets";
 import { EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "@shared/components";
 import { ideas, lessonInDomain } from "@shared/implications";
 import { classifyPresets, effortSummary, startingPointFor, supervisionSummary } from "../state/startingPoint";
+import { tokens } from "../lib/format";
 
 /**
  * The page you start runs from. A run is an Effort level (what runs), a
@@ -127,7 +128,7 @@ function StartingPoints() {
                     </div>
                   )}
                   <div className="faint">
-                    {s.fixRounds} fix round{s.fixRounds === 1 ? "" : "s"} · {s.turns} turns per phase · ${s.budgetUsd}
+                    {s.fixRounds} fix round{s.fixRounds === 1 ? "" : "s"} · {s.turns} turns per phase · ${s.budgetUsd} on the direct API, {tokens(s.budgetTokens)} tokens on Claude Code
                   </div>
                 </div>
                 <button type="button" className="btn btn-sm self-start" onClick={() => openModal("newRun", { __compose: { effort: id } } as any)}>

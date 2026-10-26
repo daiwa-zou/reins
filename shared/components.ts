@@ -414,27 +414,31 @@ export interface EffortRow {
   components: Record<EffortComponentId, boolean>;
   maxFixRounds: number;
   maxTurnsPerPhase: number;
+  /** The cap on the direct API engine, where usage is billed per token. */
   budgetUsd: number;
+  /** The cap on the Claude Code engine, where usage counts against the subscription: input + output + cache writes, cache reads at a tenth. */
+  budgetTokens: number;
   /** Max only: the evaluator re-runs every criterion's verification afresh, and an incomplete report is refused. */
   rerunEveryCriterion: boolean;
 }
 
-const row = (label: string, meaning: string, on: string, maxFixRounds: number, maxTurnsPerPhase: number, budgetUsd: number, rerunEveryCriterion = false): EffortRow => ({
+const row = (label: string, meaning: string, on: string, maxFixRounds: number, maxTurnsPerPhase: number, budgetUsd: number, budgetTokens: number, rerunEveryCriterion = false): EffortRow => ({
   label,
   meaning,
   components: Object.fromEntries(EFFORT_COMPONENTS.map((id, i) => [id, on[i] === "1"])) as Record<EffortComponentId, boolean>,
   maxFixRounds,
   maxTurnsPerPhase,
   budgetUsd,
+  budgetTokens,
   rerunEveryCriterion,
 });
 
 /** Columns of `on`: planner, contracts, evaluator, scouts, taskBudget, thinkTool. */
 export const EFFORT_TABLE: Record<HarnessEffort, EffortRow> = {
-  low: row("Low", "The builder alone, on a small budget: no plan, contract or evaluation.", "000000", 0, 30, 3),
-  medium: row("Medium", "Plan, build and evaluate once, with one fix round, on the default budget.", "101010", 1, 60, 10),
-  high: row("High", "Adds a negotiated contract and scouts, two fix rounds and a larger budget.", "111110", 2, 90, 20),
-  max: row("Max", "Everything, with the think tool, three fix rounds and the evaluator re-running every criterion.", "111111", 3, 120, 40, true),
+  low: row("Low", "The builder alone, on a small budget: no plan, contract or evaluation.", "000000", 0, 30, 3, 300_000),
+  medium: row("Medium", "Plan, build and evaluate once, with one fix round, on the default budget.", "101010", 1, 60, 10, 1_000_000),
+  high: row("High", "Adds a negotiated contract and scouts, two fix rounds and a larger budget.", "111110", 2, 90, 20, 2_000_000),
+  max: row("Max", "Everything, with the think tool, three fix rounds and the evaluator re-running every criterion.", "111111", 3, 120, 40, 4_000_000, true),
 };
 
 export type PauseKey = "afterPlan" | "afterContract" | "beforeCommit" | "afterEvaluation" | "beforePublish" | "beforeMerge";
@@ -498,6 +502,7 @@ export function defaultRunConfig(partial: Partial<RunConfig> & { task: string; w
     context: partial.context ?? { compactAtTokens: 150_000, clearToolResultsAfterTurns: 8, resetAtTokens: 400_000 },
     guardrail: partial.guardrail ?? { mode: "auto", allowNetwork: false, askPatterns: [], denyPatterns: [] },
     budgetUsd: partial.budgetUsd ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].budgetUsd,
+    budgetTokens: partial.budgetTokens ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].budgetTokens,
     maxTurnsPerPhase: partial.maxTurnsPerPhase ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].maxTurnsPerPhase,
     maxFixRounds: partial.maxFixRounds ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].maxFixRounds,
     publish: { ...DEFAULT_PUBLISH, ...((partial.publish as Partial<PublishPolicy> | undefined) ?? {}) },

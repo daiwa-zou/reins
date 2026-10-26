@@ -75,7 +75,10 @@ export interface EffortSummary {
   extras: string[];
   fixRounds: number;
   turns: number;
+  /** The cap on the direct API engine. */
   budgetUsd: number;
+  /** The cap on Claude Code, where usage counts against the subscription. */
+  budgetTokens: number;
 }
 
 /** What an Effort level turns on, as a person reads it: stages, extras, fix rounds, turns and budget. */
@@ -84,7 +87,7 @@ export function effortSummary(effort: HarnessEffort): EffortSummary {
   const on = row.components;
   const stages = [on.planner ? "Plan" : "", on.planner ? "Breakdown" : "", on.contracts ? "Contract" : "", "Tests", "Build", on.evaluator ? "Evaluate" : "", "Publish"].filter(Boolean);
   const extras = [on.scouts ? "Scout subagents" : "", on.taskBudget ? "Task budget" : "", on.thinkTool ? "Think tool" : "", row.rerunEveryCriterion ? "Evaluator re-runs every criterion" : ""].filter(Boolean);
-  return { stages, extras, fixRounds: row.maxFixRounds, turns: row.maxTurnsPerPhase, budgetUsd: row.budgetUsd };
+  return { stages, extras, fixRounds: row.maxFixRounds, turns: row.maxTurnsPerPhase, budgetUsd: row.budgetUsd, budgetTokens: row.budgetTokens };
 }
 
 const PAUSE_WORDS: Record<PauseKey, string> = { afterPlan: "after the plan", afterContract: "to approve each contract", beforeCommit: "before each commit", afterEvaluation: "after each evaluation", beforePublish: "before publishing each package", beforeMerge: "before each merge" };

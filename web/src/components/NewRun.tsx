@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { defaultRunConfig, MODELS } from "@shared/components";
 import { alwaysTierOffs } from "@shared/config";
 import { applyPreset, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
-import { money } from "../lib/format";
+import { money, tokens } from "../lib/format";
 import type { ComponentId, Composition, EffortLevel, EngineId, HarnessComponent, Preset, PresetBasis, RunConfig } from "@shared/types";
 import { adaptPreset, composeRun, compositionOf, generatedPresets, presetCompatibility } from "@shared/presets";
 import { ComposePicker } from "./ComposePicker";
@@ -239,10 +239,11 @@ export function NewRun() {
   const warnings = checkRunConfig(cfg);
   const liveEngine = cfg.engine === "replay" ? null : cfg.engine;
 
-  const budgetOk = Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
+  const tokenBudget = cfg.engine === "claude-code";
+  const budgetOk = tokenBudget ? Number.isFinite(cfg.budgetTokens ?? NaN) && (cfg.budgetTokens ?? 0) >= 10_000 : Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
   const engineOk = cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode;
   const composeError = cfg.effort ? compositionError({ effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains }, lessons, userDomains) : null;
-  const blocker = composeError ? `Start from: ${composeError}.` : cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
+  const blocker = composeError ? `Start from: ${composeError}.` : cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? (tokenBudget ? "Token budget must be at least 10,000." : "Budget must be at least $1.") : null;
   const canStart = blocker === null;
   const startRun = async (engine: "live" | "replay") => {
     setBusy(true);
@@ -379,10 +380,16 @@ export function NewRun() {
         </section>
 
         <div className="flex items-end gap-3">
-          <Field label="Budget (USD)">
-            <input className="input" style={{ width: 120 }} type="number" min={1} step={1} value={cfg.budgetUsd} onChange={(e) => set({ budgetUsd: Math.max(0, Number(e.target.value) || 0) })} aria-invalid={!budgetOk} data-budget />
-          </Field>
-          <div className="muted text-[11.5px] leading-snug pb-1">The run stops when it reaches the budget.</div>
+          {tokenBudget ? (
+            <Field label="Budget (tokens)">
+              <input className="input" style={{ width: 140 }} type="number" min={10_000} step={50_000} value={cfg.budgetTokens ?? ""} onChange={(e) => set({ budgetTokens: Math.max(0, Number(e.target.value) || 0) })} aria-invalid={!budgetOk} data-budget-tokens />
+            </Field>
+          ) : (
+            <Field label="Budget (USD)">
+              <input className="input" style={{ width: 120 }} type="number" min={1} step={1} value={cfg.budgetUsd} onChange={(e) => set({ budgetUsd: Math.max(0, Number(e.target.value) || 0) })} aria-invalid={!budgetOk} data-budget />
+            </Field>
+          )}
+          <div className="muted text-[11.5px] leading-snug pb-1">{tokenBudget ? "Usage counts against your Claude subscription, so the cap is tokens (input + output + cache writes, cache reads at a tenth). The run stops when it reaches it." : "The run stops when it reaches the budget."}</div>
         </div>
 
         <details className="rounded-lg border line" data-customize open={customizeOpen} onToggle={(e) => setCustomizeOpen((e.target as HTMLDetailsElement).open)}>
@@ -641,7 +648,7 @@ export function NewRun() {
         <div className="flex items-center gap-3 pt-2 border-t line">
           <div className="muted text-[12px] leading-snug">
             {cfg.engine === "claude-code" ? (
-              <>Uses your Claude subscription; costs are list-price estimates (~{money(cfg.budgetUsd)} cap).</>
+              <>Uses your Claude subscription (cap {tokens(cfg.budgetTokens ?? 0)} tokens); dollar figures are list-price estimates, not bills.</>
             ) : (
               <>
                 Rough estimate: <span className="mono">~{est}</span>.

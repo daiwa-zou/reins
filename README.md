@@ -12,7 +12,7 @@ Press **d** to watch a recorded run. For live runs pick an engine in the New run
 | Engine | Needs | What Reins owns |
 |---|---|---|
 | **Direct API** | `ANTHROPIC_API_KEY` (environment or Settings) | The whole loop: prompt caching, compaction, context editing, tool search, task budgets, tool examples, every switch below. |
-| **Claude Code** | A logged-in `claude` CLI (no API key) | Planner/contract/builder/evaluator pipeline, guardrails (`canUseTool`), structured end-of-phase tools (in-process MCP), the event log. Claude Code keeps its own tools and context management. |
+| **Claude Code** | A logged-in `claude` CLI (no API key) | Planner/contract/builder/evaluator pipeline, guardrails (`canUseTool`), structured end-of-phase tools (in-process MCP), the event log. Claude Code keeps its own tools and context management. Usage counts against your subscription, so the budget is tokens, not dollars. |
 | **Recorded demo** | nothing | A synthetic recording replayed through the same UI, approvals included. |
 
 ## What it does
@@ -94,7 +94,7 @@ npm run build && npm start   # single-process production serve
 
 ## Status
 
-- **Claude Code engine**: exercised end to end from this checkout with the local login and no `ANTHROPIC_API_KEY` (the SDK init message reports `apiKeySource: "none"`). Usage counts against the Claude subscription; the per-turn costs are the SDK's list-price estimates. Known quirk: the SDK's Bash tool runs in your login shell, so shell aliases apply (a `cat` alias that colourises output confused the agent once; it recovered with Read).
+- **Claude Code engine**: exercised end to end from this checkout with the local login and no `ANTHROPIC_API_KEY` (the SDK init message reports `apiKeySource: "none"`). Usage counts against the Claude subscription, so the run's budget is tokens (input + output + cache writes, cache reads at a tenth; `budgetTokens`, set by Effort) and the per-turn dollar figures are list-price estimates, shown as such and never used as a cap. Known quirk: the SDK's Bash tool runs in your login shell, so shell aliases apply (a `cat` alias that colourises output confused the agent once; it recovered with Read).
 - **Direct API engine**: by decision, verified against a scripted stand-in for the Messages API only (tool execution, parallel read-only calls, guardrail approvals and denials, operator notes as mid-conversation system messages, graceful fallback when a beta is rejected) plus the orchestrator end to end over a temp git repo. The Claude Code engine is the default live path; if you later add an `ANTHROPIC_API_KEY`, Settings › Test connection sends one request with the direct engine's exact shape and reports what the API accepted.
 - **Sandbox**: the Seatbelt profile is probed in the test suite (writes outside the workspace and network are denied). With the Claude Code engine the SDK's own sandbox is enabled instead, with network off unless the run allows it.
 - **Classifier**: single-stage and unmeasured here; the auto mode post reports 0.4% false positives and 17% misses for Anthropic's production classifier, so treat it as a filter, not a guarantee. Rules are the pre-filter; only flagged commands reach it.

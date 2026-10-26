@@ -2,7 +2,7 @@
 // preset, the diff from defaults and validation of user presets. No I/O, so the
 // server, the web UI and vitest all use exactly the same rules.
 import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, HarnessEffort, Preset, PresetConfig, PublishPolicy, Supervision, RoleId, RunRoleId, RunConfig } from "./types.js";
-import { cleanGuidance, COMPONENTS, COMPONENT_IDS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_LEVELS, isEffort, isSupervision, PAUSE_KEYS, PUBLISH_MERGE_METHODS, PUBLISH_MERGE_WHEN, SUPERVISION_LEVELS } from "./components.js";
+import { cleanGuidance, COMPONENTS, COMPONENT_IDS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, isEffort, isSupervision, PAUSE_KEYS, PUBLISH_MERGE_METHODS, PUBLISH_MERGE_WHEN, SUPERVISION_LEVELS } from "./components.js";
 
 export const ENGINE_LABEL: Record<EngineId | "replay", string> = { anthropic: "Direct API", "claude-code": "Claude Code", replay: "Replay" };
 
@@ -10,7 +10,7 @@ const ROLE_IDS: RunRoleId[] = ["planner", "builder", "evaluator", "classifier", 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 const MODES: GuardrailMode[] = ["ask", "auto", "trust"];
 const CONTEXT_KEYS = ["compactAtTokens", "clearToolResultsAfterTurns", "resetAtTokens"] as const;
-const NUMBER_KEYS = ["budgetUsd", "maxTurnsPerPhase", "maxFixRounds"] as const;
+const NUMBER_KEYS = ["budgetUsd", "budgetTokens", "maxTurnsPerPhase", "maxFixRounds"] as const;
 
 export const PAUSE_LABEL: Record<(typeof PAUSE_KEYS)[number], string> = {
   afterPlan: "Pause after the plan",
@@ -77,8 +77,15 @@ export function checkRunConfig(config: unknown): ConfigWarning[] {
   const ctx = isObj(config.context) ? config.context : null;
   if (ctx && typeof ctx.resetAtTokens === "number" && typeof ctx.compactAtTokens === "number" && ctx.resetAtTokens <= ctx.compactAtTokens)
     out.push({ level: "warn", setting: "context.resetAtTokens", message: `Reset at ${ctx.resetAtTokens.toLocaleString("en-US")} tokens is not above compact at ${ctx.compactAtTokens.toLocaleString("en-US")} (context.resetAtTokens <= context.compactAtTokens): the reset would fire before compaction ever helps.` });
-  if (typeof config.budgetUsd === "number" && config.budgetUsd < 1)
+  if (typeof config.budgetUsd === "number" && config.budgetUsd < 1 && engine !== "claude-code")
     out.push({ level: "warn", setting: "budgetUsd", message: `A budget of $${config.budgetUsd} (budgetUsd < 1) stops most runs during planning.` });
+  // On Claude Code the budget is tokens (usage counts against the subscription); a dollar figure someone set is not applied.
+  if (engine === "claude-code" && typeof config.budgetUsd === "number" && isEffort(config.effort) && config.budgetUsd !== EFFORT_TABLE[config.effort].budgetUsd) {
+    const tokens = typeof config.budgetTokens === "number" ? config.budgetTokens : EFFORT_TABLE[config.effort].budgetTokens;
+    out.push({ level: "info", setting: "budgetUsd", message: `A dollar budget ($${config.budgetUsd}) is not applied on Claude Code: usage counts against the Claude subscription, so the cap is ${tokens.toLocaleString("en-US")} tokens (budgetTokens).` });
+  }
+  if (typeof config.budgetTokens === "number" && config.budgetTokens < 10_000 && engine === "claude-code")
+    out.push({ level: "warn", setting: "budgetTokens", message: `A token budget of ${config.budgetTokens.toLocaleString("en-US")} (budgetTokens < 10,000) stops most runs during planning.` });
   if (typeof config.maxTurnsPerPhase === "number" && config.maxTurnsPerPhase < 5)
     out.push({ level: "warn", setting: "maxTurnsPerPhase", message: `${config.maxTurnsPerPhase} turns per phase (maxTurnsPerPhase < 5) is rarely enough to read, edit and verify anything.` });
   return out;
@@ -113,6 +120,7 @@ export function applyPreset(base: RunConfig, preset: Pick<Preset, "name" | "conf
     ...base,
     ...(p.engine ? { engine: p.engine } : {}),
     ...(typeof p.budgetUsd === "number" ? { budgetUsd: p.budgetUsd } : {}),
+    ...(typeof p.budgetTokens === "number" ? { budgetTokens: p.budgetTokens } : {}),
     ...(typeof p.maxTurnsPerPhase === "number" ? { maxTurnsPerPhase: p.maxTurnsPerPhase } : {}),
     ...(typeof p.maxFixRounds === "number" ? { maxFixRounds: p.maxFixRounds } : {}),
     roles,
@@ -133,7 +141,7 @@ export function applyPreset(base: RunConfig, preset: Pick<Preset, "name" | "conf
 
 /** The preset-able part of a full config, e.g. for "Save as preset…". */
 export function presetFromConfig(cfg: RunConfig): PresetConfig {
-  return { engine: cfg.engine === "replay" ? undefined : cfg.engine, components: { ...cfg.components }, roles: structuredCloneSafe(cfg.roles), pauses: { ...cfg.pauses }, context: { ...cfg.context }, guardrail: { ...cfg.guardrail }, budgetUsd: cfg.budgetUsd, maxTurnsPerPhase: cfg.maxTurnsPerPhase, maxFixRounds: cfg.maxFixRounds, ...(cfg.guidance?.length ? { guidance: [...cfg.guidance] } : {}) };
+  return { engine: cfg.engine === "replay" ? undefined : cfg.engine, components: { ...cfg.components }, roles: structuredCloneSafe(cfg.roles), pauses: { ...cfg.pauses }, context: { ...cfg.context }, guardrail: { ...cfg.guardrail }, budgetUsd: cfg.budgetUsd, ...(typeof cfg.budgetTokens === "number" ? { budgetTokens: cfg.budgetTokens } : {}), maxTurnsPerPhase: cfg.maxTurnsPerPhase, maxFixRounds: cfg.maxFixRounds, ...(cfg.guidance?.length ? { guidance: [...cfg.guidance] } : {}) };
 }
 function structuredCloneSafe<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));
@@ -180,7 +188,7 @@ export function diffFromDefaults(config: Partial<RunConfig>): ConfigChange[] {
     const n = config.guidance.length;
     out.push({ path: "guidance", label: "Run guidance", from: "none", to: `${n} line${n === 1 ? "" : "s"}`, text: `Run guidance: ${n} line${n === 1 ? "" : "s"} (default none)` });
   }
-  for (const k of NUMBER_KEYS) if (typeof config[k] === "number") push(k, k === "budgetUsd" ? "Budget (USD)" : k === "maxTurnsPerPhase" ? "Max turns per phase" : "Fix rounds", d[k], config[k]);
+  for (const k of NUMBER_KEYS) if (typeof config[k] === "number") push(k, k === "budgetUsd" ? "Budget (USD)" : k === "budgetTokens" ? "Budget (tokens, Claude Code)" : k === "maxTurnsPerPhase" ? "Max turns per phase" : "Fix rounds", d[k], config[k]);
   return out;
 }
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
@@ -211,6 +219,7 @@ export function validatePresetConfig(raw: unknown, opts: { legacy?: boolean } = 
         config.engine = v as EngineId;
         break;
       case "budgetUsd":
+      case "budgetTokens":
       case "maxTurnsPerPhase":
       case "maxFixRounds":
         if (typeof v !== "number" || !Number.isFinite(v) || v < 0) bad(k, "a non-negative number");

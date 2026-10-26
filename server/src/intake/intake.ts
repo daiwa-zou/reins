@@ -21,6 +21,7 @@ import { ClaudeCodeLoop } from "../engine/claudeCodeLoop.js";
 import { listLessons, userLessonsDir, writeUserLesson } from "../lessons.js";
 import { loadSkills } from "../skills.js";
 import { librarianPrompt } from "../roles/prompts.js";
+import { budgetOf } from "../../../shared/budget.js";
 import { emptyUsage } from "../engine/pricing.js";
 
 export const INTAKE_PREFIX = "intake-";
@@ -534,6 +535,7 @@ export class IntakeManager extends EventEmitter {
       pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false },
       // An intake job is a low-effort run: one builder session, no evaluation (EFFORT_TABLE.low).
       budgetUsd: EFFORT_TABLE.low.budgetUsd,
+      budgetTokens: EFFORT_TABLE.low.budgetTokens,
       maxTurnsPerPhase: EFFORT_TABLE.low.maxTurnsPerPhase,
       maxFixRounds: EFFORT_TABLE.low.maxFixRounds,
     });
@@ -565,7 +567,7 @@ export class IntakeManager extends EventEmitter {
       signal: run.abort.signal,
       waitIfPaused: async () => {},
       drainSteer: () => [],
-      remainingBudget: () => run.config.budgetUsd,
+      remainingBudget: () => budgetOf(run.config).limit,
       requestApproval: async (_k: "action", title: string, detail: string, payload: unknown) => {
         const r = await ask({ kind: "action", title, detail, payload });
         if (!run.abort.signal.aborted) this.status(run, "running");

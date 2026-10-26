@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { RunModel } from "../state/derive";
 import { useStore } from "../state/store";
 import { Meter } from "./ui";
+import { budgetOf, countedTokens } from "@shared/budget";
 import { money, tokens } from "../lib/format";
 
 /**
@@ -15,8 +16,12 @@ export function Overview({ model }: { model: RunModel; live: RunModel }) {
   const navigate = useStore((s) => s.navigate);
   const cfg = model.config;
   if (!cfg) return null;
-  const budget = cfg.budgetUsd;
-  const spentFrac = budget ? model.costUsd / budget : 0;
+  // Tokens on Claude Code (usage counts against the subscription), dollars on the direct engine.
+  const b = budgetOf(cfg);
+  const spent = b.kind === "tokens" ? countedTokens(model.usage) : model.costUsd;
+  const budget = b.limit;
+  const spentFrac = budget ? spent / budget : 0;
+  const fmt = (n: number) => (b.kind === "tokens" ? `${tokens(n)} tokens` : money(n));
   const done = model.features.filter((f) => f.status === "done").length;
   const latestEval = model.evaluations[model.evaluations.length - 1];
   const passing = latestEval ? latestEval.results.filter((r) => r.pass).length : 0;
@@ -77,12 +82,18 @@ export function Overview({ model }: { model: RunModel; live: RunModel }) {
           <div className="flex items-baseline justify-between text-small mb-1">
             <span>{Math.round(spentFrac * 100)}% used</span>
             <span className="muted">
-              cap <span className="mono">{money(budget)}</span>
+              cap <span className="mono">{fmt(budget)}</span>
             </span>
           </div>
-          <Meter value={model.costUsd} max={budget} tone={spentFrac > 0.9 ? "bad" : spentFrac > 0.7 ? "warn" : "accent"} />
+          <Meter value={spent} max={budget} tone={spentFrac > 0.9 ? "bad" : spentFrac > 0.7 ? "warn" : "accent"} />
           <div className="muted text-small mt-1.5">
-            <span className="mono">{money(Math.max(0, budget - model.costUsd))}</span> left before the run stops
+            <span className="mono">{fmt(Math.max(0, budget - spent))}</span> left before the run stops
+            {b.kind === "tokens" && (
+              <span className="faint">
+                {" "}
+                · ≈{money(model.costUsd)} at list price, estimated, not billed
+              </span>
+            )}
           </div>
           <div className="faint text-caption mono mt-2 flex gap-3" title="Uncached input / output / cache-read tokens">
             <span>in {tokens(model.usage.input)}</span>

@@ -11,6 +11,7 @@ import { listRunIds, loadConfig, readEvents, saveConfig, summarize, deleteRun as
 import { REINS_HOME } from "../store/runStore.js";
 import { startReplay } from "./replay.js";
 import { execFileSync } from "node:child_process";
+import { budgetOf } from "../../../shared/budget.js";
 import { resolveRunInput } from "../presets.js";
 
 /** Events that change a run's summary row (phase, round, cost), so the run list is pushed again. */
@@ -30,6 +31,8 @@ interface ActiveRun {
   steer: string[];
   pending: Map<string, PendingApproval>;
   costUsd: () => number;
+  /** Tokens spent so far as a subscription counts them (the Claude Code budget's unit). */
+  tokens: () => number;
 }
 
 /** Owns every live run: creation, approvals, steering, pause/cancel, and the fan-out of events. */
@@ -131,7 +134,7 @@ export class RunManager extends EventEmitter {
 
   private attach(config: RunConfig): ActiveRun {
     const bus = new RunBus(config.id);
-    const run: ActiveRun = { config, bus, abort: new AbortController(), paused: false, pauseWaiters: [], steer: [], pending: new Map(), costUsd: () => 0 };
+    const run: ActiveRun = { config, bus, abort: new AbortController(), paused: false, pauseWaiters: [], steer: [], pending: new Map(), costUsd: () => 0, tokens: () => 0 };
     bus.on("event", (ev: RunEvent) => {
       this.emit("event", ev);
       if (SUMMARY_EVENTS.has(ev.type)) this.notifyRuns();
@@ -177,7 +180,10 @@ export class RunManager extends EventEmitter {
           run.pauseWaiters.push(resolve);
         }),
       drainSteer: () => run.steer.splice(0),
-      remainingBudget: () => run.config.budgetUsd - run.costUsd(),
+      remainingBudget: () => {
+        const b = budgetOf(run.config);
+        return b.kind === "tokens" ? b.limit - run.tokens() : b.limit - run.costUsd();
+      },
       requestApproval: async (_kind, title, detail, payload) => {
         const r = await ask({ kind: "action", title, detail, payload });
         if (!run.abort.signal.aborted) this.status(run, "running");
@@ -212,6 +218,7 @@ export class RunManager extends EventEmitter {
     this.status(run, "running");
     const orch = new Orchestrator(this.client, run.config, run.bus, this.control(run));
     run.costUsd = () => orch.costUsd;
+    run.tokens = () => orch.tokens;
     try {
       const { ok, summary } = await orch.run();
       if (run.abort.signal.aborted) this.status(run, "cancelled", summary);

@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { REINS_HOME } from "../store/runStore.js";
+import { budgetExhaustedMessage } from "../../../shared/budget.js";
 import { TURNS_REMAINING_NUDGE_AT, forcedCallNote, forcedTerminalMessage, turnsRemainingNote, turnsRemainingNudge } from "./turnBudget.js";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
@@ -216,8 +217,8 @@ export class AgentLoop {
     while (true) {
       if (this.control.signal.aborted) return this.result("aborted", finalText);
       await this.control.waitIfPaused();
-      if (this.control.remainingBudget() <= 0) {
-        this.bus.emitEvent({ type: "error", message: `Budget of $${this.config.budgetUsd} exhausted`, recoverable: false });
+      if (this.control.remainingBudget() - this.cost <= 0) {
+        this.bus.emitEvent({ type: "error", message: budgetExhaustedMessage(this.config), recoverable: false });
         return this.result("budget", finalText);
       }
       if (this.turn >= this.opts.maxTurns) return this.forcedTerminal("max_turns", finalText);

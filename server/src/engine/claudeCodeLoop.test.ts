@@ -36,7 +36,7 @@ function harness() {
     waitIfPaused: async () => {},
     requestApproval: async () => ({ approved: true }),
     drainSteer: () => [],
-    remainingBudget: () => 10,
+    remainingBudget: () => 1_000_000,
   };
   const loop = new ClaudeCodeLoop(config, bus, control, { role: "builder", system: "sys", tools: ["read_file", "bash", "finish"], terminal: ["finish"], handlers: {}, maxTurns: 10 });
   let finalText = "";
@@ -171,7 +171,7 @@ function ccHarness(maxTurns: number) {
   const bus = new RunBus("test-cc", false);
   const events: RunEvent[] = [];
   bus.on("event", (e: RunEvent) => events.push(e));
-  const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 10 };
+  const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 1_000_000 };
   const loop = new ClaudeCodeLoop(config, bus, control, { role: "evaluator", system: "sys", tools: ["read_file", "bash", "report_evaluation"], terminal: ["report_evaluation"], handlers: {}, maxTurns });
   return { loop, events };
 }
@@ -330,7 +330,7 @@ describe("ClaudeCodeLoop turn budget", () => {
     const bus = new RunBus("test-cc-orch", false);
     const events: RunEvent[] = [];
     bus.on("event", (e: RunEvent) => events.push(e));
-    const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 10 };
+    const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 1_000_000 };
     const orch = new Orchestrator(null, cfg, bus, { ...control, requestPhaseApproval: async () => ({ approved: true }), requestContractApproval: async (c) => ({ approved: true, criteria: c }) });
     const r = await orch.run();
     expect(calls).toHaveLength(5);
@@ -383,3 +383,49 @@ describe("workspaceRelative", () => {
     expect(workspaceRelative("/tmp/ws", "/etc/hosts")).toBe("../../etc/hosts");
   });
 });
+
+describe("ClaudeCodeLoop token budget", () => {
+  afterEach(() => vi.mocked(query).mockReset());
+
+  it("sends no maxBudgetUsd, counts tokens itself, and stops with the token budget named when the cap is passed", async () => {
+    // Each scripted assistant message counts 100 + 20 + 50 + 1000/10 = 270 tokens; a 1,000-token cap is passed on the fourth.
+    const config = defaultRunConfig({ task: "t", workspace: "/tmp/ws", engine: "claude-code", budgetTokens: 1000 });
+    const bus = new RunBus("test-cc-tokens", false);
+    const events: RunEvent[] = [];
+    bus.on("event", (e: RunEvent) => events.push(e));
+    const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 1000 };
+    const loop = new ClaudeCodeLoop(config, bus, control, { role: "builder", system: "sys", tools: ["read_file", "bash", "finish"], terminal: ["finish"], handlers: {}, maxTurns: 20 });
+    let yielded = 0;
+    const calls = scriptQueries([
+      async function* () {
+        yield init("s1");
+        for (let i = 1; i <= 10; i++) {
+          yielded++;
+          yield* bashTurn(i);
+        }
+        yield result("success");
+      },
+    ]);
+    const r = await loop.run("go");
+    expect(calls[0].options.maxBudgetUsd).toBeUndefined();
+    expect(r.reason).toBe("budget");
+    expect(yielded).toBe(4);
+    expect(r.usage.input).toBeGreaterThanOrEqual(300);
+    const err = events.find((e): e is Extract<RunEvent, { type: "error" }> => e.type === "error")!;
+    expect(err.message).toBe("Token budget of 1,000 exhausted (usage counts against the Claude subscription)");
+  });
+
+  it("keeps maxBudgetUsd for a config whose budget is dollars", async () => {
+    const config = defaultRunConfig({ task: "t", workspace: "/tmp/ws", engine: "anthropic", budgetUsd: 5 });
+    const loop = new ClaudeCodeLoop(config, new RunBus("test-cc-usd", false), { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 4 }, { role: "builder", system: "sys", tools: ["read_file"], terminal: [], handlers: {}, maxTurns: 2 });
+    const calls = scriptQueries([
+      async function* () {
+        yield init("s1");
+        yield result("success");
+      },
+    ]);
+    await loop.run("go");
+    expect(calls[0].options.maxBudgetUsd).toBe(4);
+  });
+});
+

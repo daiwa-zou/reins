@@ -6,6 +6,8 @@ This page covers how a run is composed from **Effort**, **Supervision** and doma
 
 A run is composed from two dials and any number of domains: `{ effort, supervision, domains }`. **Effort** (`low`, `medium`, `high`, `max`) decides what the harness spends on the task: the effort-tier components and the budgets. It does not change the roles' models or their reasoning effort; Customize keeps that control as **Reasoning effort**. The default is `medium`.
 
+The budget is in the unit that is real for the engine. On the **direct API** engine usage is billed per token at list price, so `budgetUsd` is the cap. On **Claude Code** usage counts against your Claude subscription, which is measured in tokens over a window, so `budgetTokens` is the cap: input + output + cache writes, with cache reads counted at a tenth. The harness does not hand the SDK a dollar cap there; it counts the tokens itself and stops the run with "Token budget of N exhausted". Every role's "Budget and time" line says tokens and turns on Claude Code and dollars on the direct engine, never both; New run shows a token field on Claude Code (at least 10,000) and a dollar field otherwise; the Overview gauge measures in the same unit and shows the list-price estimate beside it, labelled as estimated, not billed. A dollar figure set on a Claude Code run (a saved preset, a request body) is kept as information and the config checker says it is not applied. Runs that predate `budgetTokens` get their effort level's value.
+
 <!-- generated:effort -->
 | | low | medium | high | max |
 |---|---|---|---|---|
@@ -18,6 +20,7 @@ A run is composed from two dials and any number of domains: `{ effort, supervisi
 | `maxFixRounds` | 0 | 1 | 2 | 3 |
 | `maxTurnsPerPhase` | 30 | 60 | 90 | 120 |
 | `budgetUsd` | $3 | $10 | $20 | $40 |
+| `budgetTokens` | 300,000 | 1,000,000 | 2,000,000 | 4,000,000 |
 <!-- /generated:effort -->
 
 At `max` the evaluate phase tells the evaluator to run every contract criterion's verification step afresh in that round, without reusing earlier rounds' evidence or the builder's summary, and a `report_evaluation` that omits a criterion id is refused with a message naming the missing ids, so the evaluator reports again. Below `max` an incomplete report is accepted as before.

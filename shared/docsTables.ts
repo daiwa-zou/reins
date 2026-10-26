@@ -11,7 +11,7 @@ export function renderEffortTable(): string {
   const head = `| | ${EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].label.toLowerCase()).join(" | ")} |`;
   const sep = `|---|${EFFORT_LEVELS.map(() => "---").join("|")}|`;
   const rows = EFFORT_COMPONENTS.map((id) => `| \`${id}\` | ${EFFORT_LEVELS.map((e) => (EFFORT_TABLE[e].components[id] ? "on" : "off") + (id === "evaluator" && EFFORT_TABLE[e].rerunEveryCriterion ? " (re-runs every criterion)" : "")).join(" | ")} |`);
-  const nums = (["maxFixRounds", "maxTurnsPerPhase", "budgetUsd"] as const).map((k) => `| \`${k}\` | ${EFFORT_LEVELS.map((e) => (k === "budgetUsd" ? `$${EFFORT_TABLE[e][k]}` : String(EFFORT_TABLE[e][k]))).join(" | ")} |`);
+  const nums = (["maxFixRounds", "maxTurnsPerPhase", "budgetUsd", "budgetTokens"] as const).map((k) => `| \`${k}\` | ${EFFORT_LEVELS.map((e) => (k === "budgetUsd" ? `$${EFFORT_TABLE[e][k]}` : k === "budgetTokens" ? EFFORT_TABLE[e][k].toLocaleString("en-US") : String(EFFORT_TABLE[e][k]))).join(" | ")} |`);
   return [head, sep, ...rows, ...nums].join("\n");
 }
 

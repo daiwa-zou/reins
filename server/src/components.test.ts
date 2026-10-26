@@ -22,6 +22,7 @@ describe("tiers and the Effort / Supervision tables", () => {
     expect(EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].maxFixRounds)).toEqual([0, 1, 2, 3]);
     expect(EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].maxTurnsPerPhase)).toEqual([30, 60, 90, 120]);
     expect(EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].budgetUsd)).toEqual([3, 10, 20, 40]);
+    expect(EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].budgetTokens)).toEqual([300_000, 1_000_000, 2_000_000, 4_000_000]);
     expect(EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].rerunEveryCriterion)).toEqual([false, false, false, true]);
   });
   it("SUPERVISION_TABLE has the spec's pauses, modes, labels and chips", () => {
@@ -41,7 +42,7 @@ describe("tiers and the Effort / Supervision tables", () => {
   });
   it("defaultRunConfig takes its budgets from EFFORT_TABLE (medium)", () => {
     const d = defaultRunConfig({ task: "t", workspace: "/w" });
-    expect([d.maxFixRounds, d.maxTurnsPerPhase, d.budgetUsd]).toEqual([EFFORT_TABLE.medium.maxFixRounds, EFFORT_TABLE.medium.maxTurnsPerPhase, EFFORT_TABLE.medium.budgetUsd]);
+    expect([d.maxFixRounds, d.maxTurnsPerPhase, d.budgetUsd, d.budgetTokens]).toEqual([EFFORT_TABLE.medium.maxFixRounds, EFFORT_TABLE.medium.maxTurnsPerPhase, EFFORT_TABLE.medium.budgetUsd, EFFORT_TABLE.medium.budgetTokens]);
     expect(d.components.resetWithHandoff).toBe(true);
   });
 });

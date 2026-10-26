@@ -16,6 +16,7 @@ import { branchNameFor, collectFeedback, prState, Publisher, renderFeedbackForBu
 import { DEFAULT_PUBLISH } from "../../../shared/components.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
 import { runShell } from "../tools/registry.js";
+import { budgetLine, budgetOf, countedTokens } from "../../../shared/budget.js";
 import { EFFORT_TABLE } from "../../../shared/components.js";
 
 /** The evaluate-phase instruction at max effort (EFFORT_TABLE.max.rerunEveryCriterion). */
@@ -69,7 +70,7 @@ export class Orchestrator {
   private projectContext(): Record<string, string> {
     const extra: Record<string, string> = {};
     const elapsedMin = Math.round((Date.now() - this.startedAt) / 60000);
-    extra["Budget and time"] = `$${Math.max(0, this.config.budgetUsd - this.totalCost).toFixed(2)} of $${this.config.budgetUsd} remaining; ${elapsedMin} minutes elapsed; at most ${this.config.maxTurnsPerPhase} turns in this phase. Pace yourself and leave the workspace clean if you must stop early.`;
+    extra["Budget and time"] = budgetLine(this.config, { usd: this.totalCost, tokens: countedTokens(this.totalUsage) }, elapsedMin);
     if (this.config.components.projectMemory) {
       for (const f of ["CLAUDE.md", "AGENTS.md"]) {
         const body = readWorkspaceFile(this.config.workspace, f);
@@ -93,6 +94,11 @@ export class Orchestrator {
 
   get costUsd() {
     return this.totalCost;
+  }
+
+  /** Tokens spent so far as a subscription counts them (finished phases). */
+  get tokens() {
+    return countedTokens(this.totalUsage);
   }
 
   private handlers() {

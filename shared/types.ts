@@ -154,7 +154,10 @@ export interface RunConfig {
   pauses: RunPauses;
   context: ContextPolicy;
   guardrail: GuardrailPolicy;
+  /** The dollar cap on the direct API engine (list price). Not applied on Claude Code, where usage counts against the subscription. */
   budgetUsd: number;
+  /** The token cap on the Claude Code engine (input + output + cache writes, cache reads at a tenth). Absent on runs that predate it (the effort table's value applies). */
+  budgetTokens?: number;
   maxTurnsPerPhase: number;
   maxFixRounds: number;
   /** The publish stage's policy. Absent on runs that predate it (defaults apply). */
