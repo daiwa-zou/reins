@@ -15,7 +15,89 @@ export interface PrView {
   reviewDecision?: string;
   statusCheckRollup?: unknown[] | null;
   mergeStateStatus?: string;
+  /** Conversation comments and reviews, as `gh pr view --json comments,reviews` returns them. */
+  comments?: unknown[] | null;
+  reviews?: unknown[] | null;
 }
+
+/** One piece of review feedback the builder must address. */
+export interface FeedbackItem {
+  kind: "comment" | "review" | "inline";
+  author: string;
+  body: string;
+  /** ISO time it was posted. */
+  at: string;
+  /** Reviews: APPROVED, CHANGES_REQUESTED, COMMENTED, ... */
+  state?: string;
+  path?: string;
+  line?: number;
+  url?: string;
+}
+
+/** A failing or pending check, as `gh pr checks --json name,bucket,link,description` reports it. */
+export interface CheckRow {
+  name: string;
+  bucket: string;
+  link?: string;
+  description?: string;
+}
+
+/** The harness marks its own pull request comments so it never feeds them back to the builder. */
+export const REINS_MARKER = "<!-- reins -->";
+
+const str = (v: unknown) => (typeof v === "string" ? v : "");
+const login = (v: unknown) => str((v as { login?: string } | null)?.login) || "someone";
+
+/** Everything posted on the pull request after `since` that a builder should act on, oldest first; the harness's own comments and empty reviews are left out. */
+export function collectFeedback(view: PrView, inline: unknown[] | null | undefined, since: string): FeedbackItem[] {
+  const out: FeedbackItem[] = [];
+  const fresh = (at: string) => !!at && at > since;
+  for (const raw of Array.isArray(view.comments) ? view.comments : []) {
+    const c = (raw ?? {}) as Record<string, unknown>;
+    const body = str(c.body).trim();
+    if (!body || body.startsWith(REINS_MARKER) || !fresh(str(c.createdAt))) continue;
+    out.push({ kind: "comment", author: login(c.author), body, at: str(c.createdAt), url: str(c.url) || undefined });
+  }
+  for (const raw of Array.isArray(view.reviews) ? view.reviews : []) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const body = str(r.body).trim();
+    if (!body || body.startsWith(REINS_MARKER) || !fresh(str(r.submittedAt))) continue;
+    out.push({ kind: "review", author: login(r.author), body, at: str(r.submittedAt), state: str(r.state) || undefined });
+  }
+  for (const raw of Array.isArray(inline) ? inline : []) {
+    const c = (raw ?? {}) as Record<string, unknown>;
+    const body = str(c.body).trim();
+    if (!body || body.startsWith(REINS_MARKER) || !fresh(str(c.created_at))) continue;
+    const line = typeof c.line === "number" ? c.line : typeof c.original_line === "number" ? c.original_line : undefined;
+    out.push({ kind: "inline", author: login(c.user), body, at: str(c.created_at), path: str(c.path) || undefined, line, url: str(c.html_url) || undefined });
+  }
+  return out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
+const one = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** The "Review feedback" section of a review round's first message. */
+export function renderFeedbackForBuilder(items: FeedbackItem[], failing: CheckRow[], url: string): string {
+  const lines = [`Pull request: ${url}`, "The pull request for this package is open. Reviewers and checks have come back with the following; this round is about addressing it, not about new features."];
+  if (items.length) {
+    lines.push("", "Feedback:");
+    for (const i of items) {
+      if (i.kind === "inline") lines.push(`- @${i.author} on ${i.path ?? "a file"}${i.line ? `:${i.line}` : ""}: ${one(i.body)}`);
+      else if (i.kind === "review") lines.push(`- @${i.author} ${i.state === "CHANGES_REQUESTED" ? "requested changes" : i.state === "APPROVED" ? "approved and said" : i.state === "COMMENTED" ? "commented" : "reviewed"}: ${one(i.body)}`);
+      else lines.push(`- @${i.author} commented: ${one(i.body)}`);
+    }
+  }
+  if (failing.length) {
+    lines.push("", "Failing checks:");
+    for (const c of failing) lines.push(`- ${c.name} (${c.bucket})${c.description ? `: ${one(c.description)}` : ""}${c.link ? ` — ${c.link}` : ""}`);
+  }
+  lines.push(
+    "",
+    "Address every item: change the code, or say in your summary why not. For a failing check, reproduce it locally, fix the cause, and run it again. Do not weaken or delete tests to make a check pass. Run the contract's verification steps and the test command before you finish, update progress, then call finish with a summary written for the reviewers: it is posted on the pull request.",
+  );
+  return lines.join("\n");
+}
+
 
 export type PrState = { kind: "merged" } | { kind: "closed" } | { kind: "ready" } | { kind: "failing"; checks: string[] } | { kind: "waiting"; why: string };
 
@@ -148,12 +230,41 @@ export class Publisher {
   }
 
   async view(ws: string, ref: string | number, signal: AbortSignal): Promise<PrView> {
-    const out = await this.sh(`${this.gh} pr view ${JSON.stringify(String(ref))} --json number,url,state,mergedAt,reviewDecision,statusCheckRollup,mergeStateStatus`, ws, signal, 60_000);
+    const out = await this.sh(`${this.gh} pr view ${JSON.stringify(String(ref))} --json number,url,state,mergedAt,reviewDecision,statusCheckRollup,mergeStateStatus,comments,reviews`, ws, signal, 60_000);
     try {
       return JSON.parse(out) as PrView;
     } catch {
       throw new Error(`gh pr view returned no JSON: ${out.trim().slice(-200)}`);
     }
+  }
+
+  /** Inline (diff) review comments, which `gh pr view` does not include. Empty on any failure: they are feedback, not a gate. */
+  async inlineComments(ws: string, number: number, signal: AbortSignal): Promise<unknown[]> {
+    const r = await runShell(`${this.gh} api repos/{owner}/{repo}/pulls/${number}/comments`, ws, signal, 60_000);
+    if (r.code !== 0) return [];
+    try {
+      const v = JSON.parse(r.out);
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** The checks with their buckets (pass, fail, pending, skipping, cancel). gh exits 1 on a failure and 8 while pending; both still print the JSON. */
+  async checks(ws: string, number: number, signal: AbortSignal): Promise<CheckRow[]> {
+    const r = await runShell(`${this.gh} pr checks ${number} --json name,bucket,link,description`, ws, signal, 60_000);
+    try {
+      const v = JSON.parse(r.out);
+      return Array.isArray(v) ? v.filter((x) => x && typeof x.name === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Post a comment on the pull request, marked as the harness's own. */
+  async comment(ws: string, number: number, body: string, signal: AbortSignal): Promise<void> {
+    writeWorkspaceFile(ws, ".reins/pr-comment.md", `${REINS_MARKER}\n${body}`);
+    await this.sh(`${this.gh} pr comment ${number} --body-file .reins/pr-comment.md`, ws, signal, 60_000);
   }
 
   async merge(ws: string, number: number, method: PublishPolicy["mergeMethod"], signal: AbortSignal): Promise<void> {

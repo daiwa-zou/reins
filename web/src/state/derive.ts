@@ -35,7 +35,7 @@ export type FeedItem =
   | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
   | { kind: "tests"; seq: number; ts: string; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
-  | { kind: "pr"; seq: number; ts: string; what: "opened" | "merged"; number: number; url: string; branch: string; base: string; package?: PackageRef; sha?: string }
+  | { kind: "pr"; seq: number; ts: string; what: "opened" | "merged" | "feedback"; number: number; url: string; branch?: string; base?: string; package?: PackageRef; sha?: string; round?: number; comments?: number; checks?: string[]; summary?: string }
   | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }
   | { kind: "context"; seq: number; ts: string; what: "compacted" | "cleared" | "reset"; role: RoleId; detail: string }
   | { kind: "steer"; seq: number; ts: string; text: string; delivered: boolean }
@@ -51,6 +51,8 @@ export interface PullRequestInfo {
   package?: PackageRef;
   openedTs: string;
   merged?: { sha: string; ts: string };
+  /** Review rounds the harness ran on it. */
+  rounds?: { round: number; comments: number; checks: string[]; summary: string; ts: string }[];
 }
 
 export interface PhaseStat {
@@ -252,6 +254,13 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "opened", number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, ...(ev.package ? { package: ev.package } : {}) });
         currentTurn = null;
         break;
+      case "pr.feedback": {
+        const pr = m.pullRequests.find((p) => p.number === ev.number);
+        if (pr) pr.rounds = [...(pr.rounds ?? []), { round: ev.round, comments: ev.comments, checks: ev.checks, summary: ev.summary, ts: ev.ts }];
+        m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "feedback", number: ev.number, url: ev.url, round: ev.round, comments: ev.comments, checks: ev.checks, summary: ev.summary });
+        currentTurn = null;
+        break;
+      }
       case "pr.merged": {
         const pr = m.pullRequests.find((p) => p.number === ev.number);
         if (pr) pr.merged = { sha: ev.sha, ts: ev.ts };

@@ -105,12 +105,12 @@ export function withRemote(ws: string): { remote: string; base: string } {
  * pull afterwards is a real fast-forward. Returns the command to run it and
  * the state file path.
  */
-export function fakeGh(_ws: string, views: Record<string, object[]> = {}): { command: string; state: string; read: () => FakeGhState } {
+export function fakeGh(_ws: string, views: Record<string, object[]> = {}, inline: Record<string, object[][]> = {}): { command: string; state: string; read: () => FakeGhState } {
   // Its files live outside the workspace, or the build's `git add -A` would commit them.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "reins-gh-"));
   const state = path.join(dir, "gh-state.json");
   const script = path.join(dir, "fake-gh.mjs");
-  fs.writeFileSync(state, JSON.stringify({ next: 1, prs: {}, views, calls: [], comments: [] }, null, 2));
+  fs.writeFileSync(state, JSON.stringify({ next: 1, prs: {}, views, inline, lastView: {}, calls: [], comments: [] }, null, 2));
   fs.writeFileSync(
     script,
     `import fs from "node:fs";
@@ -135,9 +135,21 @@ if (group === "pr" && verb === "view") {
   if (!pr) { console.error("no pull requests found for " + args[2]); process.exit(1); }
   const q = st.views[n] ?? [];
   const v = q.length > 1 ? q.shift() : q[0] ?? {};
+  const full = { number: pr.number, url: pr.url, state: pr.state, mergedAt: null, reviewDecision: "", statusCheckRollup: [], mergeStateStatus: "CLEAN", headRefName: pr.head, baseRefName: pr.base, comments: [], reviews: [], ...v };
+  st.lastView[n] = full;
   save();
-  console.log(JSON.stringify({ number: pr.number, url: pr.url, state: pr.state, mergedAt: null, reviewDecision: "", statusCheckRollup: [], mergeStateStatus: "CLEAN", headRefName: pr.head, baseRefName: pr.base, ...v }));
+  console.log(JSON.stringify(full));
   process.exit(0);
+}
+if (group === "pr" && verb === "checks") {
+  const n = prOf(args[2]); const v = st.lastView[n] ?? {};
+  const bucket = (c) => (c.__typename === "StatusContext" ? (c.state === "SUCCESS" ? "pass" : c.state === "PENDING" ? "pending" : "fail") : c.status !== "COMPLETED" ? "pending" : ["SUCCESS", "NEUTRAL"].includes(c.conclusion) ? "pass" : c.conclusion === "SKIPPED" ? "skipping" : "fail");
+  const rows = (v.statusCheckRollup ?? []).map((c) => ({ name: c.name ?? c.context, bucket: bucket(c), link: "https://example.test/checks/" + (c.name ?? c.context), description: c.description ?? "" }));
+  save(); console.log(JSON.stringify(rows)); process.exit(rows.some((r) => r.bucket === "fail") ? 1 : rows.some((r) => r.bucket === "pending") ? 8 : 0);
+}
+if (group === "api") {
+  const m = String(args[1]).match(/pulls\\/(\\d+)\\/comments/);
+  if (m) { const q = st.inline[m[1]] ?? []; const v = q.length > 1 ? q.shift() : q[0] ?? []; save(); console.log(JSON.stringify(v)); process.exit(0); }
 }
 if (group === "pr" && verb === "merge") {
   const n = prOf(args[2]); const pr = st.prs[n];
@@ -156,6 +168,7 @@ export interface FakeGhState {
   next: number;
   prs: Record<string, { number: number; url: string; base: string; head: string; title: string; body: string; state: string; method?: string }>;
   views: Record<string, object[]>;
+  inline: Record<string, object[][]>;
   calls: string[][];
   comments: { pr: string; body: string }[];
 }
@@ -169,3 +182,8 @@ export const prView = {
   closed: { state: "CLOSED", reviewDecision: "" },
   merged: { state: "MERGED", mergedAt: "2026-01-01T00:00:00Z" },
 };
+/** A time after any harness clock in a test, so the comment counts as new. */
+export const LATER = "2099-01-01T00:00:00Z";
+export const comment = (login: string, body: string, createdAt = LATER) => ({ author: { login }, body, createdAt, url: `https://example.test/c/${body.length}` });
+export const review = (login: string, state: string, body: string, submittedAt = LATER) => ({ author: { login }, state, body, submittedAt });
+export const inlineComment = (login: string, path: string, line: number, body: string, created_at = LATER) => ({ user: { login }, path, line, body, created_at, html_url: `https://example.test/i/${line}` });

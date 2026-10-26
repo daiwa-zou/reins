@@ -444,6 +444,7 @@ export type RunEvent = Base &
     | { type: "tests.agreed"; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
     | { type: "pr.opened"; number: number; url: string; branch: string; base: string; package?: PackageRef }
     | { type: "pr.merged"; number: number; url: string; branch: string; base: string; sha: string }
+    | { type: "pr.feedback"; number: number; url: string; round: number; comments: number; checks: string[]; summary: string }
     | {
         type: "evaluation.result";
         round: number;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchNameFor, prState, renderPrBody } from "./engine/publish.js";
+import { branchNameFor, collectFeedback, prState, REINS_MARKER, renderFeedbackForBuilder, renderPrBody } from "./engine/publish.js";
 import { DEFAULT_PUBLISH } from "../../shared/components.js";
 
 const run = (name: string, conclusion: string, status = "COMPLETED") => ({ __typename: "CheckRun", name, status, conclusion });
@@ -67,5 +67,48 @@ describe("branch names and the PR body", () => {
 
   it("DEFAULT_PUBLISH waits for an approving review, squashes, polls every minute and gives up after four hours", () => {
     expect(DEFAULT_PUBLISH).toEqual({ remote: "origin", mergeWhen: "approved", mergeMethod: "squash", pollSeconds: 60, maxWaitMinutes: 240, maxReviewRounds: 3 });
+  });
+});
+
+describe("review feedback", () => {
+  const since = "2026-05-01T00:00:00Z";
+  const view = {
+    comments: [
+      { author: { login: "ana" }, body: "Please rename x to count.", createdAt: "2026-05-01T00:01:00Z", url: "https://example.test/c/1" },
+      { author: { login: "old" }, body: "Earlier remark.", createdAt: "2026-04-30T00:00:00Z", url: "https://example.test/c/0" },
+      { author: { login: "reins-bot" }, body: REINS_MARKER + "\nAddressed the rename.", createdAt: "2026-05-01T00:02:00Z", url: "https://example.test/c/2" },
+    ],
+    reviews: [
+      { author: { login: "bo" }, state: "CHANGES_REQUESTED", body: "Needs a test for the empty case.", submittedAt: "2026-05-01T00:03:00Z" },
+      { author: { login: "cy" }, state: "APPROVED", body: "", submittedAt: "2026-05-01T00:04:00Z" },
+      { author: { login: "bo" }, state: "COMMENTED", body: "Old note", submittedAt: "2026-04-01T00:00:00Z" },
+    ],
+  };
+  const inline = [
+    { user: { login: "ana" }, path: "src/x.ts", line: 12, body: "Off by one here.", created_at: "2026-05-01T00:05:00Z", html_url: "https://example.test/i/12" },
+    { user: { login: "ana" }, path: "src/y.ts", original_line: 3, body: "Stale.", created_at: "2026-04-01T00:00:00Z", html_url: "https://example.test/i/3" },
+  ];
+
+  it("keeps only what arrived after `since`, drops the harness's own comments and empty reviews, and orders by time", () => {
+    const items = collectFeedback(view, inline, since);
+    expect(items.map((i) => [i.kind, i.author, i.body, i.path, i.line])).toEqual([
+      ["comment", "ana", "Please rename x to count.", undefined, undefined],
+      ["review", "bo", "Needs a test for the empty case.", undefined, undefined],
+      ["inline", "ana", "Off by one here.", "src/x.ts", 12],
+    ]);
+    expect(items[1].state).toBe("CHANGES_REQUESTED");
+    expect(collectFeedback({}, [], since)).toEqual([]);
+    expect(collectFeedback({ comments: null, reviews: undefined } as any, null as any, since)).toEqual([]);
+  });
+
+  it("renders the builder's brief: each item with who, where and what, then the failing checks", () => {
+    const text = renderFeedbackForBuilder(collectFeedback(view, inline, since), [{ name: "ci", bucket: "fail", link: "https://example.test/checks/ci", description: "2 tests failed" }], "https://example.test/pr/4");
+    expect(text).toContain("Pull request: https://example.test/pr/4");
+    expect(text).toContain("- @ana commented: Please rename x to count.");
+    expect(text).toContain("- @bo requested changes: Needs a test for the empty case.");
+    expect(text).toContain("- @ana on src/x.ts:12: Off by one here.");
+    expect(text).toContain("Failing checks:\n- ci (fail): 2 tests failed — https://example.test/checks/ci");
+    expect(text).toMatch(/Address every item: change the code, or say in your summary why not/);
+    expect(text).toMatch(/Do not weaken or delete tests to make a check pass/);
   });
 });

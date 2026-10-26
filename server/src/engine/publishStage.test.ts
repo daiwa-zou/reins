@@ -7,7 +7,7 @@ import { Publisher } from "./publish.js";
 import { RunBus } from "./bus.js";
 import { defaultRunConfig } from "../../../shared/components.js";
 import type { RunEvent } from "../../../shared/types.js";
-import { call, collect, control, fakeClient, fakeGh, phasesOf, prView, tmpWorkspace, toolUse, withRemote, type Scripted } from "./scripted.js";
+import { call, collect, comment, control, fakeClient, fakeGh, inlineComment, lastUserText, phasesOf, prView, review, tmpWorkspace, toolUse, withRemote, type Scripted } from "./scripted.js";
 
 // The publish stage: every package is built on its own branch cut from the
 // freshly pulled base; after evaluation passes the harness pushes, opens a
@@ -145,15 +145,15 @@ describe("the publish stage", () => {
     fs.rmSync(remote, { recursive: true, force: true });
   });
 
-  it("failing checks fail the run naming the checks (review rounds come later)", async () => {
+  it("with no review rounds allowed, failing checks fail the run naming the checks", async () => {
     const ws = tmpWorkspace();
     const { remote } = withRemote(ws);
     const gh = fakeGh(ws, { "1": [prView.failing] });
-    const cfg = cfgFor(ws, { components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false } });
+    const cfg = cfgFor(ws, { components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false }, publish: { remote: "origin", mergeWhen: "approved", mergeMethod: "squash", pollSeconds: 0, maxWaitMinutes: 60, maxReviewRounds: 0 } });
     const { client } = fakeClient([...packageRound("P1", "hello.txt")]);
     const r = await new Orchestrator(client, cfg, new RunBus("t-failing", false), control(), { publisher: new Publisher({ gh: gh.command }) }).run();
     expect(r.ok).toBe(false);
-    expect(r.summary).toBe("Pull request #1 (https://example.test/pr/1) has failing checks: ci.");
+    expect(r.summary).toBe("Pull request #1 (https://example.test/pr/1) still has failing checks (ci) after 0 review rounds. It stays open.");
     fs.rmSync(ws, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
   });
@@ -204,6 +204,116 @@ describe("the publish stage", () => {
     expect(r.ok).toBe(false);
     expect(r.summary).toBe("Merge of pull request #1 (https://example.test/pr/1) rejected: not yet. It stays open.");
     expect(gh.read().prs["1"].state).toBe("OPEN");
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+});
+
+describe("review rounds on the pull request", () => {
+  const single = (ws: string, extra: Record<string, unknown> = {}) => cfgFor(ws, { components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false }, ...extra });
+  const feedbackEvents = (events: RunEvent[]) => events.filter((e) => e.type === "pr.feedback") as any[];
+
+  it("a failing check and review comments start a builder round that commits, pushes and replies, then the PR is merged", async () => {
+    const ws = tmpWorkspace();
+    const { remote, base } = withRemote(ws);
+    const gh = fakeGh(ws, { "1": [{ ...prView.failing, comments: [comment("ana", "Please also greet in uppercase.")], reviews: [review("bo", "COMMENTED", "Looks close.")] }, prView.approved] }, { "1": [[inlineComment("ana", "hello.txt", 1, "Trailing newline missing?")], []] });
+    const cfg = single(ws);
+    let brief = "";
+    const { client, calls } = fakeClient([
+      ...packageRound("P1", "hello.txt"),
+      (params) => {
+        brief = lastUserText(params);
+        expect(params.tools.map((t: any) => t.name)).toEqual(expect.arrayContaining(["edit_file", "bash", "finish"]));
+        return { content: [toolUse("r1", "write_file", { path: "hello.txt", content: "HELLO\n", overwrite: true })], stop_reason: "tool_use" } as any;
+      },
+      call("r2", "finish", { summary: "Greeting is uppercase now; ci passes locally.", open_items: [] }),
+    ]);
+    const bus = new RunBus("t-review", false);
+    const events = collect(bus);
+    const r = await new Orchestrator(client, cfg, bus, control(), { publisher: new Publisher({ gh: gh.command }) }).run();
+    expect(r.summary).toBe("P1 ok");
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(7);
+    expect(phasesOf(events).map((p) => p.phase)).toEqual(["contract", "build", "evaluate", "publish", "wrapup"]);
+
+    // The brief carried every piece of feedback and the failing check.
+    expect(brief).toContain("# Review feedback");
+    expect(brief).toContain("- @ana commented: Please also greet in uppercase.");
+    expect(brief).toContain("- @bo commented: Looks close.");
+    expect(brief).toContain("- @ana on hello.txt:1: Trailing newline missing?");
+    expect(brief).toContain("- ci (fail)");
+    expect(brief).toContain("# Contract");
+    expect(brief).toMatch(/# Phase\npublish \(review round 1\)/);
+
+    const fb = feedbackEvents(events);
+    expect(fb.map((e) => [e.number, e.round, e.comments, e.checks])).toEqual([[1, 1, 3, ["ci"]]]);
+    expect(fb[0].summary).toBe("Greeting is uppercase now; ci passes locally.");
+    // The round was committed and pushed before the merge, and the reply posted with the marker.
+    expect(remoteLog(remote, base)).toEqual(["reins: review round 1 — Greet", "reins: build — Greet", "init"]);
+    const st = gh.read();
+    expect(st.comments).toHaveLength(1);
+    expect(st.comments[0].body).toMatch(/^<!-- reins -->/);
+    expect(st.comments[0].body).toContain("Greeting is uppercase now; ci passes locally.");
+    expect(st.comments[0].body).toContain("review round 1");
+    expect(st.prs["1"].state).toBe("MERGED");
+    expect(fs.readFileSync(path.join(ws, "hello.txt"), "utf8")).toBe("HELLO\n");
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+
+  it("requested changes with a body start a round even when checks are green", async () => {
+    const ws = tmpWorkspace();
+    const { remote } = withRemote(ws);
+    const gh = fakeGh(ws, { "1": [{ ...prView.checksOnly, reviewDecision: "CHANGES_REQUESTED", reviews: [review("bo", "CHANGES_REQUESTED", "Add a bye file too.")] }, prView.approved] });
+    let brief = "";
+    const { client } = fakeClient([
+      ...packageRound("P1", "hello.txt"),
+      (params) => ((brief = lastUserText(params)), { content: [toolUse("r1", "write_file", { path: "bye.txt", content: "bye\n" })], stop_reason: "tool_use" }) as any,
+      call("r2", "finish", { summary: "Added bye.txt.", open_items: [] }),
+    ]);
+    const bus = new RunBus("t-changes", false);
+    const events = collect(bus);
+    const r = await new Orchestrator(client, single(ws), bus, control(), { publisher: new Publisher({ gh: gh.command }) }).run();
+    expect(r.ok).toBe(true);
+    expect(brief).toContain("- @bo requested changes: Add a bye file too.");
+    expect(brief).not.toContain("Failing checks");
+    expect(feedbackEvents(events).map((e) => [e.round, e.comments, e.checks])).toEqual([[1, 1, []]]);
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+
+  it("the harness's own replies and old comments do not start a round", async () => {
+    const ws = tmpWorkspace();
+    const { remote } = withRemote(ws);
+    const gh = fakeGh(ws, { "1": [{ ...prView.approved, comments: [comment("reins", "<!-- reins -->\nEarlier reply."), comment("ana", "From last week.", "2000-01-01T00:00:00Z")] }] });
+    const { client, calls } = fakeClient([...packageRound("P1", "hello.txt")]);
+    const bus = new RunBus("t-own", false);
+    const events = collect(bus);
+    const r = await new Orchestrator(client, single(ws), bus, control(), { publisher: new Publisher({ gh: gh.command }) }).run();
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(5);
+    expect(feedbackEvents(events)).toHaveLength(0);
+    expect(gh.read().prs["1"].state).toBe("MERGED");
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+
+  it("gives up after maxReviewRounds with the feedback still open", async () => {
+    const ws = tmpWorkspace();
+    const { remote } = withRemote(ws);
+    const gh = fakeGh(ws, { "1": [prView.failing] });
+    const { client, calls } = fakeClient([
+      ...packageRound("P1", "hello.txt"),
+      call("r1", "finish", { summary: "Tried.", open_items: [] }),
+    ]);
+    const cfg = single(ws, { publish: { remote: "origin", mergeWhen: "approved", mergeMethod: "squash", pollSeconds: 0, maxWaitMinutes: 60, maxReviewRounds: 1 } });
+    const bus = new RunBus("t-rounds", false);
+    const events = collect(bus);
+    const r = await new Orchestrator(client, cfg, bus, control(), { publisher: new Publisher({ gh: gh.command }) }).run();
+    expect(r.ok).toBe(false);
+    expect(calls).toHaveLength(6);
+    expect(r.summary).toBe("Pull request #1 (https://example.test/pr/1) still has failing checks (ci) after 1 review round. It stays open.");
+    expect(feedbackEvents(events)).toHaveLength(1);
     fs.rmSync(ws, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
   });

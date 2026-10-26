@@ -93,5 +93,8 @@ describe("derive (fold of the event log)", () => {
     expect(m.pullRequests).toEqual([{ number: 7, url: "https://example.test/pr/7", branch: "reins/r-p1-say-hello", base: "main", package: pkg, openedTs: "2026-01-01T00:00:00.000Z", merged: { sha: "abc", ts: "2026-01-01T00:10:00.000Z" } }]);
     expect(m.feed.map((f) => f.kind)).toEqual(["pr", "pr"]);
     expect((m.feed[1] as any).what).toBe("merged");
+    const withRound = derive([evs[0], { runId: "r", seq: 1, ts: "2026-01-01T00:05:00.000Z", type: "pr.feedback", number: 7, url: "https://example.test/pr/7", round: 1, comments: 2, checks: ["ci"], summary: "Fixed." } as unknown as RunEvent, evs[1]]);
+    expect(withRound.pullRequests[0].rounds).toEqual([{ round: 1, comments: 2, checks: ["ci"], summary: "Fixed.", ts: "2026-01-01T00:05:00.000Z" }]);
+    expect((withRound.feed[1] as any)).toMatchObject({ kind: "pr", what: "feedback", round: 1, comments: 2, checks: ["ci"] });
   });
 });

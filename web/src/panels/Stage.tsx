@@ -299,13 +299,20 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
       return (
         <div className="flex items-center gap-2 text-small px-1 fade-in">
           <GitPullRequest size={14} className="shrink-0" style={{ color: item.what === "merged" ? "var(--ok)" : "var(--accent)" }} aria-hidden />
-          <Badge tone={item.what === "merged" ? "ok" : "neutral"}>{item.what === "merged" ? "merged" : "pull request"}</Badge>
+          <Badge tone={item.what === "merged" ? "ok" : item.what === "feedback" ? "warn" : "neutral"}>{item.what === "merged" ? "merged" : item.what === "feedback" ? `review round ${item.round}` : "pull request"}</Badge>
           <a className="underline underline-offset-2" href={item.url} target="_blank" rel="noreferrer">
             #{item.number}
           </a>
-          <span className="mono muted truncate">
-            {item.branch} → {item.base}
-          </span>
+          {item.what === "feedback" ? (
+            <span className="muted truncate">
+              {item.comments} comment{item.comments === 1 ? "" : "s"}
+              {item.checks?.length ? `, failing: ${item.checks.join(", ")}` : ""} — {item.summary}
+            </span>
+          ) : (
+            <span className="mono muted truncate">
+              {item.branch} → {item.base}
+            </span>
+          )}
           {item.package && <span className="faint truncate">· {item.package.id}: {item.package.title}</span>}
           {item.sha && <span className="mono faint">· {item.sha.slice(0, 7)}</span>}
         </div>
