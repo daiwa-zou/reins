@@ -14,6 +14,7 @@
     "test": "vitest run --config server/vitest.config.ts",
     "record-demo": "tsx server/scripts/record-demo.ts",
     "lessons:check": "tsx server/scripts/lessons-check.ts",
+    "lessons:examples": "tsx server/scripts/lessons-examples.ts",
     "docs:tables": "tsx server/scripts/docs-tables.ts"
   },
   "dependencies": {

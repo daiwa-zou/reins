@@ -10,6 +10,8 @@ import { loadSkills } from "./skills.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LESSONS_DIR = path.resolve(here, "../../lessons");
+/** The example library (the 30 distilled posts), not loaded by default: `npm run lessons:examples` copies it into $REINS_HOME/lessons. */
+export const EXAMPLES_DIR = path.resolve(here, "../../examples/lessons");
 /** Larger files are not lessons; refuse them rather than read them. */
 const MAX_LESSON_BYTES = 512 * 1024;
 
@@ -174,6 +176,13 @@ export function loadLessonLibrary(): LessonLibrary {
   const lib = { lessons, problems, dirs };
   cache = { key, lib };
   return lib;
+}
+
+/** Lint one directory of lessons as if it were the bundled dir (used by `lessons:check --examples`). */
+export function lintDir(dir: string): LessonLibrary {
+  const problems: LessonProblem[] = [];
+  const lessons = readDir(dir, "bundled", problems, loadSkills(null).map((s) => s.name));
+  return { lessons, problems, dirs: { bundled: dir, user: userLessonsDir() } };
 }
 
 export function listLessons(): Lesson[] {

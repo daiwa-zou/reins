@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Implication, Lesson, UserDomain } from "../../shared/types.js";
 import { domainEffects, slugifyDomainId, tagUserDomains, validateUserDomain } from "../../shared/domains.js";
 import { composeRun, domainPresets, PRESET_RECIPES } from "../../shared/presets.js";
+import { seededHome } from "./testLibrary.js";
 
 // A user-built domain is a named set of implications picked from the library.
 // Picking an implication tags it with the domain: stage implications feed the
@@ -86,7 +87,7 @@ describe("composing a run with a user-built domain", () => {
 });
 
 describe("domains.json", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "reins-domains-"));
+  const home = seededHome("reins-domains-");
   const prev = process.env.REINS_HOME;
   beforeAll(() => {
     process.env.REINS_HOME = home;
@@ -99,7 +100,7 @@ describe("domains.json", () => {
     const { deleteDomain, DomainNotFound, DomainValidationError, listDomains, saveDomain } = await import("./domains.js");
     const { listLessons } = await import("./lessons.js");
     const first = listLessons()[0];
-    const ids = first.items.filter((i) => i.standing !== "unreviewed").slice(0, 2).map((i) => i.id);
+    const ids = first.items.filter((i) => i.standing !== "unreviewed" && !i.implicit).slice(0, 2).map((i) => i.id);
     expect(listDomains()).toEqual([]);
     const saved = saveDomain({ label: "Team rules", description: "ours", implications: ids });
     expect(saved).toMatchObject({ id: "team-rules", label: "Team rules", implications: ids });
@@ -118,7 +119,7 @@ describe("domains.json", () => {
     const { saveDomain, deleteDomain } = await import("./domains.js");
     const { resolveRunInput } = await import("./presets.js");
     const { listLessons } = await import("./lessons.js");
-    const stage = listLessons().flatMap((l) => l.items).find((i) => i.kind === "stage" && i.target === "build" && i.standing === "bundled")!;
+    const stage = listLessons().flatMap((l) => l.items).find((i) => i.kind === "stage" && i.target === "build" && i.standing !== "unreviewed")!;
     saveDomain({ id: "build-notes", label: "Build notes", implications: [stage.id] });
     const cfg = resolveRunInput({ task: "t", workspace: "/w", domains: ["build-notes"] } as any);
     expect(cfg.domains).toEqual(["build-notes"]);

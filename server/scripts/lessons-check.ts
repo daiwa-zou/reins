@@ -3,9 +3,10 @@
 // warnings (untyped bullets, missing quotes) do not fail. The component catalogue
 // is not checked against the library: components exist without lessons.
 // Point it at another library with REINS_HOME=<dir> (reads <dir>/lessons).
-import { loadLessonLibrary } from "../src/lessons.js";
+import { EXAMPLES_DIR, loadLessonLibrary, lintDir } from "../src/lessons.js";
 
-const lib = loadLessonLibrary();
+// --examples lints examples/lessons (the shipped example library) instead of your library.
+const lib = process.argv.includes("--examples") ? lintDir(EXAMPLES_DIR) : loadLessonLibrary();
 const errors = lib.problems.filter((p) => p.level === "error");
 const warns = lib.problems.filter((p) => p.level === "warn");
 const dirFor = (s: string) => (s === "user" ? lib.dirs.user : s === "bundled" ? lib.dirs.bundled : "shared/components.ts");

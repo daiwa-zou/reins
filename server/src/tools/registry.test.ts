@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { ALL_TOOLS, scrubbedEnv, truncate } from "./registry.js";
 import { listLessons } from "../lessons.js";
+import { seededHome } from "../testLibrary.js";
 
 describe("scrubbedEnv", () => {
   it("drops credentials and keeps ordinary variables", () => {
@@ -32,9 +33,9 @@ describe("truncate", () => {
 });
 
 describe("list_lessons / read_lesson", () => {
-  // Only the bundled library: an empty REINS_HOME keeps the developer's own lessons out of the assertions.
+  // The example library in a temp home keeps the developer's own lessons out of the assertions.
   beforeAll(() => {
-    process.env.REINS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "reins-reg-"));
+    process.env.REINS_HOME = seededHome("reins-reg-");
   });
   const ctx = { workspace: process.cwd(), role: "builder", allowNetwork: false, sandbox: false, signal: new AbortController().signal, handlers: {} } as any;
   const list = (input: Record<string, string> = {}) => ALL_TOOLS.list_lessons.run(input, ctx);

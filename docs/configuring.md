@@ -226,7 +226,9 @@ Every switch with its tier, what it does, what the harness does instead when it 
 
 The tables on this page are generated from `shared/components.ts` by `npm run docs:tables`; `server/src/docs.test.ts` fails when a generated block differs from its renderer.
 
-## Lessons: bundled and your own
+## Lessons: your own, and the examples
+
+The library ships empty: `lessons/` in the repo has no files, and the harness needs none (the component catalogue stands on its own). Your lessons live in `$REINS_HOME/lessons`. `npm run lessons:examples` copies the 30 distilled Anthropic engineering posts from `examples/lessons/` into it as reviewed lessons (`--force` overwrites ones already there); `npm run lessons:check --examples` lints the example library itself. A markdown file dropped into `lessons/` is read as a bundled lesson (standing `bundled`), which is how a fork ships its own defaults.
 
 - **Bundled**: `lessons/*.md` in the repo.
 - **Yours**: `$REINS_HOME/lessons/*.md`. A file with the same name (slug) as a bundled lesson **overrides** it; every other file is added. Your lessons get a *user* badge in the Lessons view and `"source": "user"` in `GET /api/lessons`.
@@ -277,7 +279,8 @@ A source whose content hash (or URL) matches a lesson in the library is refused 
 Lints the bundled library, `$REINS_HOME/lessons` and the catalogue mapping, prints each problem with its file, and exits 1 if there is any error. It honours `REINS_HOME`:
 
 ```sh
-npm run lessons:check                      # bundled + ~/.reins/lessons
+npm run lessons:check                      # lessons/ (empty by default) + ~/.reins/lessons
+npm run lessons:check -- --examples        # the example library in examples/lessons
 REINS_HOME=/tmp/my-home npm run lessons:check
 ```
 

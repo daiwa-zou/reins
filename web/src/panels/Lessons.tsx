@@ -72,7 +72,17 @@ export function LessonsPanel() {
   const userProblems = (problems?.problems ?? []).filter((p) => p.source !== "bundled" || p.level === "error");
   const userCount = lessons.filter((l) => l.source === "user").length;
 
-  if (!lessons.length && loaded) return <Empty title="No lessons found" body="Add markdown files under lessons/ or your own library (see docs/lesson-template.md)." />;
+  if (!lessons.length && loaded)
+    return (
+      <div className="h-full overflow-auto p-6 flex flex-col items-center gap-4" data-lessons-empty>
+        <Empty title="No lessons yet" body="The library ships empty and the harness needs none. Run `npm run lessons:examples` to add the 30 distilled Anthropic engineering posts, write one from docs/lesson-template.md into $REINS_HOME/lessons, or distil one from a source below." />
+        <div className="card p-4 w-full max-w-2xl">
+          <IntakeNotice />
+          <IntakeForm inline />
+          <IntakeJobs />
+        </div>
+      </div>
+    );
 
   return (
     <div className="h-full flex">

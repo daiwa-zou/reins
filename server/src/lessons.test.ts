@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseLesson } from "../../shared/lessons.js";
-import { getLesson, LESSONS_DIR, loadLessonLibrary } from "./lessons.js";
+import { EXAMPLES_DIR, getLesson, LESSONS_DIR, loadLessonLibrary } from "./lessons.js";
 
 const GOOD = `---
 title: "A good lesson: with a colon"
@@ -78,13 +78,16 @@ describe("parseLesson", () => {
 });
 
 describe("lesson library", () => {
-  it("bundled library lints clean", () => {
+  it("lessons/ ships empty: the library has no bundled lessons unless you add files", () => {
+    expect(fs.readdirSync(LESSONS_DIR).filter((x) => x.endsWith(".md"))).toEqual([]);
+  });
+  it("the example library (examples/lessons) lints clean", () => {
     const slugs: string[] = [];
     const errs: string[] = [];
-    for (const f of fs.readdirSync(LESSONS_DIR).filter((x) => x.endsWith(".md"))) {
+    for (const f of fs.readdirSync(EXAMPLES_DIR).filter((x) => x.endsWith(".md"))) {
       const slug = f.replace(/\.md$/, "");
       slugs.push(slug);
-      for (const p of parseLesson(slug, fs.readFileSync(path.join(LESSONS_DIR, f), "utf8")).problems) errs.push(`${f} [${p.level}]: ${p.message}`);
+      for (const p of parseLesson(slug, fs.readFileSync(path.join(EXAMPLES_DIR, f), "utf8")).problems) errs.push(`${f} [${p.level}]: ${p.message}`);
     }
     // Untyped bullets are valid (kind gap) but warned about; errors are not allowed anywhere.
     expect(errs.filter((e) => e.includes("[error]"))).toEqual([]);
@@ -109,7 +112,7 @@ describe("user lessons ($REINS_HOME/lessons)", () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it("picks up a lessons dir created after the first load, overrides by slug, reports problems, and never follows symlinks out", () => {
+  it("picks up a lessons dir created after the first load, takes an example lesson as a user one, reports problems, and never follows symlinks out", () => {
     const before = loadLessonLibrary().lessons.length;
     const dir = path.join(home, "lessons");
     fs.mkdirSync(dir);
@@ -118,8 +121,8 @@ describe("user lessons ($REINS_HOME/lessons)", () => {
     expect(lib.lessons.length).toBe(before + 1);
     expect(lib.lessons.find((l) => l.slug === "my-note")).toMatchObject({ title: "My note", source: "user" });
 
-    const bundled = fs.readFileSync(path.join(LESSONS_DIR, "agent-skills.md"), "utf8");
-    fs.writeFileSync(path.join(dir, "agent-skills.md"), bundled.replace(/^title: .*$/m, "title: My skills override"));
+    const example = fs.readFileSync(path.join(EXAMPLES_DIR, "agent-skills.md"), "utf8");
+    fs.writeFileSync(path.join(dir, "agent-skills.md"), example.replace(/^title: .*$/m, "title: My skills override"));
     fs.writeFileSync(path.join(dir, "broken.md"), "junk");
     const outside = path.join(home, "secret.md");
     fs.writeFileSync(outside, GOOD.replace("First learning.", "SECRET CONTENT"));

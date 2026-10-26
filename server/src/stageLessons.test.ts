@@ -9,6 +9,10 @@ import { parseLesson } from "../../shared/lessons.js";
 import { ideas, linkCatalogue, renderStageBlock, stageImplications, STAGE_BLOCK_CAP } from "../../shared/implications.js";
 import { composeRun, presetsLabel } from "../../shared/presets.js";
 import { listLessons } from "./lessons.js";
+import { seededHome } from "./testLibrary.js";
+
+// These tests read real lessons; lessons/ ships empty, so they run against the example library.
+process.env.REINS_HOME = seededHome("reins-stage-home-");
 import { resolveRunInput } from "./presets.js";
 import { firstMessage } from "./roles/prompts.js";
 import { Orchestrator } from "./engine/orchestrator.js";

@@ -8,6 +8,10 @@ import { resolveRunInput } from "../presets.js";
 import { firstMessage } from "../roles/prompts.js";
 import { RunBus } from "./bus.js";
 import { AgentLoop } from "./loop.js";
+import { seededHome } from "../testLibrary.js";
+
+// These tests read real lessons; lessons/ ships empty, so they run against the example library.
+process.env.REINS_HOME = seededHome("reins-stage-engines-");
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
 
 // Both engines get the phase's first message from roles/prompts.ts firstMessage,
