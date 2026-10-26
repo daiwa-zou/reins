@@ -33,7 +33,7 @@ export function Help() {
             ["Supervision", "How much you want to be asked: Unattended, Ask before publishing (one prompt before a package's branch is pushed and its pull request opened), Check in at gates (plan, contract, evaluation, merge) or Ask before every write (every pause, guardrail mode ask)."],
             ["Tier", "Who decides whether a component is on: Always on (only an experiment turns it off), Set by Effort, or Follows settings (Supervision and the engine)."],
             ["Experiment", "A run with an always-on component switched off (POST /api/runs with ablated: [...]), recorded as ablated and shown on the title chip."],
-            ["Domains", "What kind of project: Web, CLI, Go, Python and any domain a lesson names. Zero or more, layered over Effort and Supervision; they may only raise effort and tighten supervision."],
+            ["Domains", "What kind of project: Web, CLI, Go, Python, any domain a lesson names, and your own built from the lessons' implications (Build a domain… on Harness, Lessons or New run). Zero or more, layered over Effort and Supervision; they may only raise effort and tighten supervision."],
             ["Saved preset", "Your own saved settings (Customize › Save as preset…). Manage them and your default on the Harness page."],
             ["Component", "One switch in the harness, such as the planner or the evaluator. Effort sets them; New run › Customize overrides one; docs/configuring.md explains each."],
             ["Lesson", "A distilled engineering post. Lessons explain where a component, a domain or a guidance line comes from."],

@@ -9,6 +9,7 @@ import { HarnessPanel } from "./panels/Harness";
 import { LessonsPanel } from "./panels/Lessons";
 import { ReliabilityPanel } from "./panels/Reliability";
 import { NewRun } from "./components/NewRun";
+import { DomainBuilder } from "./components/DomainBuilder";
 import { Settings } from "./panels/Settings";
 import { Welcome } from "./components/Welcome";
 import { Help } from "./components/Help";
@@ -133,6 +134,7 @@ export function App() {
         </main>
       </div>
       {modal === "newRun" && <NewRun />}
+      {modal === "domainBuilder" && <DomainBuilder />}
       {modal === "settings" && <Settings />}
       {modal === "help" && <Help />}
       {/* Always-mounted live regions: a region created together with its content is often not announced. */}

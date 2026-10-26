@@ -1,4 +1,4 @@
-import type { Composition, IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet } from "@shared/types";
+import type { Composition, IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet, UserDomain } from "@shared/types";
 
 export type PresetEntry = Preset & { isDefault: boolean; compatibility?: Record<EngineId, PresetCompatibility> };
 export interface PresetList {
@@ -48,6 +48,9 @@ export const api = {
   lessons: () => fetch("/api/lessons").then((r) => j<Lesson[]>(r)),
   lessonProblems: () => fetch("/api/lessons/problems").then((r) => j<{ problems: LessonProblem[]; userDir: string; bundledDir: string }>(r)),
   presets: () => fetch("/api/presets").then((r) => j<PresetList>(r)),
+  domains: () => fetch("/api/domains").then((r) => j<UserDomain[]>(r)),
+  saveDomain: (body: Pick<UserDomain, "id" | "label" | "description" | "implications">) => post("/api/domains", body).then((r) => j<UserDomain>(r)),
+  deleteDomain: (id: string) => fetch(`/api/domains/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => j<{ ok: true }>(r)),
   savePreset: (body: { name: string; description?: string; config: PresetConfig; default?: boolean; lessons?: string[] }) => post("/api/presets", body).then((r) => j<{ preset: Preset; dropped: string[]; default: string | null }>(r)),
   deletePreset: (name: string) => fetch(`/api/presets/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) => j<{ ok: true }>(r)),
   setDefaultPreset: (name: string | null) => post("/api/presets/default", { name }).then((r) => j<{ default: string | null }>(r)),

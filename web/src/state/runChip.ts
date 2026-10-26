@@ -1,4 +1,4 @@
-import type { Composition, Lesson, RunConfig } from "@shared/types";
+import type { Composition, Lesson, RunConfig, UserDomain } from "@shared/types";
 import { composeRun, PresetCompositionError, runChipLabel } from "@shared/presets";
 
 /**
@@ -18,9 +18,9 @@ export function runPresetChip(cfg: Pick<RunConfig, "preset" | "presets" | "job" 
  * and return the problem as a string for New run to show inline; null when it
  * composes. Never throws.
  */
-export function compositionError(comp: Partial<Composition>, lessons: Lesson[]): string | null {
+export function compositionError(comp: Partial<Composition>, lessons: Lesson[], userDomains: UserDomain[] = []): string | null {
   try {
-    composeRun(comp, lessons);
+    composeRun(comp, lessons, undefined, undefined, userDomains);
     return null;
   } catch (e) {
     if (e instanceof PresetCompositionError) return e.message;

@@ -46,9 +46,11 @@ function StartingPoints() {
   const openModal = useStore((s) => s.openModal);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const toastMsg = useStore((s) => s.toastMsg);
+  const userDomains = useStore((s) => s.userDomains);
+  const openDomainBuilder = useStore((s) => s.openDomainBuilder);
   const list = storePresets.length ? storePresets : generatedPresets([]);
   const { saved, domains: generated } = classifyPresets(list);
-  const domains = domainPresets(lessons);
+  const domains = domainPresets(lessons, userDomains);
   const def = startingPointFor(defaultPreset, { saved: saved.map((p) => p.name), generated: generated.map((p) => ({ name: p.name, domain: p.domain })) });
   const isDefault = (key: string) => (def.kind === "saved" ? def.name === key : def.kind === "compose" ? ["full", ...def.domains].join("+") === key : false);
 
@@ -100,7 +102,7 @@ function StartingPoints() {
           </a>
         </div>
         <p className="muted text-[12.5px] leading-relaxed mt-1" data-harness-intro>
-          A run is an <b>Effort</b> level (what the harness does), a <b>Supervision</b> level (when it asks you) and any <b>domains</b> (what kind of project), or one of your saved presets. Pick one to open New run with it filled in; everything else is set for you.
+          A run is an <b>Effort</b> level (what the harness does), a <b>Supervision</b> level (when it asks you) and any <b>domains</b> (what kind of project), or one of your saved presets. Pick one to open New run with it filled in; everything else is set for you. Build your own domain from the lessons' implications with <i>Build a domain…</i>.
         </p>
       </div>
 
@@ -160,13 +162,31 @@ function StartingPoints() {
       </div>
 
       <div>
-        <div className="section-label mb-1.5">Domains · what kind of project (layered over Effort and Supervision)</div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <div className="section-label flex-1">Domains · what kind of project (layered over Effort and Supervision)</div>
+          <button type="button" className="btn btn-sm" onClick={() => openDomainBuilder()} data-build-domain>
+            Build a domain…
+          </button>
+        </div>
         <ul className="grid md:grid-cols-2 gap-2">
           {domains.map((d) => {
-            const shaping = lessons.filter((l) => l.standing !== "unreviewed" && lessonInDomain(l, d.id!));
+            const mine = userDomains.find((u) => u.id === d.id);
+            const shaping = mine ? [] : lessons.filter((l) => l.standing !== "unreviewed" && lessonInDomain(l, d.id!));
             const name = domainPresetName(d.id!);
             return (
-              <Item key={d.id} k={`full+${d.id}`} title={presetChip(d.id!)} label={`Medium · Check in · ${presetChip(d.id!)}`} description={d.description} defaultName={name} onStart={() => openModal("newRun", { __compose: { domains: [d.id!] } } as any)} dataKey={{ "data-start-domain": d.id! }}>
+              <Item key={d.id} k={`full+${d.id}`} title={mine ? d.name : presetChip(d.id!)} label={`Medium · Check in · ${presetChip(d.id!)}`} description={d.description} defaultName={name} onStart={() => openModal("newRun", { __compose: { domains: [d.id!] } } as any)} dataKey={{ "data-start-domain": d.id! }}>
+                {mine && (
+                  <div className="text-[11.5px] leading-snug flex flex-wrap items-center gap-1.5">
+                    <Badge tone="accent">yours</Badge>
+                    <span className="faint">
+                      Built from {mine.implications.length} implication{mine.implications.length === 1 ? "" : "s"}
+                      {d.basis?.length ? ` in ${d.basis.length} lesson${d.basis.length === 1 ? "" : "s"}` : ""}
+                    </span>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDomainBuilder({ domain: mine })} data-edit-domain={mine.id}>
+                      Edit
+                    </button>
+                  </div>
+                )}
                 {shaping.length > 0 && (
                   <div className="text-[11.5px] leading-snug">
                     <span className="faint">Shaped by: </span>

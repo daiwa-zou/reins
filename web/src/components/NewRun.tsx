@@ -41,6 +41,8 @@ export function NewRun() {
   const toastMsg = useStore((s) => s.toastMsg);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
   const lessons = useStore((s) => s.lessons);
+  const userDomains = useStore((s) => s.userDomains);
+  const openDomainBuilder = useStore((s) => s.openDomainBuilder);
 
   const draft = useStore((s) => s.newRunDraft);
   const setNewRunDraft = useStore((s) => s.setNewRunDraft);
@@ -63,8 +65,8 @@ export function NewRun() {
   // settings and records the ids, so the error shows inline and Start is blocked.
   const composeInto = (c: Partial<RunConfig>, comp: Partial<Composition>, engine: EngineId = liveEngineOf(c)): RunConfig => {
     const ablated = c.ablated ?? [];
-    if (compositionError(comp, lessons)) return { ...fresh(c), ...c, preset: undefined, presets: undefined, ...comp } as RunConfig;
-    const composed = composeRun(comp, lessons, undefined, engine);
+    if (compositionError(comp, lessons, userDomains)) return { ...fresh(c), ...c, preset: undefined, presets: undefined, ...comp } as RunConfig;
+    const composed = composeRun(comp, lessons, undefined, engine, userDomains);
     const out = { ...applyPreset(fresh({ ...c, engine }), { name: composed.label, config: composed.config }), engine, preset: undefined, presets: undefined, effort: composed.effort, supervision: composed.supervision, domains: composed.domains } as RunConfig;
     if (ablated.length) return { ...out, ablated, components: { ...out.components, ...Object.fromEntries(ablated.map((id) => [id, false])) } };
     return { ...out, ablated: undefined };
@@ -239,7 +241,7 @@ export function NewRun() {
 
   const budgetOk = Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
   const engineOk = cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode;
-  const composeError = cfg.effort ? compositionError({ effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains }, lessons) : null;
+  const composeError = cfg.effort ? compositionError({ effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains }, lessons, userDomains) : null;
   const blocker = composeError ? `Start from: ${composeError}.` : cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
   const canStart = blocker === null;
   const startRun = async (engine: "live" | "replay") => {
@@ -333,6 +335,8 @@ export function NewRun() {
           </div>
           <ComposePicker
             lessons={lessons}
+            userDomains={userDomains}
+            onBuildDomain={() => openDomainBuilder()}
             value={cfg.effort ? { effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains ?? [] } : null}
             suggestions={check?.exists ? (check.suggestions ?? []) : []}
             onOpenLesson={openLesson}

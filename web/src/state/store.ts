@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Composition, EngineId, HarnessComponent, IntakeJobSummary, Lesson, RunEvent, RunSummary, ServerInfo, ServerMessage } from "@shared/types";
 import { api, type PresetEntry } from "../lib/api";
+import { tagUserDomains } from "@shared/domains";
 import { decodeNav, encodeNav, isKnownRun, normalizeNav, sameNav, type DetailsSub, type NavState, type RunView, type Section } from "./nav";
 
 export type { Section, RunView, DetailsSub, NavState } from "./nav";
@@ -31,8 +32,14 @@ interface State {
   /** Show model thinking in Activity (persisted, off by default). */
   showThinking: boolean;
   theme: Theme;
-  modal: null | "newRun" | "settings" | "help";
+  modal: null | "newRun" | "settings" | "help" | "domainBuilder";
   newRunPrefill?: Partial<import("@shared/types").RunConfig>;
+  /** The user's domains built from implications ($REINS_HOME/domains.json); the library in `lessons` is tagged with them. */
+  userDomains: import("@shared/types").UserDomain[];
+  refreshDomains: () => Promise<void>;
+  /** What the domain builder opens on: an existing domain to edit, or a lesson to seed from. */
+  domainDraft: { domain?: import("@shared/types").UserDomain | null; lesson?: import("@shared/types").Lesson | null } | null;
+  openDomainBuilder: (seed?: State["domainDraft"]) => void;
   /** Scrubber: show state as of this seq (null = live). */
   scrubSeq: number | null;
   /** Open lesson (Lessons section), mirrored in the URL as ?lesson=. */
@@ -179,6 +186,8 @@ export const useStore = create<State>((set, get) => ({
   showThinking: readPref(PREF_THINKING, false),
   theme: savedTheme,
   modal: null,
+  userDomains: [],
+  domainDraft: null,
   scrubSeq: null,
   lesson: null,
   component: null,
@@ -200,14 +209,15 @@ export const useStore = create<State>((set, get) => ({
     booted = true;
     connect(set, get);
     let info, components, lessons, runs, intakeJobs: IntakeJobSummary[] = [];
+    let userDomains: import("@shared/types").UserDomain[] = [];
     try {
-      [info, components, lessons, runs, intakeJobs] = await Promise.all([api.info(), api.components(), api.lessons(), api.runs(), api.intakeJobs().catch(() => [] as IntakeJobSummary[])]);
+      [info, components, lessons, runs, intakeJobs, userDomains] = await Promise.all([api.info(), api.components(), api.lessons(), api.runs(), api.intakeJobs().catch(() => [] as IntakeJobSummary[]), api.domains().catch(() => [])]);
     } catch (e) {
       booted = false;
       set({ booting: false, bootError: (e as Error).message });
       return;
     }
-    set({ info, components, lessons, runs, intakeJobs, booting: false, bootError: null });
+    set({ info, components, lessons: tagUserDomains(lessons, userDomains), userDomains, runs, intakeJobs, booting: false, bootError: null });
     void get().refreshPresets();
     const known = (id: string) => isKnownRun(get(), id);
     const fromUrl = decodeNav(location.search, { runExists: known });
@@ -252,7 +262,16 @@ export const useStore = create<State>((set, get) => ({
     applyTheme(theme);
     set({ theme });
   },
-  openModal: (modal, prefill) => set({ modal, newRunPrefill: prefill }),
+  openModal: (modal, prefill) => set({ modal, newRunPrefill: prefill, ...(modal === "domainBuilder" ? {} : { domainDraft: null }) }),
+  openDomainBuilder: (seed) => set({ modal: "domainBuilder", domainDraft: seed ?? null }),
+  refreshDomains: async () => {
+    try {
+      const [lessons, userDomains] = await Promise.all([api.lessons(), api.domains()]);
+      set({ lessons: tagUserDomains(lessons, userDomains), userDomains });
+    } catch {
+      /* keep what we have */
+    }
+  },
   setScrub: (scrubSeq) => set({ scrubSeq }),
   setLessonFilter: (slug) => get().navigate({ section: "lessons", lesson: slug, component: null }),
   refreshPresets: async () => {
@@ -272,7 +291,7 @@ export const useStore = create<State>((set, get) => ({
   },
   refreshLessons: async () => {
     try {
-      set({ lessons: await api.lessons() });
+      set({ lessons: tagUserDomains(await api.lessons(), get().userDomains) });
     } catch {
       /* keep what we have */
     }

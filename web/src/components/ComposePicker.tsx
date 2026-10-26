@@ -1,5 +1,5 @@
 import React from "react";
-import type { Composition, HarnessEffort, Lesson, Supervision } from "@shared/types";
+import type { Composition, HarnessEffort, Lesson, Supervision, UserDomain } from "@shared/types";
 import { DEFAULT_COMPOSITION, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "@shared/components";
 import { domainPresets, effortRecommendations, presetChip } from "@shared/presets";
 import { compositionError } from "../state/runChip";
@@ -39,13 +39,13 @@ function Segmented<T extends string>({ name, label, ids, value, labelOf, meaning
  * spends; Supervision decides when it asks you; domains layer lessons in the order picked. Lesson
  * recommendations for an effort level are shown with their reason and a Use button, never applied silently.
  */
-export function ComposePicker({ lessons, value, suggestions, onChange, onOpenLesson }: { lessons: Lesson[]; value: Partial<Composition> | null; suggestions: DomainSuggestion[]; onChange: (c: Composition) => void; onOpenLesson?: (slug: string) => void }) {
+export function ComposePicker({ lessons, userDomains = [], value, suggestions, onChange, onOpenLesson, onBuildDomain }: { lessons: Lesson[]; userDomains?: UserDomain[]; value: Partial<Composition> | null; suggestions: DomainSuggestion[]; onChange: (c: Composition) => void; onOpenLesson?: (slug: string) => void; onBuildDomain?: () => void }) {
   const cur: Composition = { effort: value?.effort ?? DEFAULT_COMPOSITION.effort, supervision: value?.supervision ?? DEFAULT_COMPOSITION.supervision, domains: value?.domains ?? [] };
   const active = !!value;
   const picked = cur.domains;
-  const domains = domainPresets(lessons);
+  const domains = domainPresets(lessons, userDomains);
   const ids = [...new Set([...domains.map((d) => d.id!), ...suggestions.map((s) => s.domain)])];
-  const error = active ? compositionError(cur, lessons) : null;
+  const error = active ? compositionError(cur, lessons, userDomains) : null;
   const reason = (d: string) => suggestions.find((s) => s.domain === d)?.reason;
   const toggle = (d: string) => onChange({ ...cur, domains: picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d] });
   const recs = effortRecommendations(lessons, picked);
@@ -64,12 +64,17 @@ export function ComposePicker({ lessons, value, suggestions, onChange, onOpenLes
           return (
             <button key={d} type="button" aria-pressed={on} disabled={!known} className={`badge ${on ? "badge-accent" : "badge-neutral"} hover:brightness-95`} title={known ? `${domains.find((x) => x.id === d)?.description ?? ""}${why ? `\nSuggested: ${why}` : ""}` : `No lesson names the domain "${d}" yet${why ? ` (suggested: ${why})` : ""}`} onClick={() => toggle(d)} data-domain={d}>
               {on ? "✓ " : ""}
-              {presetChip(d)}
+              {domains.find((x) => x.id === d)?.user ? domains.find((x) => x.id === d)!.name : presetChip(d)}
               {why && <span className="muted"> · suggested</span>}
             </button>
           );
         })}
         <span className="faint text-[11.5px]">what kind of project; pick any</span>
+        {onBuildDomain && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onBuildDomain} data-build-domain>
+            Build a domain…
+          </button>
+        )}
       </div>
       {recs.map((r) => (
         <div key={`${r.slug}:${r.claim}`} className="rounded-md border line px-2.5 py-1.5 flex flex-wrap items-center gap-2 text-[12px]" data-effort-recommendation={r.level}>
