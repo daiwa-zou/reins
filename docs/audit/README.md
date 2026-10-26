@@ -268,3 +268,27 @@ Every learning is traced to code (`path:line`), a component or a foundation, wit
 - **writing-tools-for-agents**: No per-tool metrics: covered by the tool eval fold above.
 - **writing-tools-for-agents**: No `response_format`: add `format: "concise" | "detailed"` to `git_status`, `list_files` and `search` (concise is paths only).
 - **writing-tools-for-agents**: SDK truncation has no hint: reuse `truncate()` at `claudeCodeLoop.ts:340`.
+
+## Closed since the audit
+
+The auditors' statuses above are their snapshot. These gaps were closed afterwards (the row stays as audited; the fix is here with its commit):
+
+| Gap (audit file) | Fix | Commit |
+|---|---|---|
+| `confinePath` lexical only (claude-code-sandboxing, how-we-contain-claude) | realpath of the deepest existing ancestor, re-checked under the real workspace; test with a symlink | 4b2eba6 |
+| API key re-enters the SDK subprocess (claude-code-sandboxing, confidential-inference, managed-agents) | the login is the credential; the key is no longer passed to the Claude Code subprocess | 4b2eba6 |
+| Reads of secrets open under Seatbelt (claude-code-sandboxing, how-we-contain-claude) | `~/.ssh`, `~/.aws`, git and gh credentials, `.netrc`, `.npmrc` and Reins settings denied for reads | 4b2eba6 |
+| Gate decisions not all logged (confidential-inference) | every allow is logged too, including read-only and in-workspace | 4b2eba6 |
+| `write_file` overwrites silently (swe-bench-sonnet) | requires `overwrite: true` for an existing file | 4b2eba6 |
+| Feature titles editable by the agent (effective-harnesses) | only status and note may change on a known feature | 4b2eba6 |
+| Steer notes drained by a scout (multi-agent-research-system) | scouts get their own control with an empty steer queue | 4b2eba6 |
+| SDK engine: no truncation hint, no sniff wrap, no denial escalation (several) | `truncate()` reused, sniffed output flagged, 3-in-a-row / 20-total escalation | 4b2eba6 |
+| SDK engine composition fabricated (effective-context-engineering) | estimated from what the session actually saw | 4b2eba6 |
+| Local server unauthenticated and bound to all interfaces (how-we-contain-claude) | bound to loopback | 4b2eba6 |
+| Think tool default contradicts the post's update (claude-think-tool) | off by default, assumption text updated | 4b2eba6 |
+| Sandbox inert on Linux without notice (claude-code-sandboxing, desktop-extensions) | "unavailable on this platform" badge on the switch | 4b2eba6 |
+| Trials not isolated (demystifying-evals, eval-awareness, managed-agents) | `fresh` repeats run in a detached git worktree with an empty `.reins/`, grouped under the origin | 4b9ef7d |
+| No infra bucket (infrastructure-noise, swe-bench-sonnet) | `failureKind` on trials; infra failures reported separately and excluded from the rate | 4b9ef7d |
+| No `init.sh` (effective-harnesses) | planner writes it; the harness runs and logs it before every build phase | 4b9ef7d |
+| Nested tools lack examples; no registry lint (advanced-tool-use, writing-tools, multi-agent) | examples on every array-of-object tool; lint test for length, examples, overlap, parameter names | 4b9ef7d |
+| Accent badge below AA, focus clipped in tab strips, tabs without roving focus (accessibility review) | fixed and verified in the live app | aa4ea6d, 4b9ef7d |
