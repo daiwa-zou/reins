@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
-import type { ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, RunConfig, Usage, WorkPackage } from "../../../shared/types.js";
+import type { ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, RunConfig, TestPlan, Usage, WorkPackage } from "../../../shared/types.js";
 import { RunBus } from "./bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
@@ -11,6 +11,7 @@ import { checkRunConfig } from "../../../shared/config.js";
 import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor, type PromptRole } from "../roles/prompts.js";
 import { packageLabel, packageRef, renderBreakdown, renderPackage, singlePackage, validateBreakdown, PACKAGE_MAX_LINES } from "../../../shared/packages.js";
+import { renderTestPlanDoc, renderTestsForBuilder, testsCriterion, validateTestPlan } from "../../../shared/testPlan.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
 import { runShell } from "../tools/registry.js";
 import { EFFORT_TABLE } from "../../../shared/components.js";
@@ -94,6 +95,8 @@ export class Orchestrator {
   private pkg: PackageRef | undefined;
   /** The agreed breakdown, or null when the run is one implicit package. */
   private packages: WorkPackage[] | null = null;
+  /** The current package's tests-stage plan, once agreed. */
+  private testPlan: TestPlan | null = null;
 
   private async phase<T>(phase: Phase, round: number, body: () => Promise<{ result: LoopResult | null; summary: string; value: T }>): Promise<T> {
     const started = Date.now();
@@ -308,6 +311,50 @@ export class Orchestrator {
       writeWorkspaceFile(ws, ".reins/contract.json", JSON.stringify(this.contract, null, 2));
     }
 
+    // ---- Tests (written before the build) ----
+    this.testPlan = null;
+    if (this.config.components.testsFirst) {
+      const stop = await this.phase("tests", 0, async () => {
+        const state: { plan: TestPlan | null; red: { exitCode: number | null; excerpt: string } | null } = { plan: null, red: null };
+        const r = await this.loop("evaluator", "test_writer", [...READ_TOOLS, "write_file", "edit_file", "bash"], ["propose_tests"], {
+          propose_tests: async (input: any) => {
+            const v = validateTestPlan(input, this.contract, (f) => fs.existsSync(path.join(ws, f)));
+            if (v.problems.length) throw new Error(`Refused: ${v.problems.join(" ")} Fix these and call propose_tests again.`);
+            // Red check: the suite must fail before any code is written, or it does not test the new behaviour.
+            const run = await runShell(v.plan.command, ws, this.control.signal, 180_000, undefined, this.config.components.osSandbox ? { workspace: ws, allowNetwork: this.config.guardrail.allowNetwork } : undefined);
+            const excerpt = run.out.trim().slice(-1500);
+            if (run.timedOut) throw new Error(`Refused: the test command timed out after 180 seconds (${v.plan.command}). Make the suite fast and non-interactive, then call propose_tests again.`);
+            if (run.code === 0) throw new Error(`Refused: the suite passes before any code is written (${v.plan.command} exited 0), so it does not test the new behaviour. Make each test fail because the behaviour is missing, then call propose_tests again.${excerpt ? `\nOutput:\n${excerpt}` : ""}`);
+            state.plan = v.plan;
+            state.red = { exitCode: run.code, excerpt };
+            writeWorkspaceFile(ws, ".reins/tests.json", JSON.stringify(v.plan, null, 2));
+            writeWorkspaceFile(ws, ".reins/tests.md", renderTestPlanDoc(v.plan, state.red));
+            this.bus.emitEvent({ type: "tests.agreed", plan: v.plan, red: state.red });
+            return `Agreed: ${v.plan.tests.length} test${v.plan.tests.length === 1 ? "" : "s"}, red before the build (exit ${run.code}).`;
+          },
+        }).run(
+          firstMessage("tests", this.config, {
+            ...this.projectContext(),
+            ...pkgBrief,
+            Contract: renderContract(this.contract),
+            Instructions: "Learn how this project tests, write the tests that prove every hard criterion (they must fail before any code is written), run them to see the failure, then call propose_tests.",
+          }),
+        );
+        if (this.checkStop(r)) return { result: r, summary: "Stopped.", value: true };
+        if (state.plan && state.red) {
+          this.testPlan = state.plan;
+          this.contract = [...this.contract.filter((c) => c.id !== testsCriterion("").id), testsCriterion(state.plan.command)];
+          writeWorkspaceFile(ws, ".reins/contract.json", JSON.stringify(this.contract, null, 2));
+          this.bus.emitEvent({ type: "contract.agreed", criteria: this.contract });
+          return { result: r, summary: `${state.plan.tests.length} tests written, red before the build (exit ${state.red.exitCode}); T added to the contract.`, value: false };
+        }
+        this.bus.emitEvent({ type: "note", level: "warn", text: `The test writer did not call propose_tests (${r.reason}); the build goes ahead without tests to make pass and the contract is unchanged. ${TURNS_ADVICE}` });
+        return { result: r, summary: "No tests proposed.", value: false };
+      });
+      if (stop) return { ok: false, summary: "Stopped while writing tests." };
+      if (this.testPlan && this.config.components.gitCommits) await this.commit(`reins: tests${label} — ${this.pkg ? pkg.title : this.config.title}`);
+    }
+
     // ---- Build / Evaluate rounds ----
     let lastEval: Evaluation | null = null;
     for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
@@ -315,6 +362,7 @@ export class Orchestrator {
       const stop = await this.phase("build", round, async () => {
         const ctx = this.projectContext();
         const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : { ...ctx, ...pkgBrief }), Contract: renderContract(this.contract) };
+        if (this.testPlan && !lastEval) extra["Tests to make pass"] = renderTestsForBuilder(this.testPlan);
         if (lastEval) extra["Evaluation of the previous round"] = renderEvaluationForBuilder(lastEval);
         else extra.Instructions = `Follow the session preamble, then implement the features${this.pkg ? ` of this package (${pkg.features.join(", ")}). Build only the features of this package; the others belong to later packages` : ""}. Call finish only when every hard criterion's verification step has been run and passed.`;
         if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";

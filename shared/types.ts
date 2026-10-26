@@ -7,7 +7,7 @@ export type RoleId = "planner" | "builder" | "evaluator" | "classifier" | "scout
 /** Roles every run config carries settings for. The librarian (lesson intake) borrows the planner's settings unless set. */
 export type RunRoleId = Exclude<RoleId, "librarian">;
 
-export type Phase = "plan" | "breakdown" | "contract" | "build" | "evaluate" | "wrapup";
+export type Phase = "plan" | "breakdown" | "contract" | "tests" | "build" | "evaluate" | "wrapup";
 
 export type RunStatus =
   | "queued"
@@ -22,6 +22,7 @@ export type ComponentId =
   | "planner"
   | "workPackages"
   | "contracts"
+  | "testsFirst"
   | "evaluator"
   | "progressFile"
   | "featureList"
@@ -275,6 +276,30 @@ export interface WorkPackage {
   dependsOn: string[];
 }
 
+/** One test the tests stage wrote before the build, and what it proves. */
+export interface TestSpec {
+  id: string;
+  /** Workspace-relative file that holds it. */
+  file: string;
+  name: string;
+  /** Contract criterion ids it covers. */
+  criteria: string[];
+  kind: "unit" | "behavior" | "integration" | "e2e";
+  /** What it checks and why, for the reviewer. */
+  explains: string;
+}
+
+/** The tests stage's output (shared/testPlan.ts): the suite the builder must make pass. */
+export interface TestPlan {
+  /** Runs the new tests; it is also the verification step of the T criterion. */
+  command: string;
+  tests: TestSpec[];
+  /** Hard criteria no test can check here, each with the reason. */
+  uncovered: { id: string; reason: string }[];
+  /** The writer's overall explanation. */
+  explanation: string;
+}
+
 /** Which package a contract, build or evaluate phase belongs to. */
 export interface PackageRef {
   id: string;
@@ -393,6 +418,7 @@ export type RunEvent = Base &
     | { type: "contract.proposed"; by: RoleId; criteria: ContractCriterion[]; rationale: string }
     | { type: "contract.agreed"; criteria: ContractCriterion[] }
     | { type: "breakdown.agreed"; packages: WorkPackage[]; rationale: string }
+    | { type: "tests.agreed"; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
     | {
         type: "evaluation.result";
         round: number;

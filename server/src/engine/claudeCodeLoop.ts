@@ -250,7 +250,7 @@ export class ClaudeCodeLoop {
       systemPrompt:
         this.opts.system +
         (canWrite ? "" : "\n\nYou may read" + (canShell ? " and run commands" : "") + " but must not create or edit files in this phase.") +
-        "\n\nThe Reins tools (propose_breakdown, propose_contract, review_contract, report_evaluation, finish, update_progress, think, read_skill, lessons) are available as mcp__reins__* tools and are always loaded; call them directly." +
+        "\n\nThe Reins tools (propose_breakdown, propose_contract, review_contract, propose_tests, report_evaluation, finish, update_progress, think, read_skill, lessons) are available as mcp__reins__* tools and are always loaded; call them directly." +
         "\n\nShell commands run in the user's login shell, where cat, mv, cp and rm may be aliased to interactive or colourising variants that hang or garble output without a tty. Use the Read, Write and Edit tools for files, and in shell commands write \\cat, \\mv, \\cp, \\rm (or /bin/ paths) to bypass aliases. Never run interactive commands.",
       // Restrict the built-in tool set with `tools`, and keep allowedTools empty so
       // every call (built-in and mcp__reins__*) falls through to canUseTool.

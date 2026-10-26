@@ -37,6 +37,8 @@ export function narrateToolCall(name: string, input: any): string {
       return `Proposing a definition of done (${Array.isArray(input?.criteria) ? input.criteria.length : "?"} criteria)`;
     case "propose_breakdown":
       return `Slicing the plan into ${Array.isArray(input?.packages) ? input.packages.length : "?"} work packages`;
+    case "propose_tests":
+      return `Proposing ${Array.isArray(input?.tests) ? input.tests.length : "?"} tests to write first`;
     case "review_contract":
       return input?.accept ? `Accepting the contract` : `Revising the contract`;
     case "report_evaluation":

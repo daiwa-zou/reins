@@ -56,8 +56,9 @@ describe("derive (fold of the event log)", () => {
     expect(after.finishedTs).toBe("2026-01-01T00:00:04.000Z");
   });
   it("knows the breakdown phase, between plan and contract", () => {
-    expect(PHASE_ORDER).toEqual(["plan", "breakdown", "contract", "build", "evaluate", "wrapup"]);
+    expect(PHASE_ORDER).toEqual(["plan", "breakdown", "contract", "tests", "build", "evaluate", "wrapup"]);
     expect(PHASE_LABEL.breakdown).toBe("Breakdown");
+    expect(PHASE_LABEL.tests).toBe("Tests");
   });
   it("carries the work package of a phase into the phase list and the feed", () => {
     const pkg = { id: "P2", title: "Document the endpoint", index: 2, total: 2 };
@@ -71,5 +72,14 @@ describe("derive (fold of the event log)", () => {
     const item = m.feed.find((f) => f.kind === "phase") as any;
     expect(item.package).toEqual(pkg);
     expect(item.finished.summary).toBe("2 criteria agreed");
+  });
+  it("folds tests.agreed into the latest test plan and a feed item", () => {
+    const plan = { command: "npm test", tests: [{ id: "T1", file: "t/a.test.ts", name: "a", criteria: ["C1"], kind: "unit", explains: "e" }], uncovered: [], explanation: "x" };
+    const evs = [{ runId: "r", seq: 0, ts: "2026-01-01T00:00:00.000Z", type: "tests.agreed", plan, red: { exitCode: 1, excerpt: "1 failed" } }] as unknown as RunEvent[];
+    const m = derive(evs);
+    expect(m.tests).toEqual({ plan, red: { exitCode: 1, excerpt: "1 failed" } });
+    const item = m.feed.find((f) => f.kind === "tests") as any;
+    expect(item.plan.tests).toHaveLength(1);
+    expect(item.red.exitCode).toBe(1);
   });
 });

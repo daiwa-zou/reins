@@ -31,6 +31,8 @@ foundations: secretsOutside
   > Git operations go through a secure git proxy that limits Claude to authorized repositories
 - [foundation:eventLog] Give many parallel sessions a compact status view with per-session steering and results, not a single transcript.
   > Parallel tasks run across different repositories from one interface
+- [component:testsFirst] Give every package a test-driven verification path: the tests exist before the change and the agent verifies against them.
+  > backend changes where Claude can verify via test-driven development
 - [stage:contract] Prefer criteria that have a verification path the builder can run, such as tests, over criteria only a person can judge.
   > backend changes where Claude can verify via test-driven development
 - [foundation:reviewIntent] Make the end-of-task summary of changes the primary deliverable shown to the user.

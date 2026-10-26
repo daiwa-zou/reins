@@ -294,7 +294,7 @@ describe("Orchestrator", () => {
       workspace: ws,
       maxTurnsPerPhase: 5,
       maxFixRounds: 1,
-      components: { planner: false, osSandbox: false, actionClassifier: false } as any,
+      components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false } as any,
       pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false },
     });
     const criteria = [
@@ -367,7 +367,7 @@ describe("Orchestrator", () => {
 
   it("runs plan -> contract -> build -> evaluate -> wrapup with file handoff and commits", async () => {
     const ws = tmpWorkspace();
-    const cfg = defaultRunConfig({ task: "Add a greeting file", workspace: ws, components: { osSandbox: false, actionClassifier: false } as any, pauses: { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false } });
+    const cfg = defaultRunConfig({ task: "Add a greeting file", workspace: ws, components: { testsFirst: false, osSandbox: false, actionClassifier: false } as any, pauses: { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false } });
     const features = [{ id: "F1", title: "hello.txt exists", status: "todo" }];
     const criteria = [{ id: "C1", text: "hello.txt contains hello", verify: "cat hello.txt", hard: true }];
     const { client } = fakeClient([
@@ -436,7 +436,7 @@ describe("Orchestrator", () => {
     const cfg = defaultRunConfig({
       task: "t",
       workspace: ws,
-      components: { planner: false, evaluator: false, osSandbox: false, actionClassifier: false } as any,
+      components: { planner: false, evaluator: false, testsFirst: false, osSandbox: false, actionClassifier: false } as any,
       pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: true },
       maxFixRounds: 0,
     });

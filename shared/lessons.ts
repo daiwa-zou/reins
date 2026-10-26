@@ -33,7 +33,7 @@ const list = (v: string | undefined) =>
  * frontmatter block exists, plus every problem found.
  */
 export const IMPLICATION_KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "gap", "effort"];
-export const PHASES: Phase[] = ["plan", "breakdown", "contract", "build", "evaluate", "wrapup"];
+export const PHASES: Phase[] = ["plan", "breakdown", "contract", "tests", "build", "evaluate", "wrapup"];
 export const STANDINGS: Standing[] = ["bundled", "reviewed", "unreviewed"];
 export const PROVENANCES: LessonProvenance[] = ["post", "article", "paper", "postmortem", "note"];
 const DOMAIN = /^[a-z0-9][a-z0-9-]{0,39}$/;

@@ -34,6 +34,10 @@ foundations: reviewIntent
   > It identifies which files to examine for a bug, feature or analysis
 - [component:projectMemory] Keep a project knowledge layer such as CLAUDE.md and runbooks that the agent reads and can update.
   > it reads the CLAUDE.md files
+- [stage:tests] Write the whole suite for the package up front, failure paths included, rather than one test per feature as it is built.
+  > Claude writes comprehensive tests
+- [component:testsFirst] Guide the work with tests written first instead of letting tests be the step that is given up on.
+  > guiding test-driven development
 - [component:selfVerification] Run build, test and iterate loops against a design artifact and keep visual evidence of the result.
   domains: web
   > Figma files are fed to Claude Code followed by autonomous write-code/run-tests/iterate loops

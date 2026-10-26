@@ -46,6 +46,18 @@ export const COMPONENTS: HarnessComponent[] = [
     tier: "effort",
   },
   {
+    id: "testsFirst",
+    label: "Tests first",
+    short: "After the contract, a test writer encodes each criterion as a test that must fail before the build, explains every test in .reins/tests.md, and making the suite pass becomes a hard criterion.",
+    whenOff: "No tests phase: the builder writes whatever tests it chooses while building, and only the contract's own verification steps are checked.",
+    engines: ["anthropic", "claude-code"],
+    assumption: "A builder that writes its own tests after the code tests what it built, not what was asked; tests written first from the contract pin the requirement.",
+    lessons: [],
+    defaultOn: true,
+    group: "roles",
+    tier: "always",
+  },
+  {
     id: "evaluator",
     label: "Skeptical evaluator",
     short: "A separate agent checks every contract criterion against the live result.",

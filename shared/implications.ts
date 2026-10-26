@@ -11,7 +11,7 @@ import { COMPONENTS, FOUNDATIONS } from "./components.js";
 /** At most this many lines in one stage's "Lessons for this stage" block. */
 export const STAGE_BLOCK_CAP = 8;
 
-export const STAGE_PHASES: Phase[] = ["plan", "breakdown", "contract", "build", "evaluate", "wrapup"];
+export const STAGE_PHASES: Phase[] = ["plan", "breakdown", "contract", "tests", "build", "evaluate", "wrapup"];
 
 /** Only these may enter stage prompt blocks and presets. Unreviewed ones only show up as Ideas. */
 export const isTrusted = (i: Pick<Implication, "standing">) => i.standing === "bundled" || i.standing === "reviewed";

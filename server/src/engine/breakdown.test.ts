@@ -24,8 +24,8 @@ const packages = [
 const criteria = (id: string) => [{ id, text: `${id} holds`, verify: "cat README.md", hard: true }];
 
 const noPauses = { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false };
-const base = (ws: string, extra: Record<string, unknown> = {}) =>
-  defaultRunConfig({ task: "Add a health endpoint", title: "Add a health endpoint", workspace: ws, components: { osSandbox: false, actionClassifier: false, ...((extra.components as object) ?? {}) } as any, pauses: noPauses, ...extra, maxFixRounds: 0 });
+const base = (ws: string, { components, ...extra }: Record<string, unknown> = {}) =>
+  defaultRunConfig({ task: "Add a health endpoint", title: "Add a health endpoint", workspace: ws, components: { testsFirst: false, osSandbox: false, actionClassifier: false, ...((components as object) ?? {}) } as any, pauses: noPauses, ...extra, maxFixRounds: 0 });
 
 /** The planner's two turns: spec + features, then finish. */
 const planner: Scripted[] = [

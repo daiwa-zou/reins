@@ -440,6 +440,47 @@ const proposeBreakdown = tool(
   },
 );
 
+const proposeTests = tool(
+  "propose_tests",
+  "Hand over the tests you wrote for this package: the command that runs them, each test with the criteria it covers and what it checks, and your overall explanation. Write the test files before calling this. The harness runs the command and refuses the plan if the suite already passes (tests must fail before the build), if a hard criterion is covered by no test and not listed as uncovered with a reason, or if a file does not exist. This ends your turn.",
+  {
+    command: { type: "string", description: "Runs the new tests, e.g. npm test -- health" },
+    tests: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "T1, T2, ..." },
+          file: { type: "string", description: "Workspace-relative path of the test file" },
+          name: { type: "string", description: "The test's name as it appears in the runner" },
+          criteria: { type: "array", items: { type: "string" }, description: "Contract criterion ids this test proves" },
+          kind: { type: "string", enum: ["unit", "behavior", "integration", "e2e"] },
+          explains: { type: "string", description: "What it checks and why, for a reviewer" },
+        },
+        required: ["id", "file", "name", "criteria", "kind", "explains"],
+        additionalProperties: false,
+      },
+    },
+    uncovered: { type: "array", items: { type: "object", properties: { id: { type: "string" }, reason: { type: "string" } }, required: ["id", "reason"], additionalProperties: false }, description: "Hard criteria no test can check in this workspace, with the reason" },
+    explanation: { type: "string", description: "How the suite fits together and what it deliberately leaves out" },
+  },
+  ["command", "tests", "uncovered", "explanation"],
+  async (input, ctx) => ctx.handlers.propose_tests?.(input) ?? "Proposed.",
+  {
+    examples: [
+      {
+        command: "npm test -- health",
+        tests: [
+          { id: "T1", file: "test/health.test.ts", name: "GET /health responds 200 with status and uptime", criteria: ["C1"], kind: "behavior", explains: "Starts the server on a free port and requests /health; proves the endpoint end to end, not a handler in isolation." },
+          { id: "T2", file: "test/health.test.ts", name: "an unknown path returns JSON 404", criteria: ["C3"], kind: "behavior", explains: "The failure path the contract names: the body must be JSON, not the framework's HTML page." },
+        ],
+        uncovered: [{ id: "C2", reason: "C2 is the README section; the evaluator's grep checks it and a test would only duplicate that." }],
+        explanation: "Two behaviour tests through the real HTTP interface, no mocks; they fail now because the route does not exist.",
+      },
+    ],
+  },
+);
+
 const reviewContract = tool(
   "review_contract",
   "Accept the proposed contract or return a revised list. Reject vague criteria, add missing failure cases, tighten verification steps. This ends your turn.",
@@ -486,7 +527,7 @@ const implicationSchema = {
   type: "object",
   properties: {
     kind: { type: "string", enum: ["component", "stage", "skill", "foundation", "gap"] },
-    target: { type: "string", description: "A component id, a phase (plan, breakdown, contract, build, evaluate, wrapup), a skill name or a foundation id. Empty for gap." },
+    target: { type: "string", description: "A component id, a phase (plan, breakdown, contract, tests, build, evaluate, wrapup), a skill name or a foundation id. Empty for gap." },
     claim: { type: "string", description: "One sentence: what the harness should do." },
     quote: { type: "string", description: "Evidence: a passage copied verbatim from the source." },
     domains: { type: "array", items: { type: "string" }, description: "Optional domain tags, e.g. web, cli, golang" },
@@ -529,7 +570,7 @@ const proposeLesson = tool(
 );
 
 export const ALL_TOOLS: Record<string, ToolDef> = Object.fromEntries(
-  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeBreakdown, proposeContract, reviewContract, reportEvaluation, finish, proposeLesson].map((t) => [
+  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeBreakdown, proposeTests, proposeContract, reviewContract, reportEvaluation, finish, proposeLesson].map((t) => [
     (t.schema as Anthropic.Beta.BetaTool).name,
     t,
   ]),

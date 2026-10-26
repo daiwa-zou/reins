@@ -46,6 +46,10 @@ standing: bundled
   > a fresh model tries to refute the result so the worker is not its own grader
 - [stage:evaluate] Review the diff against the criteria from a fresh context and report only correctness and requirement gaps, not style.
   > An adversarial reviewer subagent sees only the diff and criteria, and must be told to report only correctness and requirement gaps or it will over-engineer.
+- [component:testsFirst] Write the tests from the contract before any code, confirm they fail, and forbid the builder from changing them.
+  > confirm tests fail before coding, do not modify tests
+- [stage:tests] Test the behaviour through its real interface; a test that passes against a mock of the thing under test proves nothing.
+  > avoid mock implementations
 - [component:workPackages] Cut the plan into pull-request-sized packages, so each one goes through implementation, commit and its own PR.
   > approval leads to implementation, commit and PR
 - [stage:breakdown] A package whose whole diff fits in one sentence needs no further slicing; one that spans several modules or an unfamiliar area does.

@@ -9,6 +9,7 @@ import type {
   GuardrailDecision,
   PackageRef,
   Phase,
+  TestPlan,
   RoleId,
   RunConfig,
   RunEvent,
@@ -33,6 +34,7 @@ export type FeedItem =
   | { kind: "turn"; seq: number; ts: string; role: RoleId; turn: number; thinking?: string; text?: string; calls: ToolCall[]; usage?: Usage; costUsd?: number; stopReason?: string; finishedTs?: string }
   | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
+  | { kind: "tests"; seq: number; ts: string; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
   | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }
   | { kind: "context"; seq: number; ts: string; what: "compacted" | "cleared" | "reset"; role: RoleId; detail: string }
   | { kind: "steer"; seq: number; ts: string; text: string; delivered: boolean }
@@ -63,6 +65,8 @@ export interface RunModel {
   calls: ToolCall[];
   contract: ContractCriterion[];
   contractHistory: { by: RoleId; criteria: ContractCriterion[]; rationale: string }[];
+  /** The latest tests-stage plan (per package) with its red run. */
+  tests?: { plan: TestPlan; red: { exitCode: number | null; excerpt: string } };
   evaluations: { round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }[];
   features: FeatureItem[];
   snapshots: (ContextSnapshot & { seq: number })[];
@@ -224,6 +228,11 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         m.feed.push({ kind: "contract", seq: ev.seq, ts: ev.ts, by: "agreed", criteria: ev.criteria });
         currentTurn = null;
         break;
+      case "tests.agreed":
+        m.tests = { plan: ev.plan, red: ev.red };
+        m.feed.push({ kind: "tests", seq: ev.seq, ts: ev.ts, plan: ev.plan, red: ev.red });
+        currentTurn = null;
+        break;
       case "evaluation.result":
         m.evaluations.push({ round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
         m.feed.push({ kind: "evaluation", seq: ev.seq, ts: ev.ts, round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
@@ -291,7 +300,7 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
   return m;
 }
 
-export const PHASE_ORDER: Phase[] = ["plan", "breakdown", "contract", "build", "evaluate", "wrapup"];
-export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", breakdown: "Breakdown", contract: "Contract", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
+export const PHASE_ORDER: Phase[] = ["plan", "breakdown", "contract", "tests", "build", "evaluate", "wrapup"];
+export const PHASE_LABEL: Record<Phase, string> = { plan: "Plan", breakdown: "Breakdown", contract: "Contract", tests: "Tests", build: "Build", evaluate: "Evaluate", wrapup: "Wrap up" };
 export const ROLE_LABEL: Record<RoleId, string> = { planner: "Planner", builder: "Builder", evaluator: "Evaluator", classifier: "Classifier", scout: "Scout", librarian: "Librarian" };
 export const isLive = (s: RunStatus) => s === "running" || s === "paused" || s === "waiting_approval" || s === "queued";

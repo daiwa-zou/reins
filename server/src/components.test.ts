@@ -6,13 +6,13 @@ import { COMPONENTS, COMPONENT_IDS, defaultRunConfig, EFFORT_COMPONENTS, EFFORT_
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DIRECT_ONLY = ["toolSearch", "toolExamples", "compaction", "contextEditing", "taskBudget", "scouts"];
-const BOTH = ["thinkTool", "skills", "actionClassifier", "osSandbox", "planner", "contracts", "evaluator", "featureList", "progressFile", "projectMemory", "gitCommits", "selfVerification", "resetWithHandoff", "workPackages"];
+const BOTH = ["thinkTool", "skills", "actionClassifier", "osSandbox", "planner", "contracts", "evaluator", "featureList", "progressFile", "projectMemory", "gitCommits", "selfVerification", "resetWithHandoff", "workPackages", "testsFirst"];
 
 describe("tiers and the Effort / Supervision tables", () => {
   it("every component has the tier of spec §1; actionClassifier is the only engine-tier one", () => {
     const effort = ["planner", "contracts", "evaluator", "scouts", "taskBudget", "thinkTool"];
     for (const c of COMPONENTS) expect(c.tier, c.id).toBe(c.id === "actionClassifier" ? "engine" : effort.includes(c.id) ? "effort" : "always");
-    expect(COMPONENTS.filter((c) => c.tier === "always")).toHaveLength(15);
+    expect(COMPONENTS.filter((c) => c.tier === "always")).toHaveLength(16);
     expect([...EFFORT_COMPONENTS]).toEqual(effort);
   });
   it("EFFORT_TABLE has exactly the spec's cells", () => {
@@ -42,8 +42,8 @@ describe("tiers and the Effort / Supervision tables", () => {
 });
 
 describe("component catalogue", () => {
-  it("has 22 components, each with whenOff and a non-empty engines subset", () => {
-    expect(COMPONENTS).toHaveLength(22);
+  it("has 23 components, each with whenOff and a non-empty engines subset", () => {
+    expect(COMPONENTS).toHaveLength(23);
     for (const c of COMPONENTS) {
       expect(c.whenOff.trim().length, c.id).toBeGreaterThan(10);
       expect(c.engines.length, c.id).toBeGreaterThan(0);
@@ -61,6 +61,13 @@ describe("component catalogue", () => {
     expect(wp).toMatchObject({ tier: "always", group: "roles", defaultOn: true, engines: ["anthropic", "claude-code"] });
     expect(wp.requires ?? []).toEqual([]);
     expect(wp.whenOff).toMatch(/one package/);
+  });
+
+  it("tests first is always on, on both engines, and needs no other component", () => {
+    const tf = COMPONENTS.find((c) => c.id === "testsFirst")!;
+    expect(tf).toMatchObject({ tier: "always", group: "roles", defaultOn: true, engines: ["anthropic", "claude-code"] });
+    expect(tf.requires ?? []).toEqual([]);
+    expect(tf.short).toMatch(/fail/);
   });
 
   it("requires ids exist", () => {

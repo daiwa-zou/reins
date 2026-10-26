@@ -171,7 +171,7 @@ function EndCard({ model }: { model: RunModel }) {
 
 function PhaseStepper({ model }: { model: RunModel }) {
   const cfg = model.config;
-  const enabled = PHASE_ORDER.filter((p) => (p === "plan" ? cfg?.components.planner !== false : p === "breakdown" ? cfg?.components.planner !== false && cfg?.components.workPackages === true : p === "contract" ? cfg?.components.contracts !== false : p === "evaluate" ? cfg?.components.evaluator !== false : true));
+  const enabled = PHASE_ORDER.filter((p) => (p === "plan" ? cfg?.components.planner !== false : p === "breakdown" ? cfg?.components.planner !== false && cfg?.components.workPackages === true : p === "contract" ? cfg?.components.contracts !== false : p === "tests" ? cfg?.components.testsFirst === true : p === "evaluate" ? cfg?.components.evaluator !== false : true));
   const latestByPhase = new Map<Phase, RunModel["phases"][number]>();
   for (const p of model.phases) latestByPhase.set(p.phase, p);
   const rounds = model.phases.filter((p) => p.phase === "build").length;
@@ -226,6 +226,8 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
       );
     case "contract":
       return <ContractItem item={item} />;
+    case "tests":
+      return <TestsItem item={item} />;
     case "evaluation":
       return (
         <div className="card p-3 border-l-4 fade-in" style={{ borderLeftColor: item.verdict === "pass" ? "var(--ok)" : "var(--bad)" }}>
@@ -332,6 +334,44 @@ function ContractItem({ item }: { item: Extract<FeedItem, { kind: "contract" }> 
                 {c.hard && <span className="badge badge-neutral ml-1.5">hard</span>}
                 <div className="muted text-caption mono mt-0.5">verify: {c.verify}</div>
               </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TestsItem({ item }: { item: Extract<FeedItem, { kind: "tests" }> }) {
+  const [open, setOpen] = useState(false);
+  const n = item.plan.tests.length;
+  return (
+    <div className="card px-3 py-2 fade-in">
+      <button type="button" className="w-full flex items-center gap-2 text-small text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Badge tone="ok">tests written</Badge>
+        <span className="muted">
+          {n} test{n === 1 ? "" : "s"} · red before the build (exit {item.red.exitCode ?? "none"}) · <span className="mono">{item.plan.command}</span>
+        </span>
+        <span className="flex-1" />
+        {open ? <ChevronDown size={14} className="faint" aria-hidden /> : <ChevronRight size={14} className="faint" aria-hidden />}
+      </button>
+      {item.plan.explanation && <div className="text-small mt-1.5 leading-relaxed">{item.plan.explanation}</div>}
+      {open && (
+        <ul className="flex flex-col gap-1 mt-2 fade-in">
+          {item.plan.tests.map((t) => (
+            <li key={t.id} className="text-small flex gap-2">
+              <span className="mono faint w-6 shrink-0">{t.id}</span>
+              <span>
+                {t.name} <span className="badge badge-neutral ml-1">{t.kind}</span> <span className="mono faint text-caption">{t.criteria.join(", ")}</span>
+                <div className="muted text-caption mt-0.5">{t.explains}</div>
+                <div className="faint text-caption mono">{t.file}</div>
+              </span>
+            </li>
+          ))}
+          {item.plan.uncovered.map((u) => (
+            <li key={u.id} className="text-small flex gap-2">
+              <span className="mono faint w-6 shrink-0">{u.id}</span>
+              <span className="muted">not covered by a test: {u.reason}</span>
             </li>
           ))}
         </ul>

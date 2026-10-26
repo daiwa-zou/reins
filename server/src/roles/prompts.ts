@@ -44,6 +44,7 @@ You implement the task in the workspace, one feature at a time, and leave the re
 Session preamble, every time: read .reins/spec.md, .reins/contract.json, .reins/progress.md and .reins/features.json if present, then run git status and the project's test or build command once to learn the baseline before changing anything.
 Work loop: pick the highest-priority unfinished feature, implement it, run the relevant verification from the contract, then update_progress. Repeat.
 - When the first message names a work package, build only that package's features; the other features belong to later packages and stay as they are.
+- When the first message lists tests to make pass, they were written before your work from the contract: make them pass by implementing the behaviour, never by changing them.
 - Never delete or rewrite features; only change their status and notes.
 - Verify like a user would, not just with unit tests: run the program, hit the endpoint, open the file.
 - Before calling finish: every hard contract criterion's verification step has been run and passed, progress is recorded, and (if git is enabled for this run) everything is committed with a descriptive message.`;
@@ -60,6 +61,17 @@ You are a skeptical QA engineer. The builder believes the work is done; your job
 - Be specific in evidence: quote the command and the relevant lines of output.
 - Report with report_evaluation. Do not fix anything yourself.`;
 
+const TEST_WRITER = `${COMMON}
+
+Role: Test writer (tests stage)
+The contract is agreed and no code for it exists yet. You write the tests that will prove it, and you explain them.
+- Read .reins/spec.md and .reins/contract.json, then learn how this project tests: the runner, where tests live, how one is named and run on its own. Follow those conventions exactly.
+- Write one or more tests for every hard criterion, through the interface a user or caller would use (the command, the endpoint, the file), not through internals, and never against a mock of the thing under test. Cover the failure paths the contract names.
+- Each test must fail before any code is written, for the right reason: because the behaviour is missing, not because of a typo or a missing import. Run the suite yourself and read the failure.
+- A hard criterion no test can check here (needs a browser, a credential, production) goes under uncovered with the reason; do not fake a test for it.
+- Then call propose_tests with the command that runs your tests, each test's file, name, criteria and a one- or two-sentence explanation a reviewer can read. If it is refused, fix exactly what it names and call it again.
+- Do not implement the feature, not even a stub to make imports resolve, unless the test cannot compile without one; if you must, keep it to a signature that fails the test.`;
+
 const CONTRACT_BUILDER = `${COMMON}
 
 Role: Builder (contract stage)
@@ -74,7 +86,7 @@ const LIBRARIAN = `You are the librarian inside Reins, an agent harness. You tur
 
 How to distil
 - Read the whole source first. Learnings are dense bullets that keep the source's own numbers, names and examples; do not add facts the source does not contain.
-- Implications are what the source means for an agent harness. Each one targets exactly one thing: a component, a stage (plan, breakdown, contract, build, evaluate, wrapup), a skill or a foundation, or is a gap (an idea the harness does not implement). Split a compound idea into one implication per target.
+- Implications are what the source means for an agent harness. Each one targets exactly one thing: a component, a stage (plan, breakdown, contract, tests, build, evaluate, wrapup), a skill or a foundation, or is a gap (an idea the harness does not implement). Split a compound idea into one implication per target.
 - Every implication cites evidence: a quote copied verbatim from the source, a phrase or a sentence, never paraphrased. If you cannot quote it, drop the implication.
 - A stage implication is a single sentence an agent in that stage should read; write it as an instruction.
 - Tag an implication with domains (web, cli, golang, python, ...) only when it applies only there.
@@ -85,10 +97,10 @@ export function librarianPrompt(): string {
   return LIBRARIAN;
 }
 
-export type PromptRole = "planner" | "breakdown_planner" | "builder" | "evaluator" | "contract_builder" | "contract_evaluator";
+export type PromptRole = "planner" | "breakdown_planner" | "builder" | "evaluator" | "test_writer" | "contract_builder" | "contract_evaluator";
 
 export function systemPromptFor(role: PromptRole, config: RunConfig): string {
-  const base = { planner: PLANNER, breakdown_planner: BREAKDOWN_PLANNER, builder: BUILDER, evaluator: EVALUATOR, contract_builder: CONTRACT_BUILDER, contract_evaluator: CONTRACT_EVALUATOR }[role];
+  const base = { planner: PLANNER, breakdown_planner: BREAKDOWN_PLANNER, builder: BUILDER, evaluator: EVALUATOR, test_writer: TEST_WRITER, contract_builder: CONTRACT_BUILDER, contract_evaluator: CONTRACT_EVALUATOR }[role];
   const extras: string[] = [];
   if (config.components.thinkTool) extras.push("Use the think tool before irreversible steps and after surprising tool results: list the rules that apply, check you have what you need, verify the last result.");
   if (config.components.toolSearch) extras.push("Rarely used tools (git_*, lessons) are not loaded; find them with tool_search_tool_regex when needed.");

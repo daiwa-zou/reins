@@ -287,7 +287,7 @@ describe("ClaudeCodeLoop turn budget", () => {
       engine: "claude-code",
       maxTurnsPerPhase: 5,
       maxFixRounds: 1,
-      components: { planner: false, contracts: false, osSandbox: false, actionClassifier: false } as any,
+      components: { planner: false, contracts: false, testsFirst: false, osSandbox: false, actionClassifier: false } as any,
       pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false },
     });
     let fixBrief = "";

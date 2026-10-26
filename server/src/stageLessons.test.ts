@@ -119,6 +119,7 @@ describe("a run with presets careful, golang, cli", () => {
   it("records the presets and the build phase's first message carries the merged stage block (no duplicates, at most 8)", async () => {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), "reins-stage-"));
     const cfg = defaultRunConfig({ ...resolveRunInput({ task: "Add a --version flag", workspace: ws, presets: ["careful", "golang", "cli"] }), id: "stage-test" });
+    cfg.components.testsFirst = false; // this test is about the build brief, not the tests stage
     // The legacy body is migrated and recorded in the new shape.
     expect(cfg.presets).toBeUndefined();
     expect(cfg).toMatchObject({ effort: "high", supervision: "ask-every-write", domains: ["golang", "cli"] });
@@ -175,7 +176,9 @@ describe("max effort re-runs every criterion", () => {
   const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 100, requestPhaseApproval: async () => ({ approved: true }), requestContractApproval: async () => ({ approved: true }) };
   const make = (effort: "max" | "high") => {
     const ws = fs.mkdtempSync(path.join(os.tmpdir(), "reins-max-"));
-    return { ws, cfg: defaultRunConfig({ ...resolveRunInput({ task: "t", workspace: ws, effort, supervision: "unattended" }), id: `max-${effort}` }) };
+    const cfg = defaultRunConfig({ ...resolveRunInput({ task: "t", workspace: ws, effort, supervision: "unattended" }), id: `max-${effort}` });
+    cfg.components.testsFirst = false; // these tests are about the evaluator's report, not the tests stage
+    return { ws, cfg };
   };
   it("at max, a report that omits a criterion is refused naming the missing id, and the prompt says to re-run every criterion", async () => {
     const { ws, cfg } = make("max");
