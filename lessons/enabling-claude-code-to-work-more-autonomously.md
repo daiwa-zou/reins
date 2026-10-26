@@ -21,10 +21,17 @@ foundations: eventLog
 - Background tasks keep long-running processes like dev servers alive without blocking other work. Together with checkpoints these let users delegate broad tasks such as large refactors or feature exploration.
 
 ## Harness implications
-- Checkpointing of workspace state before every agent edit, with independent restore of code vs conversation, is a baseline safety feature that makes users willing to delegate bigger tasks.
-- Be explicit in the UI about what checkpoints do not cover (shell side effects), and integrate with git rather than replace it.
-- Long-lived background processes (dev servers, watchers) need a managed lifecycle in the harness so the agent can keep working while they run.
-- Hooks give deterministic guarantees at lifecycle points (post-edit, pre-commit, stop); CLAUDE.md-style instructions are advisory and cannot substitute.
-- Subagents for parallel decomposition should be built into the SDK layer so any surface (terminal, IDE, custom agent) gets them.
-- Multiple surfaces over one engine: the harness core should be UI-agnostic, with real-time diff streaming for graphical clients and status visibility for terminals.
-- Prompt history search is a small but important ergonomic for iterative steering.
+- [component:gitCommits] Checkpoint workspace state before agent edits so code can be restored independently of the conversation.
+  > code state is saved automatically before each change
+- [component:gitCommits] Say plainly what checkpoints do not cover, such as shell side effects, and build them on git rather than replacing it.
+  > They cover only Claude's edits, not user edits or Bash commands, so use them alongside version control.
+- [gap] Manage the lifecycle of long-lived background processes such as dev servers so the agent can keep working while they run.
+  > Background tasks keep long-running processes like dev servers alive without blocking other work.
+- [component:selfVerification] Run deterministic checks such as tests or lint at fixed lifecycle points rather than relying on advisory instructions.
+  > run the test suite after code changes or lint before commits
+- [component:scouts] Build subagents into the engine layer so every surface gets them.
+  > now with subagents and hooks
+- [foundation:eventLog] Keep the engine UI-agnostic, streaming the same run events to every surface, including real-time diffs.
+  > showing Claude's changes in real time with inline diffs
+- [gap] Offer searchable prompt history for iterative steering.
+  > searchable prompt history via `Ctrl+R`

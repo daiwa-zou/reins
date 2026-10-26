@@ -31,12 +31,25 @@ foundations: fileHandoff, toolHygiene
 - Risk note from the author (ex-pentester): passing autonomous tests can be mistaken for completed work, and deploying software without human verification is concerning.
 
 ## Harness implications
-- Provide a run-forever mode with session-per-iteration restarts, each session logged under a stable identifier (commit hash) so the trajectory is reconstructible.
-- Treat git as the coordination substrate: lock files in a `current_tasks/`-style directory, pull/merge/push at session end, and surface lock ownership and merge conflicts in the UI.
-- Build verification quality into the harness: a CI gate that rejects regressions, plus a deterministic fast-sample test mode so agents get cheap signal without burning time or context.
-- Protect the context window by design: tools should emit terse, grep-friendly output (one-line errors), write details to files, and precompute summaries; the UI can show the full log while the agent sees the digest.
-- Design for time blindness: avoid chatty progress output; expose elapsed time and budget explicitly as harness state rather than expecting the model to infer it.
-- Keep README and progress files as mandatory, frequently-updated artifacts since every session starts cold.
-- Decompose big tasks into independently attackable shards (oracle-based bisection, per-project targets) so parallel agents do not pile onto the same bug; the harness can offer an oracle/bisection helper. Support role specialization (dedup, perf, quality critic, docs) as distinct prompt profiles on the same harness.
-- Guard against the agent killing its own harness (`pkill -9 bash`) by running the supervisor outside the agent's process tree or container.
-- Make "tests pass" distinct from "done" in the UI; require a human verification step before anything is treated as shippable.
+- [component:resetWithHandoff] Run long work as a series of fresh sessions, each logged under a stable identifier so the trajectory can be reconstructed.
+  > A fresh container and session start for every iteration.
+- [gap] Use git as the coordination layer for parallel agents, with task lock files and visible lock ownership and merge conflicts.
+  > an agent writes a lock file in `current_tasks/` named for the task
+- [component:evaluator] Reject any change that breaks existing functionality, not only changes that fail the newest check.
+  > a stricter CI pipeline was added so new commits cannot break existing code
+- [gap] Offer a deterministic fast-sample test mode so agents get cheap signal without burning time or context.
+  > provide a `--fast` test option running a random 1% or 10% sample
+- [foundation:toolHygiene] Make tool output terse and grep-friendly, with one-line errors, details written to files and precomputed summaries.
+  > put `ERROR` and the reason on the same line so `grep` finds it
+- [component:taskBudget] Tell the agent its elapsed time and budget as harness state instead of expecting it to infer them.
+  > Time blindness is the other limitation
+- [component:progressFile] Keep README and progress files as mandatory, frequently updated artifacts, because every session starts cold.
+  > the harness required extensive READMEs and progress files, updated frequently
+- [component:featureList] Decompose big tasks into independently attackable pieces so parallel work does not pile onto the same bug.
+  > independent failing tests parallelize trivially
+- [foundation:fileHandoff] Give specialized roles their own prompts on the same harness, coordinating through shared files.
+  > separate agents coalesced duplicate code, improved compiler performance
+- [component:osSandbox] Run the supervisor outside the agent's process tree so the agent cannot kill its own harness.
+  > killed its own loop
+- [stage:wrapup] Report what was verified and what still needs a human check, and do not present passing tests as finished, shippable work.
+  > passing autonomous tests can be mistaken for completed work

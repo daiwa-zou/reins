@@ -26,10 +26,20 @@ foundations: reviewIntent
 - More implied practices: hand over abstract problems, let Claude work autonomously and review before final refinement; use sandboxed one-shot prompting for low-stakes work and iterate only if needed; use specialized subagents for high-volume generation; share discoveries across technical and non-technical staff.
 
 ## Harness implications
-- Support two supervision styles explicitly: tight pair-programming and "delegate, check in periodically", with the UI surfacing check-in points (pseudocode ready, tests failing as expected, tests green).
-- Make screenshots and pasted logs first-class inputs; incident workflows depend on them.
-- Codebase Q&A and onboarding is a major use; the harness should make read-only exploration cheap and safe, and allow a project-level knowledge layer (CLAUDE.md, runbooks) that the agent can both read and write.
-- Autonomous build/test/iterate loops against a design artifact (Figma, screenshot) should be a packaged workflow with visual diff evidence.
-- Non-engineers use the same harness: a sandboxed one-shot mode with sensible defaults and no need to read code.
-- Specialized subagents with narrow prompts are how teams scale repetitive generation; make them easy to define and reuse.
-- CI integration (PR-comment automation via Actions) is a common pattern; headless mode and event-triggered runs matter.
+- [foundation:declarativeConfig] Support both tight pairing and "delegate, check in periodically" as a run setting, surfacing the check-in points.
+  > periodic check-ins instead of constant supervision
+- [gap] Accept screenshots and pasted logs as first-class task inputs.
+  > dashboard screenshots were shared
+- [component:scouts] Make read-only exploration of a codebase cheap and safe.
+  > It identifies which files to examine for a bug, feature or analysis
+- [component:projectMemory] Keep a project knowledge layer such as CLAUDE.md and runbooks that the agent reads and can update.
+  > it reads the CLAUDE.md files
+- [component:selfVerification] Run build, test and iterate loops against a design artifact and keep visual evidence of the result.
+  domains: web
+  > Figma files are fed to Claude Code followed by autonomous write-code/run-tests/iterate loops
+- [component:narration] Let non-engineers follow a run in plain language without reading code.
+  > never needing to read the generated code
+- [component:scouts] Make specialized subagents with narrow prompts easy to define and reuse for repetitive work.
+  > using two specialized subagents
+- [foundation:declarativeConfig] Let runs start headless from CI or events using the same declarative run config.
+  > GitHub Actions automate PR comments
