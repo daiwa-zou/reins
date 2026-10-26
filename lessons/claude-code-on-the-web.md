@@ -23,9 +23,17 @@ foundations: secretsOutside
 - Cloud sessions share rate limits with other Claude Code usage.
 
 ## Harness implications
-- Design the harness so the same agent core runs locally and in a remote sandbox; the UI becomes a thin client showing progress, allowing steering, and receiving a PR plus summary.
-- Sandbox each session with default-deny network and an allowlist of domains the user controls; credentials never enter the sandbox, with git mediated by a proxy scoped to authorized repos.
-- Multi-session dashboards (many repos, many tasks) need a compact status view with per-session steering and results, not a single transcript.
-- Well-scoped, verifiable tasks (bug fixes, backend with tests) are the sweet spot for unattended cloud runs; the UI can nudge users toward tasks with a verification path.
-- End-of-task artifacts (PR, summary of changes) should be the primary deliverable surfaced to the user.
-- Shared quotas across surfaces imply a unified budget display.
+- [foundation:eventLog] Keep the UI a thin client over the run's events, showing progress, allowing mid-task steering and receiving the result.
+  > Real-time progress tracking is available, with the ability to steer Claude mid-task.
+- [component:osSandbox] Run every session in a sandbox with network and filesystem restrictions and a domain allowlist the user controls.
+  > every task runs in an isolated sandbox with network and filesystem restrictions
+- [foundation:secretsOutside] Keep credentials out of the sandbox and mediate git through a proxy scoped to authorized repositories.
+  > Git operations go through a secure git proxy that limits Claude to authorized repositories
+- [foundation:eventLog] Give many parallel sessions a compact status view with per-session steering and results, not a single transcript.
+  > Parallel tasks run across different repositories from one interface
+- [stage:contract] Prefer criteria that have a verification path the builder can run, such as tests, over criteria only a person can judge.
+  > backend changes where Claude can verify via test-driven development
+- [foundation:reviewIntent] Make the end-of-task summary of changes the primary deliverable shown to the user.
+  > Automatic PR creation and change summaries arrive at the end of a task.
+- [component:taskBudget] Show one budget across surfaces when they share a quota.
+  > Cloud sessions share rate limits with other Claude Code usage.

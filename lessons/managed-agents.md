@@ -28,11 +28,23 @@ foundations: eventLog, ownedLoop, secretsOutside, declarativeConfig
 - Conclusion: Managed Agents is a "meta-harness," opinionated about the interfaces around Claude (state via session, computation via sandbox, scaling to many brains and hands) but unopinionated about the specific harness, and intended to host Claude Code, task-specific harnesses, and future designs.
 
 ## Harness implications
-- Separate three concerns with hard interfaces: session (durable event log), harness (stateless loop), and sandbox/tools (hands). Each should be independently replaceable and restartable.
-- Make the session log the source of truth, not the context window; compaction and trimming operate on a view derived from the log, and the full history stays queryable (resume, rewind, reread).
-- Expose a single uniform tool interface (`execute(name, input) -> string`) for all execution environments so new hands (containers, devices, emulators, browsers) plug in without harness changes.
-- Treat infrastructure failures as tool errors the agent can handle (retry, reprovision) rather than fatal harness crashes; the UI should show provisioning state per hand. Support crash recovery by replay with `wake(sessionId)` semantics where any harness instance can pick up a session from its last event.
-- Keep credentials out of the sandbox: vault plus proxy for MCP/OAuth, pre-wired git remotes, bundled resource auth. Never depend on token scoping alone.
-- Provision lazily: start inference immediately and attach sandboxes only on first tool call to cut TTFT.
-- Build failure-localizing observability that distinguishes harness bugs, transport drops, and dead sandboxes in the event stream and UI, and make debugging possible without shelling into user-data containers.
-- Design harness features as removable assumptions (e.g. context resets) that can be retired when a new model no longer needs them, and keep them configurable per model. In the UI, show which hand each action ran on and let the user inspect or hand hands between agents.
+- [foundation:ownedLoop] Separate the session log, the stateless harness loop and the sandbox behind interfaces so each can be replaced or restarted alone.
+  > three virtualized components that can each be swapped without disturbing the others
+- [foundation:eventLog] Make the session log the source of truth, not the context window, so compaction and trimming are views and the full history stays queryable.
+  > The session is not Claude's context window.
+- [foundation:ownedLoop] Call every execution environment through one uniform tool interface so new hands plug in without harness changes.
+  > `execute(name, input) -> string`
+- [foundation:toolHygiene] Surface infrastructure failures as tool errors the agent can handle, such as retrying on a fresh environment.
+  > A dead container surfaces as a tool-call error Claude can handle
+- [foundation:eventLog] Recover from a harness crash by replaying the session log and resuming from the last event.
+  > execution resumes from the last event
+- [foundation:secretsOutside] Keep tokens unreachable from the sandbox, using a vault and proxy rather than relying on token scoping alone.
+  > tokens are never reachable from the sandbox
+- [foundation:ownedLoop] Provision execution environments lazily, on the first tool call that needs one, so inference starts at once.
+  > containers are provisioned only when a tool call needs one
+- [foundation:eventLog] Make the event stream tell harness bugs, transport drops and dead sandboxes apart, without shelling into user-data containers.
+  > a harness bug, a dropped packet, and an offline container looked identical
+- [component:resetWithHandoff] Build harness features such as context resets as removable assumptions that can be switched off once a model no longer needs them.
+  > on Opus 4.5 the behavior was gone and the resets were dead weight
+- [component:narration] Show which execution environment each action ran on.
+  > a harder cognitive task than operating in a single shell

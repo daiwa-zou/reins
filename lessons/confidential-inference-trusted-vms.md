@@ -27,11 +27,21 @@ foundations: secretsOutside
 - The article makes a call to hardware designers to build confidential computing and a hardware root of trust into accelerators, which would shrink the trust boundary further.
 
 ## Harness implications
-- Apply the same architecture to the agent harness: a small, reviewed, signed trusted core (credential broker, policy enforcer, audit logger) with everything else (tools, plugins, UI, orchestration) treated as untrusted and frequently changing. Guarantees should hold "no matter what the rest of the system does."
-- Secrets (API keys, tokens, user data) should stay encrypted at rest and in transit and be decrypted only at the component that uses them; tools and subagents receive handles or scoped tokens, never raw secrets, and the UI never renders them.
-- Attestation thinking for tools and plugins: only run code whose provenance is verified (signed, version-pinned, reviewed); record the hash and version of every tool, prompt, and harness component in each trace so a run can be audited against what was supposed to be running.
-- Concentrate trust decisions in one auditable place (a policy/key service analogous to the keyserver) rather than scattering permission checks across components; log every decision.
-- Disable debugging and escape hatches in production-mode agents by default (no arbitrary eval, no unrestricted shell) and make the mode visible in the UI.
-- Sandboxed execution for agent tools should be hypervisor- or container-isolated with egress controls; egress bandwidth and destination limits are a defense against exfiltration by a compromised or misbehaving agent, and the harness should expose and log them.
-- Safety classifiers as gates: allow a run or a high-risk action to proceed only when a classifier or verifier has signed off, and make that gate's verdict part of the trace.
-- Support independent verification: export tamper-evident audit logs and allow third parties (or the user) to verify what code and policies governed a session.
+- [component:actionClassifier] Keep the policy enforcer a small, reviewed trusted core and treat the frequently changing rest of the harness as untrusted.
+  > Everything else in the Inference Server (which "might change frequently") is untrusted.
+- [foundation:secretsOutside] Make secrets usable only at the component that needs them; tools and subagents get handles or scoped tokens, never raw secrets.
+  > sensitive data stays encrypted everywhere except the point where it is processed
+- [foundation:effectiveConfig] Record the version of every tool, prompt and harness component in each run so it can be audited against what was supposed to run.
+  > cryptographic proof that the correct code is running
+- [component:stageLessons] Let only reviewed, trusted content reach the prompts, the way only signed code runs in the trusted layer.
+  > accepts only programs signed by Anthropic's secure CI server
+- [component:actionClassifier] Concentrate trust decisions in one auditable place and log every decision.
+  > concentrating the trust decision there
+- [component:actionClassifier] Disable escape hatches such as unrestricted shell by default in unattended modes and make the mode visible.
+  > debugging features disabled
+- [component:osSandbox] Run agent tools in an isolated sandbox whose egress destinations and bandwidth are limited and logged.
+  > egress bandwidth limits on servers holding cleartext weights
+- [component:actionClassifier] Let a high-risk action proceed only after a classifier has signed off, with the verdict kept in the trace.
+  > requiring a safety classifier's signature before inference is allowed to run
+- [foundation:eventLog] Export audit logs that the user or a third party can check against the code and policies that governed the session.
+  > independent third parties validate the trusted code and run their own keyservers
