@@ -28,10 +28,19 @@ foundations: effectiveConfig, reliability
 - Treat resource configuration as a first-class controlled experimental variable, like prompt format or sampling temperature, and document it with every result.
 
 ## Harness implications
-- Every eval or agent run must record its infrastructure configuration as metadata: CPU/RAM request vs limit, multiplier over task spec, time limit, concurrency, hardware, cluster, region, and wall-clock start time. Results without this provenance should be marked non-comparable.
-- Distinguish infra errors (OOM kill, pod error, timeout, API error) from agent failures in the result schema, and show the infra error rate alongside the pass rate on every dashboard; a regression in pass rate with a rising infra error rate is an infra incident, not a model regression.
-- Default sandboxes to a soft floor plus a separate hard ceiling (around 3x the task spec as a starting point) and expose the band as a tunable; warn when request equals limit.
-- Regression detection must account for noise: compute confidence intervals, run multiple samples per task, and refuse to declare a regression on deltas smaller than the combined CI plus known infra variance (about 3 pp on TB2-like suites).
-- Compare runs only when configuration metadata matches; the UI should diff configs between two runs before showing a score delta and highlight any mismatch.
-- Schedule recurring evals at varied times of day and days and plot pass rate against time and observed API latency to catch time-dependent drift.
-- Record per-trial resource usage (peak memory, CPU time, install steps) in the trace so reviewers can see when a task failed because the agent chose a heavy strategy versus a model error. Treat resource limits as part of the task definition that shapes agent strategy, so "lean vs heavy approach" becomes an observable behavior.
+- [foundation:effectiveConfig] Record each run's infrastructure configuration (resource limits, time limit, concurrency, hardware, start time) with its result.
+  > Treat resource configuration as a first-class controlled experimental variable
+- [foundation:reliability] Separate infrastructure errors from agent failures and show the infra error rate beside the pass rate.
+  > up to about 6% of tasks failed with infrastructure errors (mostly pod errors)
+- [gap] Give sandboxes a guaranteed resource floor and a separate hard ceiling, and warn when the two are equal.
+  > a guaranteed allocation (floor) and a separate hard kill threshold (ceiling)
+- [foundation:reliability] Declare a regression only when the difference exceeds noise from sampling and infrastructure together.
+  > treat leaderboard differences under about 3 pp with skepticism
+- [foundation:reliability] Compare runs only when their configurations match, and show any mismatch before a score delta.
+  > until eval configuration is documented and matched
+- [gap] Schedule recurring evals at varied times and days to catch time-dependent drift.
+  > run public coding evals at multiple times of day and on multiple days
+- [foundation:eventLog] Record per-trial resource usage and install steps so a failure from a heavy strategy can be told apart from a model error.
+  > the pod OOMs during installation under tight limits
+- [gap] Treat resource limits as part of the task definition, because they decide whether lean or heavy strategies win.
+  > tight limits reward lean strategies and generous limits reward resource-heavy ones

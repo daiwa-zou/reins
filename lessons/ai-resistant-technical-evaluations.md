@@ -29,11 +29,23 @@ foundations: effectiveConfig
 - With unlimited time humans still beat the models: the model's advantage held only inside the 2-hour limit, so time-limited and open-ended results must be reported separately, and the longer horizon is where human judgment (tooling, verification, simplification) still adds the most.
 
 ## Harness implications
-- Harness quality is a measurable, first-order variable: the same model moved from 1487 to 1363 cycles purely from a "generic" harness improvement. A harness should expose its own version in every trace and benchmark itself against fixed tasks across versions.
-- Scores improve monotonically with wall-clock and compute (2h, 11.5h, many hours), so the harness must record time and token budget per run and plot score vs budget rather than reporting a single number.
-- Models stall on false beliefs ("bandwidth bottleneck is insurmountable") and resume when given a concrete target. Design for human steering: let users inject targets, hints, and constraints mid-run, and log those interventions so results separate "model alone" from "model plus steering."
-- Tooling-building is part of agent competence: give agents (and graders) the ability to create and run their own debuggers and visualizers, and record when they do.
-- Evals that overlap with well-trodden material saturate quickly; a harness's regression suite needs novel, private tasks and should track their age and public exposure.
-- Scoring by a crisp objective metric (cycle count, instruction count) with a validity checker is far more robust than rubric scoring; prefer such measures where possible and show them as a trend over time.
-- Humans spend about half their time reading the problem; the UI should front-load problem comprehension (summaries, state diffs, Perfetto-like trace timelines) so human oversight keeps pace with the agent.
-- Debugging mode and insight mode are different skills; separate "find the planted bug" regression tasks from optimization tasks when tracking capability.
+- [foundation:effectiveConfig] Record the harness version in every run, since harness quality alone moves results with the same model.
+  > 1363 for Opus 4.5 with an "improved harness"
+- [foundation:reliability] Benchmark the harness against fixed tasks across its own versions.
+  > validate in the harness at 2h and longer horizons
+- [foundation:reliability] Record time and token budget per run and compare results at matching budgets rather than as one number.
+  > time-limited and open-ended results must be reported separately
+- [foundation:cacheAsSignal] Let users inject a target, hint or constraint mid-run as a note, without editing the prompt, and log it.
+  > then found the trick when given a target cycle count
+- [gap] Separate "model alone" from "model plus human steering" when reporting results.
+  > who had heavily steered Claude 4
+- [gap] Let agents build and run their own debuggers and visualizers, and record when they do.
+  > building tooling (print statements, a quickly generated debugger) is part of the signal
+- [gap] Keep a regression suite of novel, private tasks and track their age and public exposure.
+  > these topics are heavily written about, so training data covers them
+- [stage:contract] Prefer a crisp objective measure with a validity check, such as a count or an exit code, over rubric scoring.
+  > score as minimal instruction count
+- [foundation:reviewIntent] Front-load problem comprehension for the human reviewer with summaries and state diffs so oversight keeps pace with the agent.
+  > humans spend roughly half their time reading the problem
+- [gap] Track debugging tasks and optimization tasks separately when measuring capability.
+  > emphasis on optimization insight over debugging

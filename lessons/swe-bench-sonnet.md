@@ -27,11 +27,19 @@ foundations: toolHygiene
 - Multimodal gap: the model could not view files saved to disk or referenced by URL, making Matplotlib-style tasks very hard.
 
 ## Harness implications
-- Keep the core scaffold minimal (prompt plus Bash plus Edit) and let the model sequence its own steps; add structure only where measured.
-- Put operational guidance inside tool descriptions (state persistence, output limits, background execution) rather than in the system prompt.
-- Use exact-match string-replacement edits with single-match enforcement and an informative error path; require absolute paths; make `create` refuse to overwrite.
-- Truncate and mark clipped tool output, and teach the agent to page with `sed -n`.
-- Expect long runs (hundreds of turns, 100k+ tokens): budget, checkpoint, and display progress.
-- Encourage a reproduce-then-fix-then-rerun loop; the harness UI should make the reproduction script and its before/after output visible as evidence.
-- Separate environment and grading failures from agent failures in telemetry so infrastructure noise does not masquerade as model error.
-- Provide image and file viewing tools so the agent can inspect rendered artifacts.
+- [foundation:ownedLoop] Keep the core scaffold minimal (a prompt, a shell tool and an edit tool) and let the model sequence its own steps.
+  > give the model as much control as possible and do not hardcode a workflow
+- [component:toolExamples] Put operational guidance such as state persistence, output limits and background execution in the tool description.
+  > its description carries the guidance
+- [foundation:toolHygiene] Make edits exact-match and single-occurrence with an informative error, and require absolute paths.
+  > `old_str` must match exactly and exactly once
+- [foundation:toolHygiene] Truncate oversized tool output, mark it as clipped and show how to page through it.
+  > oversized output is truncated and marked clipped
+- [component:taskBudget] Expect long runs of hundreds of turns and 100k+ tokens, and budget and checkpoint for them.
+  > Successful runs sometimes took hundreds of turns and more than 100k tokens.
+- [stage:build] Before fixing a bug, write a script that reproduces it, rerun it after the fix, and keep its before and after output as evidence.
+  > write a script that reproduces the error, edit source, rerun the reproduction
+- [foundation:reliability] Separate environment and grading failures from agent failures so infrastructure noise does not look like model error.
+  > environment setup failures and install patches applied twice produced false failures
+- [gap] Give the agent a way to view images and rendered files it produced.
+  > the model could not view files saved to disk or referenced by URL

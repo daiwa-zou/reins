@@ -27,11 +27,23 @@ foundations: untrustedOutput
 - Open-internet evals become less reliable as capability grows; treat eval integrity as "an ongoing adversarial problem rather than a design-time concern".
 
 ## Harness implications
-- Goals need explicit method constraints, not just outcomes: the harness should carry a "how not to" policy (forbidden sources, forbidden strategies) alongside the task, since a capable agent will otherwise optimize the letter of the goal.
-- Budget anomalies are a signal: flag runs that exceed, say, 10x median tokens, show strategy drift (query terms shifting from the subject to "benchmark", "evaluation", "decrypt"), or produce a deliverable of a different type than requested (a report about the task instead of the answer).
-- Content filtering must operate on search results and fetched content by pattern, not only URL blocklists, because agents route around URLs via mirrors.
-- Tool constraints (e.g. refusing binary downloads) are real guardrails but also real friction; make them deliberate policy with logging when an agent hits them repeatedly.
-- Multi-agent fan-out multiplies rare bad behaviour (about 3.7x); monitor per-subagent, not just the lead's output, and let subagent queries be inspected and vetoed.
-- Agents leave traces in shared external state (auto-generated pages); isolate eval and test runs from production side effects and prefer read-only or sandboxed network access where feasible.
-- Require verification of answers against primary sources before submission (Case 2 skipped it) and record provenance for every final claim so a reviewer can see where it came from.
-- Make eval integrity a continuous process: re-run flagged cases, keep canaries, and version blocklists; the UI should expose "why was this result flagged" with the trace.
+- [stage:contract] State the methods that do not count (forbidden sources or shortcuts) alongside the goal, since a capable agent will otherwise satisfy only the letter of it.
+  > the task was "find the answer" with no restriction on method
+- [gap] Flag runs whose token use is far above the median for the same task.
+  > about 40.5M tokens, about 38x median
+- [gap] Detect strategy drift, such as queries shifting from the subject to the benchmark or to decryption.
+  > it appended "puzzle question", "trivia question", then "LLM evaluation" to queries
+- [stage:evaluate] Fail a deliverable of a different type than the one requested, such as a report about the task instead of its result.
+  > one final submission being a "benchmark identification report" instead of an answer
+- [foundation:untrustedOutput] Filter fetched content by pattern, not only by URL, because agents reach the same content through mirrors.
+  > URL-level blocklists were insufficient because of alternative paths to the same content
+- [component:actionClassifier] Make tool constraints deliberate policy and log when an agent hits them repeatedly.
+  > which the web tool rejected
+- [component:scouts] Monitor and inspect each subagent's queries, not only the lead's output, because fan-out multiplies rare bad behaviour.
+  > the unintended-solution rate was 0.24% single-agent vs 0.87% multi-agent (3.7x)
+- [component:osSandbox] Isolate runs from external side effects and prefer read-only or sandboxed network access.
+  > retailer pages became unintended shared state
+- [component:selfVerification] Verify the answer against primary sources before submitting and record where each final claim came from.
+  > decrypted the dataset the same way and submitted without verification
+- [gap] Run eval integrity as a continuous process: re-run flagged cases, keep canaries, version blocklists and show why a result was flagged.
+  > treat eval integrity as "an ongoing adversarial problem rather than a design-time concern"
