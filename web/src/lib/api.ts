@@ -1,9 +1,10 @@
-import type { IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet } from "@shared/types";
+import type { Composition, IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet } from "@shared/types";
 
 export type PresetEntry = Preset & { isDefault: boolean; compatibility?: Record<EngineId, PresetCompatibility> };
 export interface PresetList {
   presets: PresetEntry[];
   default: string | null;
+  defaultComposition?: Composition & { engine?: EngineId };
   file: string;
 }
 
@@ -68,7 +69,7 @@ export const api = {
     return j<{ id: string; slug: string }>(r);
   },
   intakeJobs: () => fetch("/api/intake").then((r) => j<IntakeJobSummary[]>(r)),
-  composablePresets: () => fetch("/api/presets/composable").then((r) => j<{ profiles: Preset[]; domains: Preset[] }>(r)),
+  composablePresets: () => fetch("/api/presets/composable").then((r) => j<{ efforts: unknown[]; supervisions: unknown[]; domains: Preset[] }>(r)),
   steer: (id: string, text: string) => post(`/api/runs/${id}/steer`, { text }).then((r) => j<{ ok: true }>(r)),
   pause: (id: string) => post(`/api/runs/${id}/pause`).then((r) => j<{ ok: true }>(r)),
   resume: (id: string) => post(`/api/runs/${id}/resume`).then((r) => j<{ ok: true }>(r)),

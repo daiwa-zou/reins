@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ApprovalRequest, EngineId, ImplicationKind, LessonProvenance, RunConfig, RunEvent, Standing, Usage } from "../../../shared/types.js";
-import { COMPONENT_IDS, defaultRunConfig, FOUNDATIONS } from "../../../shared/components.js";
+import { COMPONENT_IDS, defaultRunConfig, EFFORT_TABLE, FOUNDATIONS } from "../../../shared/components.js";
 import { IMPLICATION_KINDS, LESSON_SLUG, normalizeForQuote, parseLesson, PHASES, PROVENANCES, quoteInSource, renderImplication } from "../../../shared/lessons.js";
 import { RunBus, type EventStore } from "../engine/bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions } from "../engine/loop.js";
@@ -532,9 +532,10 @@ export class IntakeManager extends EventEmitter {
       components: { ...off, thinkTool: true, narration: true },
       guardrail: { mode: "auto", allowNetwork: true, askPatterns: [], denyPatterns: [] },
       pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false },
-      budgetUsd: 3,
-      maxTurnsPerPhase: 20,
-      maxFixRounds: 0,
+      // An intake job is a low-effort run: one builder session, no evaluation (EFFORT_TABLE.low).
+      budgetUsd: EFFORT_TABLE.low.budgetUsd,
+      maxTurnsPerPhase: EFFORT_TABLE.low.maxTurnsPerPhase,
+      maxFixRounds: EFFORT_TABLE.low.maxFixRounds,
     });
     (config as RunConfig).job = "intake";
     const run = this.track(config, dir);

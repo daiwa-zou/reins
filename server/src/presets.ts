@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { EngineId, Preset, PresetCompatibility, PresetConfig } from "../../shared/types.js";
-import { compatibilityByEngine, composeRun, domainPresets, generatedPresets, isGeneratedPresetName, PresetCompositionError } from "../../shared/presets.js";
+import type { ComponentId, Composition, EngineId, Preset, PresetCompatibility, PresetConfig } from "../../shared/types.js";
+import { compatibilityByEngine, composeRun, compositionLabel, domainPresets, followEngine, generatedPresets, inferComposition, isGeneratedPresetName, LEGACY_PROFILES, migrateLegacy, PresetCompositionError, PRESET_RECIPES } from "../../shared/presets.js";
 import { stageLessonsFor } from "../../shared/implications.js";
-import { applyPreset } from "../../shared/config.js";
-import { defaultRunConfig } from "../../shared/components.js";
+import { alwaysTierOffs, applyPreset, RETIRED_PRESET_NAMES } from "../../shared/config.js";
+import { ALWAYS_IDS, DEFAULT_COMPOSITION, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE, tierOf } from "../../shared/components.js";
 import type { RunConfig } from "../../shared/types.js";
 import { listLessons } from "./lessons.js";
-import { BUILT_IN_PRESETS, FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
+import { FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
 
 /**
  * User presets live in one file, $REINS_HOME/presets.json:
@@ -40,7 +40,11 @@ function read(): PresetFile {
       if (!name || isBuiltInPresetName(name)) continue;
       try {
         const lessons = Array.isArray(p.lessons) ? p.lessons.filter((s: unknown): s is string => typeof s === "string").slice(0, 50) : [];
-        presets.push({ name, description: String(p.description ?? "").slice(0, 300), config: validatePresetConfig(p.config).config, createdAt: String(p.createdAt ?? ""), ...(lessons.length ? { lessons } : {}) });
+        // Migrate on read (the file is never rewritten): always-tier offs are dropped, and a
+        // legacy entry without a composition gets one inferred from its settings.
+        const config = validatePresetConfig(p.config, { legacy: true }).config;
+        if (!config.effort || !config.supervision) Object.assign(config, { ...inferComposition(config), ...(config.effort ? { effort: config.effort } : {}), ...(config.supervision ? { supervision: config.supervision } : {}) });
+        presets.push({ name, description: String(p.description ?? "").slice(0, 300), config, createdAt: String(p.createdAt ?? ""), ...(lessons.length ? { lessons } : {}) });
       } catch {
         /* a hand-edited entry with a bad field is ignored rather than crashing the list */
       }
@@ -62,19 +66,29 @@ function write(f: PresetFile) {
 
 function resolveDefault(f: PresetFile): string | null {
   if (!f.default) return null;
-  const all = [...BUILT_IN_PRESETS.map((p) => p.name), ...generatedPresets(listLessons()).map((p) => p.name), ...f.presets.map((p) => p.name)];
+  const all = [...generatedPresets(listLessons()).map((p) => p.name), ...f.presets.map((p) => p.name)];
   return all.find((n) => n.toLowerCase() === f.default!.toLowerCase()) ?? null;
+}
+
+/** The composition New run opens on: the default preset's, or a retired name migrated (Careful → high + ask every write). */
+function defaultComposition(f: PresetFile): Composition & { engine?: EngineId } {
+  const name = f.default ?? "";
+  const user = f.presets.find((p) => p.name.toLowerCase() === name.toLowerCase());
+  if (user) return { effort: user.config.effort ?? DEFAULT_COMPOSITION.effort, supervision: user.config.supervision ?? DEFAULT_COMPOSITION.supervision, domains: user.config.domains ?? [], ...(user.config.engine && user.config.engine !== "replay" ? { engine: user.config.engine } : {}) };
+  const recipe = generatedPresets(listLessons()).find((p) => p.name.toLowerCase() === name.toLowerCase());
+  if (recipe?.domain) return { ...DEFAULT_COMPOSITION, domains: [recipe.domain] };
+  return migrateLegacy(name);
 }
 
 export type ListedPreset = Preset & { isDefault: boolean; compatibility: Record<EngineId, PresetCompatibility> };
 
-/** Built-in, then lesson-generated (recomposed from the current lesson library on every call), then the user's. */
-export function listPresets(): { presets: ListedPreset[]; default: string | null; file: string } {
+/** Lesson-generated (recomposed from the current lesson library on every call), then the user's. */
+export function listPresets(): { presets: ListedPreset[]; default: string | null; defaultComposition: Composition & { engine?: EngineId }; file: string } {
   const f = read();
   const def = resolveDefault(f);
   const user: Preset[] = f.presets.map((p) => ({ name: p.name, description: p.description, builtIn: false, config: p.config, ...(p.lessons ? { lessons: p.lessons } : {}) }));
-  const presets = [...BUILT_IN_PRESETS, ...generatedPresets(listLessons()), ...user].map((p) => ({ ...p, isDefault: p.name === def, compatibility: compatibilityByEngine(p) }));
-  return { presets, default: def, file: presetsFile() };
+  const presets = [...generatedPresets(listLessons()), ...user].map((p) => ({ ...p, isDefault: p.name === def, compatibility: compatibilityByEngine(p) }));
+  return { presets, default: def, defaultComposition: defaultComposition(f), file: presetsFile() };
 }
 
 /** Create or replace a user preset. Throws PresetValidationError with a one-line message for a bad body. */
@@ -85,7 +99,7 @@ export function savePreset(body: unknown): { preset: Preset; dropped: string[]; 
   if (typeof b.name !== "string") throw new PresetValidationError("name must be a string");
   const name = sanitizePresetName(b.name);
   if (!name) throw new PresetValidationError("name must contain letters or digits");
-  if (isBuiltInPresetName(name)) throw new PresetValidationError(`"${name}" is a built-in preset and cannot be overwritten; pick another name`);
+  if (isBuiltInPresetName(name)) throw new PresetValidationError(`"${name}" is a retired built-in preset name; pick another name`);
   if (isGeneratedPresetName(name, listLessons()) || isGeneratedPresetName(b.name, listLessons())) throw new PresetValidationError(`"${name}" is a preset generated from lessons and cannot be overwritten; pick another name`);
   if (b.lessons !== undefined && (!Array.isArray(b.lessons) || b.lessons.some((s) => typeof s !== "string"))) throw new PresetValidationError("lessons must be an array of lesson slugs");
   if (b.config === undefined) throw new PresetValidationError("config is required (an object, e.g. {\"components\":{\"planner\":false}})");
@@ -132,7 +146,7 @@ export function setDefaultPreset(raw: unknown): string | null {
     return null;
   }
   const name = sanitizePresetName(raw);
-  const exists = BUILT_IN_PRESETS.some((p) => p.name.toLowerCase() === name.toLowerCase()) || isGeneratedPresetName(name, listLessons()) || f.presets.some((p) => p.name.toLowerCase() === name.toLowerCase());
+  const exists = RETIRED_PRESET_NAMES.some((n) => n.toLowerCase() === name.toLowerCase()) || isGeneratedPresetName(name, listLessons()) || f.presets.some((p) => p.name.toLowerCase() === name.toLowerCase());
   if (!exists) throw new PresetNotFound(`no preset named "${raw}"`);
   f.default = name;
   write(f);
@@ -142,35 +156,74 @@ export function setDefaultPreset(raw: unknown): string | null {
 export class PresetNotFound extends Error {}
 
 /**
- * The run input after preset composition. With `presets` (one care profile
- * plus domains, e.g. ["careful","golang","cli"]) the composed config is the
- * base and any field the caller sent explicitly wins over it. The stage
- * lessons are always resolved here, so the run records what its agents saw.
+ * The run input after composition. The body names `effort`, `supervision` and
+ * `domains` (or the legacy `presets: ["careful","golang","cli"]`, migrated);
+ * the composed config is the base and any field the caller sent explicitly
+ * wins over it. Always-tier components stay on unless listed in `ablated`
+ * (anything else is a 400 naming the component). Components the engine does
+ * not honour follow the engine. The stage lessons are resolved here, so the
+ * run records what its agents saw.
+ *
+ * `verbatim` (repeat, demo) reuses a recorded config as is, ablations and
+ * legacy always-tier offs included: a trial set needs identical configs.
  */
-export function resolveRunInput<T extends Partial<RunConfig> & { task: string; workspace: string }>(input: T): T {
+export function resolveRunInput<T extends Partial<RunConfig> & { task: string; workspace: string }>(input: T, opts: { verbatim?: boolean } = {}): T {
   const lessons = listLessons();
-  if (!Array.isArray(input.presets) || !input.presets.length) {
-    const { presets: _drop, ...rest } = input as any;
-    return { ...rest, stageLessons: stageLessonsFor(lessons, []) } as T;
+  if (opts.verbatim) return { ...input, stageLessons: input.stageLessons ?? stageLessonsFor(lessons, input.domains ?? []) } as T;
+  const raw = input as any;
+  let ablated: ComponentId[] = [];
+  if (raw.ablated !== undefined && raw.ablated !== null) {
+    if (!Array.isArray(raw.ablated)) throw new PresetCompositionError("ablated must be an array of always-tier component ids, e.g. [\"compaction\"]");
+    for (const id of raw.ablated) if (tierOf(String(id)) !== "always") throw new PresetCompositionError(`ablated: "${String(id)}" is not an always-tier component; only always-on components can be ablated (${ALWAYS_IDS().join(", ")})`);
+    ablated = [...new Set(raw.ablated.map(String))] as ComponentId[];
   }
-  const composed = composeRun(input.presets.map(String), lessons);
-  const base = applyPreset(defaultRunConfig({ task: input.task, workspace: input.workspace }), { name: composed.label, config: composed.config });
-  const has = (k: keyof RunConfig) => input[k] !== undefined && input[k] !== null;
+  if (raw.components && typeof raw.components === "object") {
+    const offs = alwaysTierOffs(raw.components, ablated);
+    if (offs.length) throw new PresetCompositionError(`components.${offs.join(", components.")} ${offs.length === 1 ? "is" : "are"} always on; to run without ${offs.join(", ")} start an experiment with ablated: ${JSON.stringify(offs)}`);
+  }
+  const legacy = Array.isArray(raw.presets) && raw.presets.length && raw.effort == null && raw.supervision == null && raw.domains == null;
+  let comp: Partial<Composition> = { effort: raw.effort ?? undefined, supervision: raw.supervision ?? undefined, domains: raw.domains ?? undefined };
+  let legacyEngine: EngineId | undefined;
+  if (legacy) {
+    const ids = (raw.presets as unknown[]).map((x) => String(x).trim().toLowerCase());
+    const known = [...Object.keys(LEGACY_PROFILES), ...PRESET_RECIPES.map((r) => r.id)];
+    const m = migrateLegacy(ids);
+    for (const id of ids) if (!known.includes(id) && !m.domains.includes(id)) throw new PresetCompositionError(`unknown preset "${id}"`);
+    comp = m;
+    legacyEngine = m.engine;
+  }
+  const engine = (input.engine ?? legacyEngine ?? "anthropic") as RunConfig["engine"];
+  const composed = composeRun(comp, lessons, PRESET_RECIPES, engine === "replay" ? undefined : engine);
+  const label = compositionLabel(composed, ablated);
+  const base = applyPreset(defaultRunConfig({ task: input.task, workspace: input.workspace }), { name: label, config: composed.config });
   const out: any = { ...base, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined && v !== null)) };
+  const has = (k: keyof RunConfig) => input[k] !== undefined && input[k] !== null;
   if (has("components")) out.components = { ...base.components, ...input.components };
+  for (const k of ["pauses", "context", "guardrail"] as const) if (has(k)) out[k] = { ...base[k], ...(input[k] as object) };
+  if (has("roles")) out.roles = { ...base.roles, ...input.roles };
   if (has("guidance")) out.guidance = [...new Set([...(base.guidance ?? []), ...(input.guidance ?? [])])];
-  // The profile owns the engine unless the caller picked one explicitly.
-  out.engine = input.engine ?? composed.config.engine ?? base.engine;
-  out.presets = composed.presets;
-  out.preset = input.preset ?? composed.label;
+  out.engine = engine;
+  for (const id of ablated) out.components[id] = false;
+  if (engine !== "replay") out.components = followEngine(out, engine).components;
+  delete out.presets;
+  out.effort = composed.effort;
+  out.supervision = composed.supervision;
+  out.domains = composed.domains;
+  if (ablated.length) out.ablated = ablated;
+  else delete out.ablated;
+  out.preset = label;
   out.stageLessons = composed.stageLessons;
   return out as T;
 }
 
 export { PresetCompositionError };
 
-/** Care profiles and domain presets for the New run picker. */
+/** The two dials and the domain presets for the New run picker. */
 export function composablePresets() {
   const lessons = listLessons();
-  return { profiles: BUILT_IN_PRESETS.filter((p) => p.layer === "profile"), domains: domainPresets(lessons) };
+  return {
+    efforts: EFFORT_LEVELS.map((id) => ({ id, ...EFFORT_TABLE[id] })),
+    supervisions: SUPERVISION_LEVELS.map((id) => ({ id, ...SUPERVISION_TABLE[id] })),
+    domains: domainPresets(lessons),
+  };
 }

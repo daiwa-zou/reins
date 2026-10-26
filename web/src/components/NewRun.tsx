@@ -3,10 +3,11 @@ import { Modal, Switch, Badge } from "./ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import { defaultRunConfig, MODELS } from "@shared/components";
-import { applyPreset, BUILT_IN_PRESETS, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
+import { alwaysTierOffs } from "@shared/config";
+import { applyPreset, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
 import { money } from "../lib/format";
-import type { ComponentId, EffortLevel, EngineId, HarnessComponent, Preset, PresetBasis, RunConfig } from "@shared/types";
-import { adaptPreset, composeRun, generatedPresets, presetCompatibility } from "@shared/presets";
+import type { ComponentId, Composition, EffortLevel, EngineId, HarnessComponent, Preset, PresetBasis, RunConfig } from "@shared/types";
+import { adaptPreset, composeRun, compositionOf, generatedPresets, presetCompatibility } from "@shared/presets";
 import { ComposePicker } from "./ComposePicker";
 import { compositionError } from "../state/runChip";
 import { classifyPresets, describeStart, startingPointFor, type StartingPoint } from "../state/startingPoint";
@@ -16,8 +17,8 @@ const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
 /** Prefill extras New run understands besides a RunConfig (run again, Harness, Lessons). */
 export interface NewRunExtras {
-  /** Start from this profile + domains, composed fresh (e.g. "Start a run with Web"). */
-  __compose?: string[];
+  /** Start from this composition, composed fresh (e.g. "Start a run with Web"). */
+  __compose?: Partial<Composition>;
   /** Start from this saved preset. */
   __saved?: string;
   /** Open Customize on the components. */
@@ -27,7 +28,7 @@ export interface NewRunExtras {
 
 /**
  * New run, in two depths. Always visible: the task, the folder, the engine,
- * Start from (Profile + Domains, or a Saved preset), the budget and Start.
+ * Start from (Effort + Supervision + Domains, or a Saved preset), the budget and Start.
  * Everything else sits in one Customize disclosure with a change count.
  */
 export function NewRun() {
@@ -44,9 +45,10 @@ export function NewRun() {
   const setNewRunDraft = useStore((s) => s.setNewRunDraft);
   const storePresets = useStore((s) => s.presets);
   const defaultPreset = useStore((s) => s.defaultPreset);
+  const defaultComposition = useStore((s) => s.defaultComposition);
   const refreshPresets = useStore((s) => s.refreshPresets);
-  const presets: Preset[] = storePresets.length ? storePresets : [...BUILT_IN_PRESETS, ...generatedPresets([])];
-  // Profiles and domains are picked in ComposePicker; the Saved preset select lists only the user's own.
+  const presets: Preset[] = storePresets.length ? storePresets : generatedPresets([]);
+  // Effort, supervision and domains are picked in ComposePicker; the Saved preset select lists only the user's own.
   const classified = classifyPresets(presets);
   const saved = classified.saved;
   const spOpts = { saved: saved.map((p) => p.name), generated: classified.domains.map((p) => ({ name: p.name, domain: p.domain })) };
@@ -58,30 +60,32 @@ export function NewRun() {
   // Profile + domains over fresh defaults (shared/presets.ts composeRun). Every profile and domain works on
   // both engines: switches the engine ignores are turned off (adaptPreset). An invalid composition keeps the
   // settings and records the ids, so the error shows inline and Start is blocked.
-  const composeInto = (c: Partial<RunConfig>, ids: string[], engine: EngineId = liveEngineOf(c)): RunConfig => {
-    if (!ids.length) return { ...fresh(c), ...c, presets: undefined } as RunConfig;
-    if (compositionError(ids, lessons)) return { ...fresh(c), ...c, preset: undefined, presets: ids } as RunConfig;
-    const composed = composeRun(ids, lessons);
-    const p = adaptPreset({ name: composed.label, config: composed.config, adaptive: true }, engine);
-    return { ...applyPreset(fresh({ ...c, engine }), p), engine, preset: undefined, presets: composed.presets };
+  const composeInto = (c: Partial<RunConfig>, comp: Partial<Composition>, engine: EngineId = liveEngineOf(c)): RunConfig => {
+    const ablated = c.ablated ?? [];
+    if (compositionError(comp, lessons)) return { ...fresh(c), ...c, preset: undefined, presets: undefined, ...comp } as RunConfig;
+    const composed = composeRun(comp, lessons, undefined, engine);
+    const out = { ...applyPreset(fresh({ ...c, engine }), { name: composed.label, config: composed.config }), engine, preset: undefined, presets: undefined, effort: composed.effort, supervision: composed.supervision, domains: composed.domains } as RunConfig;
+    if (ablated.length) return { ...out, ablated, components: { ...out.components, ...Object.fromEntries(ablated.map((id) => [id, false])) } };
+    return { ...out, ablated: undefined };
   };
   // A saved preset over fresh defaults; one that names an engine switches to it.
   const applySaved = (c: Partial<RunConfig>, p: Preset, engine: EngineId = p.config.engine && p.config.engine !== "replay" ? p.config.engine : liveEngineOf(c)): RunConfig => {
     const adapted = adaptPreset({ ...p, adaptive: true }, engine);
-    return { ...applyPreset(fresh({ ...c, engine }), { name: p.name, config: { ...adapted.config, engine: undefined } }), engine, preset: p.name, presets: undefined };
+    return { ...applyPreset(fresh({ ...c, engine }), { name: p.name, config: { ...adapted.config, engine: undefined } }), engine, preset: p.name, presets: undefined, effort: undefined, supervision: undefined, domains: undefined, ablated: undefined };
   };
-  const startOf = (c: Partial<RunConfig>): StartingPoint => (c.presets?.length ? { kind: "compose", presets: c.presets } : c.preset && saved.some((p) => p.name === c.preset) ? { kind: "saved", name: c.preset } : { kind: "custom" });
+  const startOf = (c: Partial<RunConfig>): StartingPoint => (c.preset && saved.some((p) => p.name === c.preset) ? { kind: "saved", name: c.preset } : c.effort ? { kind: "compose", effort: c.effort, supervision: c.supervision ?? "check-in", domains: c.domains ?? [] } : { kind: "custom" });
   /** The settings the current starting point gives, keeping task, folder, title, engine and budget. */
   const startBase = (c: RunConfig): RunConfig => {
     const sp = startOf(c);
     const keep = { task: c.task, workspace: c.workspace, title: c.title, engine: c.engine, budgetUsd: c.budgetUsd };
     if (sp.kind === "saved") return { ...applySaved(keep, saved.find((p) => p.name === sp.name)!, liveEngineOf(c)), engine: c.engine, budgetUsd: c.budgetUsd };
-    if (sp.kind === "compose" && !compositionError(sp.presets, lessons)) return { ...composeInto(keep, sp.presets, liveEngineOf(c)), engine: c.engine, budgetUsd: c.budgetUsd };
+    if (sp.kind === "compose" && !compositionError(sp, lessons)) return { ...composeInto({ ...keep, ablated: c.ablated }, sp, liveEngineOf(c)), engine: c.engine, budgetUsd: c.budgetUsd };
     return fresh(keep);
   };
 
   // Where New run opens: a prefill (run again, Harness, Lessons), else the surviving draft, else your default
-  // (a profile, a domain such as "Web app", or a saved preset, mapped by startingPointFor), else Full.
+  // (a composition, a domain such as "Web app", a retired name such as "Careful", or a saved preset, mapped by
+  // startingPointFor), else medium + check-in.
   const opening = useMemo((): { cfg: RunConfig; notice: string | null; customize: boolean } => {
     const src = prefill ?? draft ?? undefined;
     if (prefill?.__compose) return { cfg: composeInto({ ...prefill, __compose: undefined } as Partial<RunConfig>, prefill.__compose), notice: prefill.__notice ?? null, customize: !!prefill.__openHarness };
@@ -89,20 +93,30 @@ export function NewRun() {
     if (savedPick) return { cfg: applySaved({}, savedPick), notice: null, customize: false };
     if (src) {
       let cfg = defaultRunConfig({ task: "", workspace: info?.defaultWorkspace ?? "", engine: preferredEngine, ...(src as Partial<RunConfig>) });
-      // Older runs record a preset name ("Careful", "Web app", "mine (modified)"): map it onto the new model.
-      if (!cfg.presets?.length && cfg.preset) {
+      let note = prefill?.__notice ?? null;
+      // Older runs record presets (["careful","golang","cli"]) or a preset name ("Careful", "Web app",
+      // "mine (modified)"): migrate them onto Effort + Supervision + domains.
+      if (!cfg.effort && cfg.presets?.length) cfg = { ...cfg, ...compositionOf(cfg), presets: undefined, preset: undefined };
+      else if (!cfg.effort && cfg.preset) {
         const sp = startingPointFor(cfg.preset, spOpts);
-        cfg = sp.kind === "compose" ? { ...cfg, preset: undefined, presets: sp.presets } : sp.kind === "saved" ? { ...cfg, preset: sp.name } : { ...cfg, preset: undefined };
+        cfg = sp.kind === "compose" ? { ...cfg, preset: undefined, effort: sp.effort, supervision: sp.supervision, domains: sp.domains } : sp.kind === "saved" ? { ...cfg, preset: sp.name } : { ...cfg, preset: undefined };
       }
-      return { cfg, notice: prefill?.__notice ?? null, customize: !!prefill?.__openHarness };
+      // Always-tier components stay on; only an experiment (ablated) turns one off.
+      const offs = alwaysTierOffs(cfg.components, cfg.ablated ?? []);
+      if (offs.length) {
+        cfg = { ...cfg, components: { ...cfg.components, ...Object.fromEntries(offs.map((id) => [id, true])) } };
+        note = `${offs.map((id) => components.find((c) => c.id === id)?.label ?? id).join(", ")} kept on; use Harness › Experiment to run without.`;
+      }
+      return { cfg, notice: note, customize: !!prefill?.__openHarness };
     }
     const sp = startingPointFor(defaultPreset, spOpts);
     const savedDef = sp.kind === "saved" ? saved.find((p) => p.name === sp.name) : undefined;
     if (savedDef) return { cfg: applySaved({}, savedDef), notice: null, customize: false };
-    if (sp.kind === "compose") return { cfg: composeInto({ engine: sp.engine ?? preferredEngine }, sp.presets, sp.engine ?? preferredEngine), notice: null, customize: false };
-    return { cfg: composeInto({}, ["full"]), notice: null, customize: false };
+    if (sp.kind === "compose") return { cfg: composeInto({ engine: sp.engine ?? preferredEngine }, sp, sp.engine ?? preferredEngine), notice: null, customize: false };
+    if (defaultComposition) return { cfg: composeInto({ engine: defaultComposition.engine ?? preferredEngine }, defaultComposition, defaultComposition.engine ?? preferredEngine), notice: null, customize: false };
+    return { cfg: composeInto({}, {}), notice: null, customize: false };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefill, info, defaultPreset, storePresets, lessons]);
+  }, [prefill, info, defaultPreset, defaultComposition, storePresets, lessons]);
   const [notice, setNotice] = useState<string | null>(opening.notice);
   const [cfg, setCfgRaw] = useState<RunConfig>(opening.cfg);
   const [customizeOpen, setCustomizeOpen] = useState(opening.customize);
@@ -168,7 +182,7 @@ export function NewRun() {
   const engineNow = liveEngineOf(cfg);
   const start = startOf(cfg);
   const activeSaved = start.kind === "saved" ? saved.find((p) => p.name === start.name) : undefined;
-  const composed = start.kind === "compose" && !compositionError(start.presets, lessons) ? composeRun(start.presets, lessons) : null;
+  const composed = start.kind === "compose" && !compositionError(start, lessons) ? composeRun(start, lessons, undefined, engineNow) : null;
   const basis: PresetBasis[] | undefined = composed?.basis ?? activeSaved?.basis;
   // One short note when the engine ignores switches the starting point turns on (they are switched off).
   const sourceConfig = composed?.config ?? activeSaved?.config;
@@ -177,7 +191,7 @@ export function NewRun() {
 
   const pickSaved = (name: string) => {
     const p = saved.find((x) => x.name === name);
-    if (!p) return setCfg((c) => composeInto(c, ["full"]));
+    if (!p) return setCfg((c) => composeInto(c, {}));
     const switched = p.config.engine && p.config.engine !== "replay" && p.config.engine !== engineNow ? p.config.engine : null;
     setCfg((c) => applySaved(c, p));
     setNotice(switched ? `“${p.name}” is set up for ${ENGINE_LABEL[switched]}, so the engine switched to it.` : null);
@@ -186,7 +200,7 @@ export function NewRun() {
     if (id === cfg.engine) return;
     setNotice(null);
     // Re-derive the starting point for the new engine (switches it ignores go off).
-    if (start.kind === "compose" && composed) return setCfg((c) => ({ ...composeInto({ ...c, engine: id }, start.presets, id), roles: c.roles, guidance: c.guidance }));
+    if (start.kind === "compose" && composed) return setCfg((c) => ({ ...composeInto({ ...c, engine: id }, start, id), roles: c.roles, guidance: c.guidance }));
     if (activeSaved) return setCfg((c) => applySaved({ ...c, engine: id }, activeSaved, id));
     set({ engine: id });
   };
@@ -201,7 +215,7 @@ export function NewRun() {
     try {
       const r = await api.savePreset({ name: saving.name, config: presetFromConfig(cfg), default: saving.makeDefault, ...(basis?.length ? { lessons: [...new Set(basis.map((b) => b.slug))] } : {}) });
       await refreshPresets();
-      set({ preset: r.preset.name, presets: undefined });
+      set({ preset: r.preset.name, presets: undefined, effort: undefined, supervision: undefined, domains: undefined });
       setSaving(null);
       toastMsg(`Saved preset "${r.preset.name}"${r.default === r.preset.name ? " as your default" : ""}.${r.dropped.length ? ` Dropped: ${r.dropped.join(", ")}.` : ""}`);
     } catch (e) {
@@ -224,14 +238,14 @@ export function NewRun() {
 
   const budgetOk = Number.isFinite(cfg.budgetUsd) && cfg.budgetUsd >= 1;
   const engineOk = cfg.engine === "anthropic" ? !!info?.hasApiKey : !!info?.hasClaudeCode;
-  const composeError = compositionError(cfg.presets ?? [], lessons);
+  const composeError = cfg.effort ? compositionError({ effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains }, lessons) : null;
   const blocker = composeError ? `Start from: ${composeError}.` : cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? "Budget must be at least $1." : null;
   const canStart = blocker === null;
   const startRun = async (engine: "live" | "replay") => {
     setBusy(true);
     try {
       const preset = activeSaved ? (changes.length ? `${activeSaved.name} (modified)` : activeSaved.name) : undefined;
-      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, preset, presets: cfg.presets?.length ? cfg.presets : undefined, title: cfg.title || cfg.task.slice(0, 60) });
+      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, preset, presets: undefined, ...(cfg.ablated?.length ? {} : { ablated: undefined }), title: cfg.title || cfg.task.slice(0, 60) });
       if (engine !== "replay") setNewRunDraft(null);
       openModal(null);
       selectRun(created.id, { view: "activity" });
@@ -304,17 +318,26 @@ export function NewRun() {
           </div>
         </div>
 
+        {!!cfg.ablated?.length && (
+          <div className="rounded-lg border border-[var(--warn)] bg-[var(--warn-soft,transparent)] px-3 py-2 text-[12.5px]" data-experiment-banner role="status">
+            <b>Experiment:</b> run without {cfg.ablated.map((id) => components.find((c) => c.id === id)?.label ?? id).join(", ")}. Always-on components are off only in an experiment like this; the run records it in its title chip.{" "}
+            <button type="button" className="link" onClick={() => setCfg((c) => ({ ...c, ablated: undefined, components: { ...c.components, ...Object.fromEntries((c.ablated ?? []).map((id) => [id, true])) } }))}>
+              Cancel the experiment
+            </button>
+          </div>
+        )}
         <section className="rounded-lg border line p-3 flex flex-col gap-2" data-start-from aria-labelledby="start-from-label">
           <div className="text-[12px] font-semibold" id="start-from-label">
             Start from
           </div>
           <ComposePicker
             lessons={lessons}
-            value={cfg.presets ?? []}
+            value={cfg.effort ? { effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains ?? [] } : null}
             suggestions={check?.exists ? (check.suggestions ?? []) : []}
-            onChange={(ids) => {
+            onOpenLesson={openLesson}
+            onChange={(comp) => {
               setNotice(null);
-              setCfg((c) => composeInto(c, ids));
+              setCfg((c) => composeInto({ ...c, preset: undefined }, comp));
             }}
           />
           {saved.length > 0 && (
@@ -409,7 +432,7 @@ export function NewRun() {
                   ))}
                 </select>
               </Field>
-              <Field label="Effort">
+              <Field label="Reasoning effort">
                 <select className="input" value={cfg.roles.builder.effort} onChange={(e) => setRole("builder", { effort: e.target.value as EffortLevel })}>
                   {EFFORTS.map((x) => (
                     <option key={x}>{x}</option>
@@ -426,12 +449,12 @@ export function NewRun() {
             </div>
             {advanced === "harness" && (
               <div className="flex flex-col gap-3 fade-in">
-                {[...new Set(components.map((c) => c.group))].map((g) => (
+                {[...new Set(components.filter((c) => c.tier !== "always").map((c) => c.group))].map((g) => (
                   <div key={g}>
                     <div className="section-label mb-1.5">{GROUP_LABEL[g as HarnessComponent["group"]]}</div>
                     <div className="grid md:grid-cols-2 gap-2">
                       {components
-                        .filter((c) => c.group === g)
+                        .filter((c) => c.group === g && c.tier !== "always")
                         .map((c) => {
                           const ignored = liveEngine && !c.engines.includes(liveEngine);
                           const inert = c.id === "osSandbox" && info && !info.sandboxAvailable;

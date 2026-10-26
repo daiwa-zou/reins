@@ -5,11 +5,20 @@ import { fileURLToPath } from "node:url";
 import { COMPONENT_IDS } from "../../shared/components.js";
 import { parseLesson } from "../../shared/lessons.js";
 import { PRESET_RECIPES } from "../../shared/presets.js";
+import { GENERATED_BLOCKS, generatedBlock } from "../../shared/docsTables.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
 
 describe("docs cannot drift", () => {
+  it("every generated table in docs/configuring.md equals its renderer (npm run docs:tables)", () => {
+    const md = read("docs/configuring.md");
+    for (const [name, render] of Object.entries(GENERATED_BLOCKS)) expect(generatedBlock(md, name), `generated:${name} block (run npm run docs:tables)`).toBe(render());
+  });
+  it("configuring.md has the Effort, Supervision, Tiers, Ablation and Migration sections", () => {
+    const md = read("docs/configuring.md");
+    for (const h of ["Effort", "Supervision", "Tiers", "Ablation", "Migration"]) expect(md).toMatch(new RegExp(`^#+ ${h}\\b`, "m"));
+  });
   it("docs/configuring.md mentions every component id", () => {
     const doc = read("docs/configuring.md");
     const missing = COMPONENT_IDS.filter((id) => !doc.includes(`\`${id}\``));

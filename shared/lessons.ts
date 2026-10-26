@@ -2,7 +2,7 @@
 // server/src/lessons.ts; this module only sees strings, so vitest, the server,
 // the lessons:check script and the agent tools share one parser.
 import type { ComponentId, Implication, ImplicationKind, Lesson, LessonProblem, LessonProvenance, Phase, Standing } from "./types.js";
-import { COMPONENTS, COMPONENT_IDS, FOUNDATIONS, GUIDANCE_MAX_CHARS } from "./components.js";
+import { COMPONENTS, COMPONENT_IDS, EFFORT_LEVELS, FOUNDATIONS, GUIDANCE_MAX_CHARS, tierOf } from "./components.js";
 
 export type ParseProblem = Pick<LessonProblem, "level" | "message">;
 
@@ -32,7 +32,7 @@ const list = (v: string | undefined) =>
  * catalogue mapping in shared/components.ts. Returns a lesson whenever the
  * frontmatter block exists, plus every problem found.
  */
-export const IMPLICATION_KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "gap"];
+export const IMPLICATION_KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "gap", "effort"];
 export const PHASES: Phase[] = ["plan", "contract", "build", "evaluate", "wrapup"];
 export const STANDINGS: Standing[] = ["bundled", "reviewed", "unreviewed"];
 export const PROVENANCES: LessonProvenance[] = ["post", "article", "paper", "postmortem", "note"];
@@ -151,7 +151,10 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
   const effectIds = (key: "enables" | "disables") => {
     const out: ComponentId[] = [];
     for (const id of list(meta[key])) {
-      if ((COMPONENT_IDS as string[]).includes(id)) out.push(id as ComponentId);
+      if ((COMPONENT_IDS as string[]).includes(id)) {
+        out.push(id as ComponentId);
+        if (tierOf(id) === "always") problems.push({ level: "warn", message: `${key}: names "${id}", which is always on (always-tier); composition ignores it` });
+      }
       else err(`unknown component id "${id}" in ${key}: (see docs/configuring.md for the ids)`);
     }
     return [...new Set(out)];
@@ -212,7 +215,8 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
       target = h.target;
       if (kind === "gap" && target) err(`${where}: a gap has no target ([gap], not [gap:${target}])`);
       if (kind !== "gap") {
-        if (!target) err(`${where}: [${kind}] needs a target, e.g. [${kind}:${kind === "stage" ? "build" : kind === "component" ? "evaluator" : kind === "skill" ? "verify-like-a-user" : "eventLog"}]`);
+        if (!target) err(`${where}: [${kind}] needs a target, e.g. [${kind}:${kind === "stage" ? "build" : kind === "component" ? "evaluator" : kind === "skill" ? "verify-like-a-user" : kind === "effort" ? "high" : "eventLog"}]`);
+        else if (kind === "effort" && !(EFFORT_LEVELS as string[]).includes(target)) err(`${where}: unknown effort level "${target}" (use ${EFFORT_LEVELS.join(", ")})`);
         else if (kind === "component" && !(COMPONENT_IDS as string[]).includes(target)) err(`${where}: unknown component id "${target}" (see docs/configuring.md for the ids)`);
         else if (kind === "stage" && !(PHASES as string[]).includes(target)) err(`${where}: unknown stage "${target}" (use ${PHASES.join(", ")})`);
         else if (kind === "foundation" && !FOUNDATIONS.some((f) => f.id === target)) err(`${where}: unknown foundation id "${target}" (known: ${FOUNDATIONS.map((f) => f.id).join(", ")})`);

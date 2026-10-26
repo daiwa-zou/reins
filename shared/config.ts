@@ -1,15 +1,14 @@
 // Pure helpers over RunConfig: the config checker, built-in presets, applying a
 // preset, the diff from defaults and validation of user presets. No I/O, so the
 // server, the web UI and vitest all use exactly the same rules.
-import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, Preset, PresetConfig, RoleId, RunRoleId, RunConfig } from "./types.js";
-import { cleanGuidance, COMPONENTS, COMPONENT_IDS, defaultRunConfig } from "./components.js";
+import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, HarnessEffort, Preset, PresetConfig, Supervision, RoleId, RunRoleId, RunConfig } from "./types.js";
+import { cleanGuidance, COMPONENTS, COMPONENT_IDS, defaultRunConfig, EFFORT_LEVELS, isEffort, isSupervision, PAUSE_KEYS, SUPERVISION_LEVELS } from "./components.js";
 
 export const ENGINE_LABEL: Record<EngineId | "replay", string> = { anthropic: "Direct API", "claude-code": "Claude Code", replay: "Replay" };
 
 const ROLE_IDS: RunRoleId[] = ["planner", "builder", "evaluator", "classifier", "scout"];
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 const MODES: GuardrailMode[] = ["ask", "auto", "trust"];
-const PAUSE_KEYS = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation"] as const;
 const CONTEXT_KEYS = ["compactAtTokens", "clearToolResultsAfterTurns", "resetAtTokens"] as const;
 const NUMBER_KEYS = ["budgetUsd", "maxTurnsPerPhase", "maxFixRounds"] as const;
 
@@ -35,16 +34,13 @@ export function checkRunConfig(config: unknown): ConfigWarning[] {
   const out: ConfigWarning[] = [];
   if (!isObj(config)) return out;
   const comps: Record<string, unknown> = isObj(config.components) ? config.components : {};
-  const on = (id: ComponentId) => (typeof comps[id] === "boolean" ? (comps[id] as boolean) : COMPONENTS.find((c) => c.id === id)?.defaultOn ?? false);
-  const engine = config.engine === "claude-code" || config.engine === "anthropic" ? (config.engine as EngineId) : config.engine === "replay" ? null : "anthropic";
+  const onRaw = (id: ComponentId) => (typeof comps[id] === "boolean" ? (comps[id] as boolean) : COMPONENTS.find((c) => c.id === id)?.defaultOn ?? false);
+  const engine: EngineId | null = config.engine === "claude-code" || config.engine === "anthropic" ? (config.engine as EngineId) : config.engine === "replay" ? null : "anthropic";
 
-  // (a) on but ignored by the engine
-  if (engine) {
-    for (const c of COMPONENTS) {
-      if (on(c.id) && !c.engines.includes(engine))
-        out.push({ level: "warn", component: c.id, message: `${c.label} is on but ignored on this engine (${ENGINE_LABEL[engine]}). Turn it off, or use the ${c.engines.map((e) => ENGINE_LABEL[e]).join(" or ")} engine.` });
-    }
-  }
+  // Components the engine does not honour follow the engine (resolved off on it), so there is no
+  // "on but ignored" warning any more: engine support is not a choice.
+  const ignoredHere = (id: ComponentId) => !!engine && !COMPONENTS.find((c) => c.id === id)!.engines.includes(engine);
+  const on = (id: ComponentId) => !ignoredHere(id) && onRaw(id);
 
   // (b) unmet requires
   for (const c of COMPONENTS) {
@@ -83,49 +79,19 @@ export function checkRunConfig(config: unknown): ConfigWarning[] {
 }
 
 // ---- Presets --------------------------------------------------------------
+// The care profiles (Full, Minimal, Careful) and the Claude Code preset are retired:
+// a run is composed from Effort + Supervision + domains (shared/presets.ts composeRun).
+// Their names stay reserved so a saved preset cannot shadow a migrated default.
 
-/** Everything in defaultRunConfig() a preset may set, except the engine (Full keeps whatever engine you picked). */
-function fullConfig(): PresetConfig {
-  const d = defaultRunConfig({ task: "", workspace: "" });
-  return { components: d.components, roles: d.roles, pauses: d.pauses, context: d.context, guardrail: d.guardrail, budgetUsd: d.budgetUsd, maxTurnsPerPhase: d.maxTurnsPerPhase, maxFixRounds: d.maxFixRounds };
-}
-
-const allOff = (keep: ComponentId[]) => Object.fromEntries(COMPONENT_IDS.map((id) => [id, keep.includes(id)])) as Record<ComponentId, boolean>;
-const DIRECT_ONLY = COMPONENTS.filter((c) => !c.engines.includes("claude-code")).map((c) => c.id);
-
-export const BUILT_IN_PRESETS: Preset[] = [
-  { name: "Full", id: "full", layer: "profile", builtIn: true, description: "Today's defaults: every default-on component, the contract pause and the auto guardrail.", config: fullConfig() },
-  {
-    name: "Minimal",
-    id: "minimal",
-    layer: "profile",
-    builtIn: true,
-    description: "Start simple: the builder alone, with narration and the guardrails. No planner, contract or evaluator.",
-    config: { ...fullConfig(), components: allOff(["narration", "actionClassifier", "osSandbox"]), pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false }, maxFixRounds: 0 },
-  },
-  {
-    name: "Careful",
-    id: "careful",
-    layer: "profile",
-    builtIn: true,
-    description: "Full, but every pause is on and the guardrail asks you before anything that is not read-only (so the action classifier, used only in auto mode, is off).",
-    config: {
-      ...fullConfig(),
-      components: { ...fullConfig().components, actionClassifier: false },
-      pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true },
-      guardrail: { ...fullConfig().guardrail, mode: "ask" },
-    },
-  },
-  {
-    name: "Claude Code",
-    builtIn: true,
-    description: "For the Claude Code engine: the switches only the direct engine honours are off, so nothing is silently ignored.",
-    config: { ...fullConfig(), engine: "claude-code", components: { ...fullConfig().components, ...Object.fromEntries(DIRECT_ONLY.map((id) => [id, false])) } },
-  },
-];
+export const RETIRED_PRESET_NAMES = ["Full", "Minimal", "Careful", "Claude Code"];
 
 export function isBuiltInPresetName(name: string): boolean {
-  return BUILT_IN_PRESETS.some((p) => p.name.toLowerCase() === name.trim().toLowerCase());
+  return RETIRED_PRESET_NAMES.some((n) => n.toLowerCase() === name.trim().toLowerCase());
+}
+
+/** Always-tier components a config turns off, other than the listed ablations. */
+export function alwaysTierOffs(components: Partial<Record<string, unknown>> | undefined, ablated: string[] = []): ComponentId[] {
+  return COMPONENTS.filter((c) => c.tier === "always" && components?.[c.id] === false && !ablated.includes(c.id)).map((c) => c.id);
 }
 
 /**
@@ -224,7 +190,7 @@ export class PresetValidationError extends Error {}
  * Keep only known keys and component ids; report what was dropped. A field of
  * the wrong type is an error, not a silent drop, so a typo in a value is seen.
  */
-export function validatePresetConfig(raw: unknown): { config: PresetConfig; dropped: string[] } {
+export function validatePresetConfig(raw: unknown, opts: { legacy?: boolean } = {}): { config: PresetConfig; dropped: string[] } {
   if (!isObj(raw)) throw new PresetValidationError("config must be a JSON object, e.g. {\"components\":{\"planner\":false}}");
   const dropped: string[] = [];
   const config: PresetConfig = {};
@@ -252,6 +218,14 @@ export function validatePresetConfig(raw: unknown): { config: PresetConfig; drop
             continue;
           }
           if (typeof on !== "boolean") bad(`components.${id}`, "true or false");
+          if (on === false && COMPONENTS.find((x) => x.id === id)?.tier === "always") {
+            // Always-tier: on at every effort. A legacy entry's false is dropped; a new one is refused.
+            if (opts.legacy) {
+              dropped.push(`components.${id} (always on)`);
+              continue;
+            }
+            throw new PresetValidationError(`components.${id} is always on and cannot be turned off in a preset (use Harness › Experiment to run without ${label(id as ComponentId)})`);
+          }
           c[id as ComponentId] = on as boolean;
         }
         config.components = c;
@@ -327,6 +301,18 @@ export function validatePresetConfig(raw: unknown): { config: PresetConfig; drop
         config.guardrail = g;
         break;
       }
+      case "effort":
+        if (!isEffort(v)) bad("effort", `one of ${EFFORT_LEVELS.join(", ")}`);
+        config.effort = v as HarnessEffort;
+        break;
+      case "supervision":
+        if (!isSupervision(v)) bad("supervision", `one of ${SUPERVISION_LEVELS.join(", ")}`);
+        config.supervision = v as Supervision;
+        break;
+      case "domains":
+        if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(x))) bad("domains", "an array of domain ids, e.g. [\"golang\",\"cli\"]");
+        config.domains = [...new Set(v as string[])].slice(0, 12);
+        break;
       case "guidance": {
         if (!Array.isArray(v)) bad("guidance", "an array of one-line strings");
         const g = cleanGuidance(v as unknown[]);

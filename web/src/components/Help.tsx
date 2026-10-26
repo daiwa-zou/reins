@@ -29,8 +29,11 @@ export function Help() {
       <dl className="text-small grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 leading-snug" data-glossary>
         {(
           [
-            ["Profile", "How careful a run is: Full, Minimal or Careful. Exactly one, picked in New run › Start from."],
-            ["Domains", "What kind of project: Web, CLI, Go, Python and any domain a lesson names. Zero or more, layered over the profile."],
+            ["Effort", "What the harness spends on the task: Low, Medium, High or Max. Sets the planner, contract, evaluator, scouts, fix rounds, turns and budget. Not the roles' reasoning effort."],
+            ["Supervision", "How much you want to be asked: Unattended, Check in at gates (plan, contract, evaluation) or Ask before every write (every pause, guardrail mode ask)."],
+            ["Tier", "Who decides whether a component is on: Always on (only an experiment turns it off), Set by Effort, or Follows settings (Supervision and the engine)."],
+            ["Experiment", "A run with an always-on component switched off (Harness › Experiment: run without …), recorded as ablated and shown on the title chip."],
+            ["Domains", "What kind of project: Web, CLI, Go, Python and any domain a lesson names. Zero or more, layered over Effort and Supervision; they may only raise effort and tighten supervision."],
             ["Saved preset", "Your own saved settings (Customize › Save as preset…). Manage them and your default on Harness › Starting points."],
             ["Component", "One switch in the harness, such as the planner or the evaluator. Change it in New run › Customize; Harness explains each one."],
             ["Lesson", "A distilled engineering post. Lessons explain where a component, a domain or a guidance line comes from."],

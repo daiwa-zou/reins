@@ -1,23 +1,74 @@
 # Configuring Reins
 
-This page covers how to save a run setup as a **preset**, what every harness **component** does on each engine, and how to add your own **lessons** and **skills**. Everything a user adds lives under `$REINS_HOME` (default `~/.reins`), never in the repo.
+This page covers how a run is composed from **Effort**, **Supervision** and domains, how to save a run setup as a **preset**, what every harness **component** does on each engine, and how to add your own **lessons** and **skills**. Everything a user adds lives under `$REINS_HOME` (default `~/.reins`), never in the repo.
+
+## Effort
+
+A run is composed from two dials and any number of domains: `{ effort, supervision, domains }`. **Effort** (`low`, `medium`, `high`, `max`) decides what the harness spends on the task: the effort-tier components and the budgets. It does not change the roles' models or their reasoning effort; Customize keeps that control as **Reasoning effort**. The default is `medium`.
+
+<!-- generated:effort -->
+| | low | medium | high | max |
+|---|---|---|---|---|
+| `planner` | off | on | on | on |
+| `contracts` | off | off | on | on |
+| `evaluator` | off | on | on | on (re-runs every criterion) |
+| `scouts` | off | off | on | on |
+| `taskBudget` | off | on | on | on |
+| `thinkTool` | off | off | off | on |
+| `maxFixRounds` | 0 | 1 | 2 | 3 |
+| `maxTurnsPerPhase` | 30 | 60 | 90 | 120 |
+| `budgetUsd` | $3 | $10 | $20 | $40 |
+<!-- /generated:effort -->
+
+At `max` the evaluate phase tells the evaluator to run every contract criterion's verification step afresh in that round, without reusing earlier rounds' evidence or the builder's summary, and a `report_evaluation` that omits a criterion id is refused with a message naming the missing ids, so the evaluator reports again. Below `max` an incomplete report is accepted as before.
+
+## Supervision
+
+**Supervision** (`unattended`, `check-in`, `ask-every-write`) decides when the run pauses for you and the guardrail mode. The default is `check-in`.
+
+<!-- generated:supervision -->
+| id | Label | Chip | Pauses | Guardrail mode | Action classifier |
+|---|---|---|---|---|---|
+| `unattended` | Unattended | Unattended | none | `auto` | on |
+| `check-in` | Check in at gates | Check in | `afterPlan`, `afterContract`, `afterEvaluation` | `auto` | on |
+| `ask-every-write` | Ask before every write | Ask every write | `afterPlan`, `afterContract`, `beforeCommit`, `afterEvaluation` | `ask` | off |
+<!-- /generated:supervision -->
+
+A pause turns on only if its gate exists at the chosen effort: no plan pause without the planner, no contract pause without contracts, no evaluation pause without the evaluator. So every effort × supervision × engine combination composes to a config with zero config-checker warnings (a test checks all 24). `trust` mode stays reachable only through Customize.
+
+## Tiers
+
+Every component has a `tier` in `shared/components.ts` that says who decides whether it is on:
+
+- **Always on** (`always`): the practices the lessons back and the audit marks implemented (feature list, progress notes, project memory, commit per phase, compaction, context editing, reset with handoff, self-verification, narration, stage lessons, tool search, tool examples, skills, OS sandbox). On at every effort and not shown in New run. A saved preset or a `POST /api/runs` body that sends `false` for one is a 400 naming the component. `lessons:check` warns when an always-tier component is targeted by no bundled or reviewed implication.
+- **Set by Effort** (`effort`): planner, contracts, evaluator, scouts, task budget, think tool. The Effort dial sets them; Customize may still override them.
+- **Follows settings** (`engine`): the action classifier, derived from Supervision (off in `ask` mode, where nothing reaches it).
+
+Engine support is separate from the tier: a component the run's engine does not honour (its `engines` field) is resolved **off** on that engine and recorded off in the run config. That is not "turning it off": there is no 400, no ablation and no checker warning.
+
+## Ablation
+
+The only way to turn an always-tier component off is an experiment. The Harness card's **Experiment: run without Compaction** opens New run with an experiment banner, and `POST /api/runs` accepts `ablated: ComponentId[]`: every id must be always-tier (otherwise a 400 naming it), each listed id is set off, and `ablated` is recorded on the config. A `components: { compaction: false }` is accepted only when `compaction` is also in `ablated`. The title chip ends with "Experiment: without Compaction". On effort-tier cards the button flips the component as an override; engine-tier cards have none. `POST /api/runs/:id/repeat` reuses the recorded config verbatim, `ablated` included, so a trial set has identical configs.
+
+## Migration
+
+The retired care profiles and the old Claude Code preset are read, never written back:
+
+| legacy id or name | composition |
+|---|---|
+| `full`, "Full" | `medium` + `check-in` |
+| `minimal`, "Minimal" | `low` + `unattended` |
+| `careful`, "Careful" | `high` + `ask-every-write` |
+| "Claude Code" | `medium` + `check-in`, engine `claude-code` |
+| "Web app", "CLI / tool", "Go", "Python" | `medium` + `check-in` + that domain |
+
+- **Old runs** keep their `config.json` untouched and their old chip text ("Careful · Go · CLI"). Run again maps them onto the dials; always-tier offs they recorded are kept on, with the notice "kept on; use Harness › Experiment to run without". Repeat reuses them as recorded.
+- **Saved presets** in `$REINS_HOME/presets.json` are read as `{ effort, supervision, domains }` plus their overrides. A legacy entry gets an inferred composition (mode `ask` → ask-every-write; all pauses off → unattended; otherwise check-in; contracts on → high; planner and evaluator off → low; otherwise medium), and its always-tier `false` values are dropped. A `default` naming "Full", "Careful", "Minimal", "Claude Code" or a generated preset resolves to the migrated composition (`GET /api/presets` returns it as `defaultComposition`).
+- **A legacy body** `POST /api/runs {"presets": ["careful","golang","cli"]}` is accepted, migrated and recorded as `effort`, `supervision` and `domains`.
 
 ## Presets
 
-A preset is a *partial* run config: engine, component switches, roles, pauses, context policy, guardrails and limits. It never contains `task`, `workspace`, `id` or `createdAt`; those always come from the run you are starting. Applying a preset merges it over the defaults, so a preset only changes what it names.
-
-The New run dialog has a preset picker, **Save as preset…**, **Reset to defaults** and an *N changes from defaults* summary. The Harness section lists every preset with a **Start a run with <preset>** button. The run records the preset's name in its `config.json` (`"preset": "Minimal"`, or `"Minimal (modified)"` if you changed something after picking it).
-
-### Built-in presets
-
-| Preset | What it is |
-|---|---|
-| **Full** | Today's defaults (`defaultRunConfig()`). Applying it gives zero changes from defaults. |
-| **Minimal** | "Start simple" (building-effective-agents): only `narration`, `actionClassifier` and `osSandbox` on. No planner, contract or evaluator, no pauses, no fix rounds. |
-| **Careful** | Full, plus every pause on and guardrail mode `ask`. The action classifier is off because it is only used in `auto` mode. |
-| **Claude Code** | Sets the Claude Code engine and turns off the components that only the direct engine honours (see *Engines* below), so nothing is silently ignored. |
-
-Built-ins are defined in `shared/config.ts` and cannot be overwritten or deleted.
+A saved preset is a *partial* run config: effort, supervision, domains, engine, component overrides, roles, pauses, context policy, guardrails and limits. It never contains `task`, `workspace`, `id` or `createdAt`, and it may not turn an always-tier component off. Applying a preset merges it over the defaults, so a preset only changes what it names. New run has **Save as preset…** and an *N changes* summary in Customize; the run records the preset's name (`"mine"`, or `"mine (modified)"`).
 
 ### Presets generated from lessons: Web app, CLI / tool, and your domains
 
@@ -40,14 +91,9 @@ Reins composes a preset per domain (`shared/presets.ts`, `composePreset`), recom
 
 Generated names (Web app, CLI / tool, …) are reserved: `POST /api/presets` with one returns 400.
 
-### Which presets fit which engine (compatibility)
+### Which presets fit which engine
 
-`presetCompatibility(preset, engine)` decides, for built-in, generated and your presets alike:
-
-- A preset that names an engine fits only that engine (Claude Code fits only claude-code). Picking it in New run switches the engine and says so.
-- A preset that turns on a component the engine ignores does not fit, unless it is adaptive. So **Full** and **Careful** need Direct API: on Claude Code they are shown disabled with the reason. **Minimal** fits both.
-- Switching the engine away from a preset that does not fit clears it to Custom with a one-line notice. "My default" is applied only if it fits the engine New run opens on; otherwise New run starts from the defaults and says why.
-- `GET /api/presets` returns a `compatibility` entry per engine for every preset, and Harness opens *Start a run with…* on an engine that fits (or disables it with the reason).
+`presetCompatibility(preset, engine)`: a preset that names an engine fits only that engine (picking it in New run switches the engine and says so). Every other preset fits both engines; the switches the engine does not honour follow the engine and are listed as dropped. `GET /api/presets` returns a `compatibility` entry per engine for every preset.
 
 ### Run guidance
 
@@ -84,19 +130,21 @@ API:
 | `POST /api/presets/default` | Body `{ name }` marks any preset as the default; `{ name: null }` clears it. |
 | `DELETE /api/presets/:name` | Removes a user preset. Built-ins answer 400. |
 
-### Composable presets: one care profile plus domains
+### Composition: Effort + Supervision + domains
 
-A run is composed from exactly one **care profile** (`full`, `minimal`, `careful`) and any number of **domain presets** (`web`, `cli`, `golang`, `python`, and every domain a trusted lesson or implication names). The run records them in order as `presets: string[]`, e.g. `["careful", "golang", "cli"]`, and its title chip reads "Careful · Go · CLI". `POST /api/runs` accepts `presets` and composes the config on the server; explicit fields in the body still win.
+`composeRun({ effort, supervision, domains })` in `shared/presets.ts` starts from the dials and layers the **domain presets** (`web`, `cli`, `golang`, `python`, and every domain a trusted lesson or implication names) in the order picked. The run records `effort`, `supervision` and `domains`, and its title chip reads "High · Check in · Go · CLI". An unknown effort, supervision or domain is a 400. Explicit fields in the `POST /api/runs` body still win.
 
-Domains layer over the profile in the order picked:
+Domain layering can only raise effort and tighten supervision:
 
-- **Component switches**: later wins. A lesson tagged with the domain applies its `enables:`/`disables:`; when that flips a switch the profile (or an earlier lesson) set, the basis records "(overrides Careful)".
-- **Guidance**: the union of the domain recipes' lines and the lessons' `guidance:` lines, deduplicated and capped at 10.
-- **Stage lessons**: the union of trusted stage implications tagged with a picked domain plus the untagged ones, deduplicated and capped at 8 per stage (see "Lessons for this stage" below).
-- **Roles, context and guardrail**: later wins per key.
-- **Engine**: owned by the profile; a domain never changes it.
+- `enables:`/`disables:` may touch only effort-tier and engine-tier components; an always-tier id is ignored (and `lessons:check` warns).
+- A domain may not switch off an effort-tier component the dial turned on, and may not reduce fix rounds, turns or budget.
+- A domain may not switch off a pause, move the guardrail mode toward `trust` (ask < auto < trust), set `allowNetwork: true`, add `allowPatterns`, or turn the classifier on in `ask` mode.
+- Each refused effect is recorded in the basis with its reason; it is not applied and does not throw.
+- **Guidance**: the union of the recipes' lines and the lessons' `guidance:` lines, deduplicated and capped at 10. **Stage lessons**: trusted stage implications for the picked domains plus untagged ones, at most 8 per stage. **Roles and context**: later wins per key. **Engine**: never set by a domain.
 
-New run shows the profile picker and **domain chips** (the compose picker); an invalid composition (two profiles, none, or an unknown domain) is shown inline and blocks Start, and the API answers 400. A saved preset picked from the select below replaces the composition. The workspace check suggests domains with a reason: `go.mod` suggests `golang`, a `package.json` that depends on vite, next or react suggests `web`, a `cmd/` directory or a `bin` field in `package.json` suggests `cli`, and `pyproject.toml` suggests `python`.
+**Effort recommendations.** A lesson may carry `- [effort:high] domains: web Claim.` New run shows the recommendations that match the picked domains with the claim, the lesson link and a **Use High** button; they are never applied silently, and the composed config ignores them.
+
+New run shows the Effort and Supervision controls, each with a one-line meaning, and the **domain chips**. The workspace check suggests domains with a reason: `go.mod` suggests `golang`, a `package.json` that depends on vite, next or react suggests `web`, a `cmd/` directory or a `bin` field in `package.json` suggests `cli`, and `pyproject.toml` suggests `python`.
 
 ### Lessons for this stage
 
@@ -106,7 +154,6 @@ With the `stageLessons` component on (the default, on both engines), each phase'
 
 `checkRunConfig(config)` in `shared/config.ts` reports settings that will be ignored or contradict each other:
 
-- a component that is on but ignored by the chosen engine;
 - an unmet `requires` (e.g. `resetWithHandoff` without `progressFile`);
 - settings that do nothing: fix rounds or the after-evaluation pause with the evaluator off, the contract pause with contracts off, the plan pause with the planner off, the commit pause with commits off;
 - suspicious numbers: `context.resetAtTokens <= context.compactAtTokens`, `budgetUsd < 1`, `maxTurnsPerPhase < 5`.
@@ -115,33 +162,35 @@ New run shows the warnings live, and the Harness section shows them for the sele
 
 ## Components
 
-Every switch with what it does, what the harness does instead when it is off, which engines honour it, and what it depends on. *Direct API* is the `anthropic` engine, where Reins owns the Messages API loop. *Claude Code* is the `claude-code` engine, which runs each role through the local Claude Code login. On Claude Code, the switches that only the direct loop implements (tool search, tool examples, compaction, context editing, task budgets, scouts) are ignored, and the checker says so.
+Every switch with its tier, what it does, what the harness does instead when it is off, which engines honour it, and what it depends on. *Direct API* is the `anthropic` engine, where Reins owns the Messages API loop. *Claude Code* is the `claude-code` engine, which runs each role through the local Claude Code login. On Claude Code, the switches that only the direct loop implements follow the engine: they are recorded off.
 
-| id | Component | What it does | When off | Engines | Requires | Default |
-|---|---|---|---|---|---|---|
-| `planner` | Planner | Expand a short task into a spec before building. | The task text itself is written to .reins/spec.md as the spec; there is no plan phase and no planner-made feature list. | Direct API, Claude Code | – | on |
-| `contracts` | Sprint contracts | Builder and evaluator agree what 'done' means and how to verify it before any code is written. | No contract phase: the run is held to one generic criterion ("the task as described is complete and verified by running the result"). | Direct API, Claude Code | – | on |
-| `evaluator` | Skeptical evaluator | A separate agent checks every contract criterion against the live result. | No evaluate phase and no contract review: nobody but the builder checks the result, and fix rounds never run. | Direct API, Claude Code | – | on |
-| `scouts` | Scout subagents | The builder can delegate a research question to a short-lived read-only subagent that returns a summary, not its transcript. | delegate_scout is not offered, so the builder explores the codebase in its own context window. | Direct API | – | on |
-| `featureList` | Feature list (features.json) | A structured feature list the agent must not delete from, only mark done. | Features are still tracked in the run log, but .reins/features.json is not written, so the next session cannot re-read what remains. | Direct API, Claude Code | – | on |
-| `progressFile` | Progress notes (progress.md) | Structured note-taking outside the context window, re-read at the start of every session. | update_progress notes are not appended to .reins/progress.md, so the next session (and a reset) starts without them. | Direct API, Claude Code | – | on |
-| `projectMemory` | Project memory (CLAUDE.md) | The workspace's CLAUDE.md (and AGENTS.md) is handed to every role as the project's own instructions. | CLAUDE.md and AGENTS.md are not handed to the roles; they rediscover the project's conventions by reading the repo. | Direct API, Claude Code | – | on |
-| `gitCommits` | Commit per phase | Leave the repo in a clean, committed state at each phase boundary. | No commit at phase boundaries, the git_commit tool is hidden and the agents are told not to commit. | Direct API, Claude Code | – | on |
-| `compaction` | Compaction | Summarize old history in place when the prompt grows past a threshold. | Old history is never summarised; a long phase grows until it hits the turn cap or the context limit. | Direct API | – | on |
-| `contextEditing` | Clear stale tool results | Drop old tool outputs from the prompt without summarizing them. | Old tool results stay in the prompt verbatim for the rest of the phase. | Direct API | – | on |
-| `resetWithHandoff` | Reset with handoff | Start a fresh conversation from a written handoff when the context is nearly full. | The builder keeps one conversation across fix rounds, however long it gets. | Direct API, Claude Code | `progressFile` (The handoff is read from .reins/progress.md, which is only written when progress notes are on.) | off |
-| `taskBudget` | Task budget (time awareness) | Tell the model how many tokens a phase may spend so it paces itself instead of being cut off. | The model is not told its token budget; it is only stopped by the turn cap and the dollar budget. | Direct API | – | on |
-| `thinkTool` | Think tool | A no-op tool that gives the model a place to stop and reason between tool calls. | The think tool is not offered and the prompt does not ask for explicit pauses between tool calls. | Direct API, Claude Code | – | on |
-| `toolSearch` | Tool search | Keep rarely-used tools out of the prompt and load them on demand. | Every tool schema, including rarely used ones (git_*, http_fetch, lessons), is loaded into every prompt. | Direct API | – | on |
-| `toolExamples` | Tool use examples | Ship one realistic example call with the trickier tools so parameters are filled correctly. | Tools ship with their schema only, without an example call. | Direct API | – | on |
-| `skills` | Skills (SKILL.md) | Only skill names and one-line descriptions sit in the prompt; the body is read when a task calls for it. | No skills index in the prompt and no read_skill tool; installed skills are ignored. | Direct API, Claude Code | – | on |
-| `selfVerification` | Self-verification | The builder must run the contract's verification steps before calling finish. | The builder is not told to run the verification steps before finish; only the evaluator (if on) checks them. | Direct API, Claude Code | – | on |
-| `narration` | Plain-language narration | Every tool call is rendered as a sentence a person can skim. | Nothing changes yet: tool calls are always narrated in the log. The switch is recorded with the run for ablation tracking. | Direct API, Claude Code | – | on |
-| `actionClassifier` | Action classifier | Classify each risky shell command against the task instead of asking about everything. | In auto mode, ambiguous shell commands ask you instead of being settled by the classifier. | Direct API, Claude Code | – | on |
-| `osSandbox` | OS sandbox (macOS) | Run shell commands under a Seatbelt profile: writes only inside the workspace and temp, no network unless allowed. | Shell commands run without the Seatbelt profile; only the policy rules stand between the agent and the machine. | Direct API, Claude Code | – | on |
-| `stageLessons` | Lessons for this stage | Each phase's first message carries a short block of reviewed stage implications from the lesson library (at most 8 lines). | No "Lessons for this stage" block: the roles get only their fixed prompts and any run guidance. | Direct API, Claude Code | – | on |
+<!-- generated:components -->
+| id | Component | Tier | What it does | When off | Engines | Requires | Default |
+|---|---|---|---|---|---|---|---|
+| `planner` | Planner | Set by Effort | Expand a short task into a spec before building. | The task text itself is written to .reins/spec.md as the spec; there is no plan phase and no planner-made feature list. | Direct API, Claude Code | – | on |
+| `contracts` | Sprint contracts | Set by Effort | Builder and evaluator agree what 'done' means and how to verify it before any code is written. | No contract phase: the run is held to one generic criterion ("the task as described is complete and verified by running the result"). | Direct API, Claude Code | – | on |
+| `evaluator` | Skeptical evaluator | Set by Effort | A separate agent checks every contract criterion against the live result. | No evaluate phase and no contract review: nobody but the builder checks the result, and fix rounds never run. | Direct API, Claude Code | – | on |
+| `scouts` | Scout subagents | Set by Effort | The builder can delegate a research question to a short-lived read-only subagent that returns a summary, not its transcript. | delegate_scout is not offered, so the builder explores the codebase in its own context window. | Direct API | – | on |
+| `featureList` | Feature list (features.json) | Always on | A structured feature list the agent must not delete from, only mark done. | Features are still tracked in the run log, but .reins/features.json is not written, so the next session cannot re-read what remains. | Direct API, Claude Code | – | on |
+| `progressFile` | Progress notes (progress.md) | Always on | Structured note-taking outside the context window, re-read at the start of every session. | update_progress notes are not appended to .reins/progress.md, so the next session (and a reset) starts without them. | Direct API, Claude Code | – | on |
+| `projectMemory` | Project memory (CLAUDE.md) | Always on | The workspace's CLAUDE.md (and AGENTS.md) is handed to every role as the project's own instructions. | CLAUDE.md and AGENTS.md are not handed to the roles; they rediscover the project's conventions by reading the repo. | Direct API, Claude Code | – | on |
+| `gitCommits` | Commit per phase | Always on | Leave the repo in a clean, committed state at each phase boundary. | No commit at phase boundaries, the git_commit tool is hidden and the agents are told not to commit. | Direct API, Claude Code | – | on |
+| `compaction` | Compaction | Always on | Summarize old history in place when the prompt grows past a threshold. | Old history is never summarised; a long phase grows until it hits the turn cap or the context limit. | Direct API | – | on |
+| `contextEditing` | Clear stale tool results | Always on | Drop old tool outputs from the prompt without summarizing them. | Old tool results stay in the prompt verbatim for the rest of the phase. | Direct API | – | on |
+| `resetWithHandoff` | Reset with handoff | Always on | Start a fresh conversation from a written handoff when the context is nearly full. | The builder keeps one conversation across fix rounds, however long it gets. | Direct API, Claude Code | `progressFile` (The handoff is read from .reins/progress.md, which is only written when progress notes are on.) | on |
+| `taskBudget` | Task budget (time awareness) | Set by Effort | Tell the model how many tokens a phase may spend so it paces itself instead of being cut off. | The model is not told its token budget; it is only stopped by the turn cap and the dollar budget. | Direct API | – | on |
+| `thinkTool` | Think tool | Set by Effort | A no-op tool that gives the model a place to stop and reason between tool calls. | The think tool is not offered and the prompt does not ask for explicit pauses between tool calls. | Direct API, Claude Code | – | off |
+| `toolSearch` | Tool search | Always on | Keep rarely-used tools out of the prompt and load them on demand. | Every tool schema, including rarely used ones (git_*, lessons), is loaded into every prompt. | Direct API | – | on |
+| `toolExamples` | Tool use examples | Always on | Ship one realistic example call with the trickier tools so parameters are filled correctly. | Tools ship with their schema only, without an example call. | Direct API | – | on |
+| `skills` | Skills (SKILL.md) | Always on | Only skill names and one-line descriptions sit in the prompt; the body is read when a task calls for it. | No skills index in the prompt and no read_skill tool; installed skills are ignored. | Direct API, Claude Code | – | on |
+| `selfVerification` | Self-verification | Always on | The builder must run the contract's verification steps before calling finish. | The builder is not told to run the verification steps before finish; only the evaluator (if on) checks them. | Direct API, Claude Code | – | on |
+| `narration` | Plain-language narration | Always on | Every tool call is rendered as a sentence a person can skim. | Nothing changes yet: tool calls are always narrated in the log. The switch is recorded with the run for ablation tracking. | Direct API, Claude Code | – | on |
+| `actionClassifier` | Action classifier | Follows settings | Classify each risky shell command against the task instead of asking about everything. | In auto mode, ambiguous shell commands ask you instead of being settled by the classifier. | Direct API, Claude Code | – | on |
+| `osSandbox` | OS sandbox (macOS) | Always on | Run shell commands under a Seatbelt profile: writes only inside the workspace and temp, no network unless allowed. | Shell commands run without the Seatbelt profile; only the policy rules stand between the agent and the machine. | Direct API, Claude Code | – | on |
+| `stageLessons` | Lessons for this stage | Always on | Each phase's first message carries a short block of reviewed stage implications from the lesson library (at most 8 lines). | No "Lessons for this stage" block: the roles get only their fixed prompts and any run guidance. | Direct API, Claude Code | – | on |
+<!-- /generated:components -->
 
-The table is generated from `COMPONENTS` in `shared/components.ts`. A test (`server/src/docs.test.ts`) fails if any component id is missing here.
+The tables on this page are generated from `shared/components.ts` by `npm run docs:tables`; `server/src/docs.test.ts` fails when a generated block differs from its renderer.
 
 ## Lessons: bundled and your own
 

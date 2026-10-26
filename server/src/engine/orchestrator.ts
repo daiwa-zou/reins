@@ -12,6 +12,10 @@ import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor } from "../roles/prompts.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
 import { runShell } from "../tools/registry.js";
+import { EFFORT_TABLE } from "../../../shared/components.js";
+
+/** The evaluate-phase instruction at max effort (EFFORT_TABLE.max.rerunEveryCriterion). */
+export const MAX_EFFORT_EVALUATE = "Max effort: run every contract criterion's verification step afresh in this round. Do not reuse evidence from earlier rounds or the builder's summary. Then call report_evaluation with a result for every criterion id; a report that omits one is refused.";
 
 export interface OrchestratorControl extends LoopControl {
   requestPhaseApproval: (title: string, detail: string, payload: unknown) => Promise<{ approved: boolean; note?: string }>;
@@ -245,18 +249,24 @@ export class Orchestrator {
 
       if (!this.config.components.evaluator) break;
 
+      const rerunAll = !!this.config.effort && EFFORT_TABLE[this.config.effort].rerunEveryCriterion;
       const result = await this.phase("evaluate", round, async () => {
         let ev: typeof lastEval = null;
         const r = await this.loop("evaluator", "evaluator", [...READ_TOOLS, "bash"], ["report_evaluation"], {
           report_evaluation: (input: any) => {
-            const results: CriterionResult[] = input.results;
+            const results: CriterionResult[] = Array.isArray(input.results) ? input.results : [];
+            if (rerunAll) {
+              // Max effort: an evaluation that leaves out a criterion is refused, so the evaluator reports again.
+              const missing = this.contract.filter((c) => !results.some((x) => x.id === c.id)).map((c) => c.id);
+              if (missing.length) throw new Error(`Refused at max effort: the report omits criteria ${missing.join(", ")}. Run their verification steps afresh and call report_evaluation again with every criterion.`);
+            }
             const hardFail = this.contract.some((c) => c.hard && results.find((r) => r.id === c.id)?.pass !== true);
             ev = { results, verdict: hardFail ? "fail" : "pass", summary: input.summary };
             writeWorkspaceFile(ws, ".reins/evaluation.md", `# Evaluation round ${round}\n\n${input.summary}\n\n${results.map((x) => `- ${x.id}: ${x.pass ? "PASS" : "FAIL"} — ${x.evidence}`).join("\n")}\n`);
             this.bus.emitEvent({ type: "evaluation.result", round, results, verdict: ev.verdict, summary: input.summary });
             return `Recorded: ${ev.verdict}.`;
           },
-        }).run(firstMessage("evaluate", this.config, { ...this.projectContext(), Contract: renderContract(this.contract), Instructions: "Verify every criterion yourself, then call report_evaluation." }));
+        }).run(firstMessage("evaluate", this.config, { ...this.projectContext(), Contract: renderContract(this.contract), Instructions: rerunAll ? MAX_EFFORT_EVALUATE : "Verify every criterion yourself, then call report_evaluation." }));
         const verdict = ev ? (ev as any).verdict : "fail";
         return { result: r, summary: ev ? `${verdict.toUpperCase()}: ${(ev as any).summary}` : "Evaluator did not report.", value: { stop: this.checkStop(r), ev } };
       });

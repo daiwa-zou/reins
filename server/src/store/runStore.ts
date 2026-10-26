@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { RunConfig, RunEvent, RunSummary } from "../../../shared/types.js";
+import { runChipLabel } from "../../../shared/presets.js";
 
 export const REINS_HOME = process.env.REINS_HOME ?? path.join(os.homedir(), ".reins");
 const RUNS_DIR = path.join(REINS_HOME, "runs");
@@ -82,6 +83,8 @@ export function summarize(config: RunConfig, events: RunEvent[]): RunSummary {
   return {
     id: config.id,
     title: config.title,
+    // The title chip: the composition label, or the old text for runs that predate Effort and Supervision.
+    ...(runChipLabel(config) ? { chip: runChipLabel(config) } : {}),
     status,
     phase,
     round,

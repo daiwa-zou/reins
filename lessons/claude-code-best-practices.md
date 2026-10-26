@@ -5,7 +5,7 @@ url: https://www.anthropic.com/engineering/claude-code-best-practices
 tags: coding-agents, context, harness, reliability, skills
 takeaway: Everything in effective agentic coding follows from one constraint: the context window fills fast and quality degrades as it does. The biggest lever is giving the agent a check it can run, such as tests, stop hooks or a fresh-context reviewer, so the human is not the verification loop. Keep always-loaded instructions short, use hooks for what must always happen, and manage sessions like branches.
 domains: web, cli
-enables: selfVerification, evaluator
+enables: evaluator
 guidance: Give yourself a check you can run (tests, build exit code, linter) and show its output as evidence instead of asserting it passed.
 source: post
 standing: bundled
