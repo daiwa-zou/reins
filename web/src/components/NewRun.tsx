@@ -10,6 +10,7 @@ import type { ComponentId, Composition, EffortLevel, EngineId, HarnessComponent,
 import { adaptPreset, composeRun, compositionOf, generatedPresets, presetCompatibility } from "@shared/presets";
 import { ComposePicker } from "./ComposePicker";
 import { compositionError } from "../state/runChip";
+import { Bookmark, CirclePlay, Play } from "lucide-react";
 import { classifyPresets, describeStart, startingPointFor, type StartingPoint } from "../state/startingPoint";
 
 const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
@@ -265,6 +266,7 @@ export function NewRun() {
   return (
     <Modal title={prefill && !prefill.__compose && !prefill.__saved ? "New run from these settings" : "New run"} onClose={() => openModal(null)} width={760} dismissOnBackdrop={false}>
       <div className="flex flex-col gap-5">
+        <StepHeading n={1} text="What should the agent do, and where" />
         <div>
           <label className="text-[12px] font-semibold" htmlFor="newrun-task">What should the agent do?</label>
           <textarea
@@ -302,26 +304,6 @@ export function NewRun() {
           </div>
         </div>
 
-        <div>
-          <div className="text-[12px] font-semibold" id="newrun-engine-label">Engine</div>
-          <div className="flex gap-2 mt-1" role="group" aria-labelledby="newrun-engine-label">
-            {(
-              [
-                ["anthropic", "Direct API", info?.hasApiKey ? "Reins runs the whole loop. Uses your API key." : "Needs an API key (Settings)."],
-                ["claude-code", "Claude Code", info?.hasClaudeCode ? "Runs each role through your local Claude Code login." : "The claude CLI was not found on this machine."],
-              ] as const
-            ).map(([id, label, desc]) => (
-              <button key={id} type="button" data-engine={id} aria-pressed={cfg.engine === id} className={`flex-1 rounded-lg border p-2.5 text-left ${cfg.engine === id ? "border-[var(--accent)] sunk" : "line"}`} onClick={() => switchEngine(id)}>
-                <div className="font-medium text-[12.5px] flex items-center gap-2">
-                  {label}
-                  {(id === "anthropic" ? info?.hasApiKey : info?.hasClaudeCode) ? <Badge tone="ok">ready</Badge> : <Badge tone="warn">unavailable</Badge>}
-                </div>
-                <div className="muted text-[11.5px] leading-snug">{desc}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
         {!!cfg.ablated?.length && (
           <div className="rounded-lg border border-[var(--warn)] bg-[var(--warn-soft,transparent)] px-3 py-2 text-[12.5px]" data-experiment-banner role="status">
             <b>Experiment:</b> run without {cfg.ablated.map((id) => components.find((c) => c.id === id)?.label ?? id).join(", ")}. Always-on components are off only in an experiment like this; the run records it in its title chip.{" "}
@@ -330,8 +312,9 @@ export function NewRun() {
             </button>
           </div>
         )}
+        <StepHeading n={2} text="How it runs" />
         <section className="rounded-lg border line p-3 flex flex-col gap-2" data-start-from aria-labelledby="start-from-label">
-          <div className="text-[12px] font-semibold" id="start-from-label">
+          <div className="text-[12px] font-semibold sr-only" id="start-from-label">
             Start from
           </div>
           <ComposePicker
@@ -379,6 +362,27 @@ export function NewRun() {
           )}
         </section>
 
+        <StepHeading n={3} text="Engine and budget" />
+        <div>
+          <div className="text-[12px] font-semibold" id="newrun-engine-label">Engine</div>
+          <div className="flex gap-2 mt-1" role="group" aria-labelledby="newrun-engine-label">
+            {(
+              [
+                ["anthropic", "Direct API", info?.hasApiKey ? "Reins runs the whole loop. Uses your API key." : "Needs an API key (Settings)."],
+                ["claude-code", "Claude Code", info?.hasClaudeCode ? "Runs each role through your local Claude Code login." : "The claude CLI was not found on this machine."],
+              ] as const
+            ).map(([id, label, desc]) => (
+              <button key={id} type="button" data-engine={id} aria-pressed={cfg.engine === id} className={`flex-1 rounded-lg border p-2.5 text-left ${cfg.engine === id ? "border-[var(--accent)] sunk" : "line"}`} onClick={() => switchEngine(id)}>
+                <div className="font-medium text-[12.5px] flex items-center gap-2">
+                  {label}
+                  {(id === "anthropic" ? info?.hasApiKey : info?.hasClaudeCode) ? <Badge tone="ok">ready</Badge> : <Badge tone="warn">unavailable</Badge>}
+                </div>
+                <div className="muted text-[11.5px] leading-snug">{desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex items-end gap-3">
           {tokenBudget ? (
             <Field label="Budget (tokens)">
@@ -412,7 +416,7 @@ export function NewRun() {
                 Reset
               </button>
               <button className="btn btn-ghost btn-sm" onClick={() => setSaving(saving ? null : { name: activeSaved?.name ?? "", makeDefault: false })}>
-                Save as preset…
+                <Bookmark size={13} aria-hidden /> Save as preset
               </button>
             </div>
             {saving && (
@@ -667,14 +671,26 @@ export function NewRun() {
           </div>
           <div className="flex-1" />
           <button className="btn" disabled={busy} onClick={() => startRun("replay")}>
-            ▶ Watch demo instead
+            <CirclePlay size={14} aria-hidden /> Watch the demo instead
           </button>
           <button className="btn btn-primary" disabled={busy || !canStart} onClick={() => startRun("live")} title={!canStart ? "Enter a task, an existing folder, and pick an available engine" : undefined} data-start>
-            Start run
+            <Play size={13} aria-hidden /> Start run
           </button>
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** A numbered step heading: the dialog reads as three steps, top to bottom. */
+function StepHeading({ n, text }: { n: number; text: string }) {
+  return (
+    <div className="flex items-center gap-2.5 -mb-2">
+      <span className="w-6 h-6 rounded-full flex items-center justify-center text-caption font-semibold shrink-0" style={{ background: "var(--fg)", color: "var(--bg-elev)" }} aria-hidden>
+        {n}
+      </span>
+      <span className="font-semibold text-[13px]">{text}</span>
+    </div>
   );
 }
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { ExternalLink, Layers, Plus } from "lucide-react";
 import { presetChip, presetDomains } from "@shared/presets";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
@@ -87,7 +88,13 @@ export function LessonsPanel() {
   return (
     <div className="h-full flex">
       <div className="w-[270px] shrink-0 border-r line overflow-auto p-3 flex flex-col gap-3">
-        <input className="input" placeholder="Search lessons…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search lessons" />
+        <div className="flex items-center gap-2">
+          <h1 className="text-title font-semibold flex-1 m-0">Lessons</h1>
+          <button type="button" className="icon-btn" style={{ border: "1px solid var(--line-strong)" }} aria-label="Add a lesson from a source" title="Add a lesson from a source" onClick={() => setAddOpen(true)} data-add-lesson-button>
+            <Plus size={15} aria-hidden />
+          </button>
+        </div>
+        <input className="input" type="search" placeholder="Search lessons" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search lessons" />
         <label className="flex flex-col gap-1 text-small">
           <span className="section-label">Informs component</span>
           <select className="input" value={component ?? ""} onChange={(e) => navigate({ section: "lessons", component: e.target.value || null, lesson: null })} aria-label="Filter by component">
@@ -124,15 +131,13 @@ export function LessonsPanel() {
         <div className="faint text-[11px]">
           {shown.length} of {lessons.length} lessons{userCount ? ` · ${userCount} yours` : ""}
         </div>
-        <button type="button" className="btn btn-sm self-start" onClick={() => openDomainBuilder()} data-build-domain title="Pick implications from the library and name them as a domain for New run">
-          Build a domain…
-        </button>
         <div className="flex flex-col gap-0.5">
           {shown.map((l) => (
             <button key={l.slug} className={`text-left rounded-md px-2 py-1.5 text-[12.5px] leading-snug ${open === l.slug ? "sunk font-medium" : "hover:bg-[var(--bg-sunk)]"}`} onClick={() => select(l.slug)} aria-current={open === l.slug ? "page" : undefined}>
               {l.title}
               <div className="faint text-[10.5px] mt-0.5 flex items-center gap-1.5">
                 {l.date}
+                <span>· {(l.items ?? []).filter((i) => !i.implicit).length} implications</span>
                 {l.source === "user" && <Badge tone="accent">yours</Badge>}
                 {(l.domains ?? []).map((d) => (
                   <Badge key={d} title="A domain this lesson shapes">
@@ -223,11 +228,18 @@ export function LessonsPanel() {
                   <article key={l.slug} id={`lesson-${l.slug}`} className="card p-5 fade-in">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-[17px] font-semibold tracking-tight leading-tight">{l.title}</h2>
-                      {l.url && (
-                        <a href={l.url} target="_blank" rel="noreferrer" className="btn btn-sm shrink-0">
-                          Original ↗
-                        </a>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {l.standing !== "unreviewed" && (
+                          <button type="button" className="btn btn-sm" onClick={() => openDomainBuilder({ lesson: l })} data-build-domain-from={l.slug} title="Open the domain builder with this lesson's implications picked">
+                            <Layers size={13} aria-hidden /> Build a domain
+                          </button>
+                        )}
+                        {l.url && (
+                          <a href={l.url} target="_blank" rel="noreferrer" className="icon-btn" aria-label="Open the original post" title="Open the original post">
+                            <ExternalLink size={14} aria-hidden />
+                          </a>
+                        )}
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11.5px] muted">
                       <span>{l.date}</span>
@@ -245,14 +257,7 @@ export function LessonsPanel() {
                     <p className="mt-3 leading-relaxed text-[14px]">{l.takeaway}</p>
                     {(informs.length > 0 || founds.length > 0 || usedDomains.length > 0) && (
                       <div className="mt-4 rounded-lg border line p-3 flex flex-col gap-2 text-[12px]" data-used-by>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-[13px] font-semibold flex-1">Used by</h3>
-                          {l.standing !== "unreviewed" && (
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDomainBuilder({ lesson: l })} data-build-domain-from={l.slug} title="Open the domain builder with this lesson's implications picked">
-                              Build a domain from this lesson…
-                            </button>
-                          )}
-                        </div>
+                        <h3 className="text-[13px] font-semibold">Used by</h3>
                         {(informs.length > 0 || founds.length > 0) && (
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="faint">Components:</span>

@@ -1,4 +1,5 @@
 import React from "react";
+import { Plus } from "lucide-react";
 import type { Composition, HarnessEffort, Lesson, Supervision, UserDomain } from "@shared/types";
 import { DEFAULT_COMPOSITION, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "@shared/components";
 import { domainPresets, effortRecommendations, presetChip } from "@shared/presets";
@@ -71,8 +72,8 @@ export function ComposePicker({ lessons, userDomains = [], value, suggestions, o
         })}
         <span className="faint text-[11.5px]">what kind of project; pick any</span>
         {onBuildDomain && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onBuildDomain} data-build-domain>
-            Build a domain…
+          <button type="button" className="chip chip-add" style={{ height: 24, width: 24 }} onClick={onBuildDomain} aria-label="Build a domain from the lessons' implications" title="Build a domain…" data-build-domain>
+            <Plus size={13} aria-hidden />
           </button>
         )}
       </div>
