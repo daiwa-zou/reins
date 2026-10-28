@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { reinsHome } from "./store/runStore.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const BUNDLED_SKILLS_DIR = path.resolve(here, "../../skills");
@@ -48,7 +48,7 @@ function scan(root: string, source: Skill["source"]): Skill[] {
 export function loadSkills(workspace: string | null): Skill[] {
   const byName = new Map<string, Skill>();
   for (const s of scan(BUNDLED_SKILLS_DIR, "bundled")) byName.set(s.name, s);
-  for (const s of scan(path.join(process.env.REINS_HOME ?? path.join(os.homedir(), ".reins"), "skills"), "user")) byName.set(s.name, s);
+  for (const s of scan(path.join(reinsHome(), "skills"), "user")) byName.set(s.name, s);
   if (workspace) {
     for (const s of scan(path.join(workspace, ".reins", "skills"), "workspace")) byName.set(s.name, s);
     for (const s of scan(path.join(workspace, ".claude", "skills"), "workspace")) if (!byName.has(s.name)) byName.set(s.name, s);

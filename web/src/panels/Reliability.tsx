@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Badge, Empty } from "../components/ui";
+import { Badge, Empty, Stat } from "../components/ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import { money, duration, relTime, pct, tilde } from "../lib/format";
@@ -31,8 +31,7 @@ export function ReliabilityPanel() {
   }, [k, runsKey]);
 
   const repeat = (set: TrialSet, n: number) => {
-    const budget = runs.find((r) => r.id === set.trials[0].runId);
-    if (!confirm(`Queue ${n} more live trials of this task? They run one after another, each stopping at the run's budget.${budget ? "" : ""}`)) return;
+    if (!confirm(`Queue ${n} more live trials of this task? They run one after another, each stopping at the run's budget.`)) return;
     api.repeat(set.trials[0].runId, n).then(() => toastMsg(`Queued ${n} more trials; they run one after another.`)).catch((e) => toastMsg(e.message, "error"));
   };
 
@@ -76,14 +75,14 @@ export function ReliabilityPanel() {
                   <div className="font-semibold leading-snug line-clamp-2">{set.task}</div>
                   <div className="muted text-[11.5px] mt-0.5 truncate">{tilde(set.workspace, info?.home)}</div>
                 </div>
-                <Stat label="pass rate" value={set.n ? pct(set.passRate) : "—"} sub={`${set.passes}/${set.n} finished${set.infra ? ` · ${set.infra} infra (not counted)` : ""}`} />
+                <Stat align="right" card={false} label="pass rate" value={set.n ? pct(set.passRate) : "—"} sub={`${set.passes}/${set.n} finished${set.infra ? ` · ${set.infra} infra (not counted)` : ""}`} />
                 {set.n >= set.k ? (
                   <>
-                    <Stat label={`pass^${set.k}`} value={pct(set.passPowK)} tone={set.passPowK >= 0.8 ? "ok" : set.passPowK >= 0.5 ? "warn" : "bad"} />
-                    <Stat label={`pass@${set.k}`} value={pct(set.passAtK)} />
+                    <Stat align="right" card={false} label={`pass^${set.k}`} value={pct(set.passPowK)} tone={set.passPowK >= 0.8 ? "ok" : set.passPowK >= 0.5 ? "warn" : "bad"} />
+                    <Stat align="right" card={false} label={`pass@${set.k}`} value={pct(set.passAtK)} />
                   </>
                 ) : (
-                  <Stat label={`pass^${set.k}`} value="n/a" sub={`needs ${set.k - set.n} more finished trial(s)`} />
+                  <Stat align="right" card={false} label={`pass^${set.k}`} value="n/a" sub={`needs ${set.k - set.n} more finished trial(s)`} />
                 )}
                 <button className="btn btn-sm" onClick={() => repeat(set, 3)} disabled={set.trials.some((t) => t.status === "running" || t.status === "waiting_approval")} title="Queues three identical live runs, one after another">
                   Run 3 more
@@ -136,16 +135,6 @@ export function ReliabilityPanel() {
           ))
         )}
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "ok" | "warn" | "bad" }) {
-  return (
-    <div className="text-right">
-      <div className="text-[10.5px] uppercase tracking-wider faint font-semibold">{label}</div>
-      <div className={`text-[17px] font-semibold mono ${tone ? `text-[var(--${tone})]` : ""}`}>{value}</div>
-      {sub && <div className="muted text-[11px]">{sub}</div>}
     </div>
   );
 }

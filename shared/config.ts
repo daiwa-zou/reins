@@ -1,8 +1,10 @@
 // Pure helpers over RunConfig: the config checker, built-in presets, applying a
 // preset, the diff from defaults and validation of user presets. No I/O, so the
 // server, the web UI and vitest all use exactly the same rules.
-import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, HarnessEffort, Preset, PresetConfig, PublishPolicy, Supervision, RoleId, RunRoleId, RunConfig } from "./types.js";
-import { cleanGuidance, COMPONENTS, COMPONENT_IDS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, isEffort, isSupervision, PAUSE_KEYS, PUBLISH_MERGE_METHODS, PUBLISH_MERGE_WHEN, SUPERVISION_LEVELS } from "./components.js";
+import type { ComponentId, ConfigWarning, EffortLevel, EngineId, GuardrailMode, HarnessEffort, Preset, PresetConfig, PublishPolicy, Supervision, RoleId, RoleSettings, RunRoleId, RunConfig } from "./types.js";
+import { cleanGuidance, componentLabel as label, COMPONENTS, COMPONENT_IDS, DEFAULT_PUBLISH, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, isEffort, isSupervision, PAUSE_KEYS, PUBLISH_MERGE_METHODS, PUBLISH_MERGE_WHEN, SUPERVISION_LEVELS } from "./components.js";
+import { DOMAIN_ID } from "./domains.js";
+import { isObj } from "./util.js";
 
 export const ENGINE_LABEL: Record<EngineId | "replay", string> = { anthropic: "Direct API", "claude-code": "Claude Code", replay: "Replay" };
 
@@ -12,6 +14,11 @@ const MODES: GuardrailMode[] = ["ask", "auto", "trust"];
 const CONTEXT_KEYS = ["compactAtTokens", "clearToolResultsAfterTurns", "resetAtTokens"] as const;
 const NUMBER_KEYS = ["budgetUsd", "budgetTokens", "maxTurnsPerPhase", "maxFixRounds"] as const;
 
+/** The model and effort a role runs with. The librarian (and any role a config does not name) borrows the planner's. */
+export function roleSettings(config: RunConfig, role: RoleId): RoleSettings {
+  return config.roles[role as RunRoleId] ?? config.roles.planner;
+}
+
 export const PAUSE_LABEL: Record<(typeof PAUSE_KEYS)[number], string> = {
   afterPlan: "Pause after the plan",
   afterContract: "Pause to approve the contract",
@@ -20,9 +27,6 @@ export const PAUSE_LABEL: Record<(typeof PAUSE_KEYS)[number], string> = {
   beforePublish: "Pause before publishing",
   beforeMerge: "Pause before each merge",
 };
-
-const label = (id: ComponentId) => COMPONENTS.find((c) => c.id === id)?.label ?? id;
-const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 
 // ---- Config checker -------------------------------------------------------
 
@@ -347,7 +351,7 @@ export function validatePresetConfig(raw: unknown, opts: { legacy?: boolean } = 
         config.supervision = v as Supervision;
         break;
       case "domains":
-        if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(x))) bad("domains", "an array of domain ids, e.g. [\"golang\",\"cli\"]");
+        if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !DOMAIN_ID.test(x))) bad("domains", "an array of domain ids, e.g. [\"golang\",\"cli\"]");
         config.domains = [...new Set(v as string[])].slice(0, 12);
         break;
       case "guidance": {

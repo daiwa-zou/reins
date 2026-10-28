@@ -1,12 +1,11 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Lesson, LessonProblem } from "../../shared/types.js";
-import type { Standing } from "../../shared/types.js";
+import type { Lesson, LessonProblem, Standing } from "../../shared/types.js";
 import { LESSON_SLUG, parseLesson } from "../../shared/lessons.js";
 import { applyCatalogueLinks } from "../../shared/implications.js";
 import { loadSkills } from "./skills.js";
+import { reinsHome } from "./store/runStore.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const LESSONS_DIR = path.resolve(here, "../../lessons");
@@ -17,7 +16,7 @@ const MAX_LESSON_BYTES = 512 * 1024;
 
 /** The user's own library: $REINS_HOME/lessons (read at call time, so tests and the check script can point it elsewhere). */
 export function userLessonsDir(): string {
-  return path.join(process.env.REINS_HOME ?? path.join(os.homedir(), ".reins"), "lessons");
+  return path.join(reinsHome(), "lessons");
 }
 
 export interface LessonLibrary {
@@ -137,7 +136,7 @@ function readDir(dir: string, source: Lesson["source"], problems: LessonProblem[
       problem("error", "cannot be read (dangling symlink?); skipped");
       continue;
     }
-    if (path.dirname(real) !== realDir && !real.startsWith(realDir + path.sep)) {
+    if (!real.startsWith(realDir + path.sep)) {
       problem("error", "is a symlink to a file outside the lessons directory; not read");
       continue;
     }

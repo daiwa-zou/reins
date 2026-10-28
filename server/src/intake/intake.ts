@@ -6,23 +6,33 @@
 //
 //   fetch/read source -> librarian distils (propose_lesson) -> check() hook
 //   -> approval card (edit/drop implications, set standing) -> adopt
+//
+// A source is a URL or pasted text (read whole, up front), or one the
+// librarian explores with tools: a git repository (cloned or read in place)
+// or an MCP server (its tools attached). Explored sources come with a focus,
+// what to look for, and source.md becomes the record of what the librarian
+// actually read, so quotes are still checked verbatim.
 import Anthropic from "@anthropic-ai/sdk";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import type { ApprovalRequest, EngineId, ImplicationKind, LessonProvenance, RunConfig, RunEvent, Standing, Usage } from "../../../shared/types.js";
+import type { ApprovalDecision, ApprovalRequest, EngineId, ImplicationKind, IntakeSourceSpec, LessonProvenance, McpServerSpec, RunConfig, RunEvent, Standing, Usage } from "../../../shared/types.js";
 import { COMPONENT_IDS, defaultRunConfig, EFFORT_TABLE, FOUNDATIONS } from "../../../shared/components.js";
 import { IMPLICATION_KINDS, LESSON_SLUG, normalizeForQuote, parseLesson, PHASES, PROVENANCES, quoteInSource, renderImplication } from "../../../shared/lessons.js";
-import { RunBus, type EventStore } from "../engine/bus.js";
+import { fileEventStore, RunBus } from "../engine/bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions } from "../engine/loop.js";
 import { ClaudeCodeLoop } from "../engine/claudeCodeLoop.js";
+import { readEventFile } from "../store/runStore.js";
 import { listLessons, userLessonsDir, writeUserLesson } from "../lessons.js";
 import { loadSkills } from "../skills.js";
 import { librarianPrompt } from "../roles/prompts.js";
 import { budgetOf } from "../../../shared/budget.js";
 import { emptyUsage } from "../engine/pricing.js";
+import { connectMcpSource, mcpSpecProblem, type McpSource } from "./mcpSource.js";
 
 export const INTAKE_PREFIX = "intake-";
 export const isIntakeId = (id: string) => typeof id === "string" && id.startsWith(INTAKE_PREFIX);
@@ -57,7 +67,12 @@ export interface LessonEdits {
 export interface IntakeJobFile {
   id: string;
   slug: string;
+  /** The duplicate key: the page URL, the repository URL or path, or mcp://<name>. */
   url?: string;
+  /** Absent for jobs from before explored sources: then url means a page, else pasted text. */
+  source?: IntakeSourceSpec;
+  /** What to look for (required for a repository or MCP server; a hint for a page or text). */
+  focus?: string;
   hash?: string;
   status: "running" | "waiting_approval" | "adopted" | "rejected" | "failed" | "refused" | "cancelled" | "interrupted";
   createdAt: string;
@@ -130,33 +145,8 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-function fileStore(file: string): EventStore {
-  return {
-    append: (ev) => {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.appendFileSync(file, JSON.stringify(ev) + "\n");
-    },
-    read: () => readEventFile(file),
-  };
-}
-
-function readEventFile(file: string, fromSeq = 0): RunEvent[] {
-  if (!fs.existsSync(file)) return [];
-  const out: RunEvent[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const ev = JSON.parse(line) as RunEvent;
-      if (ev.seq >= fromSeq) out.push(ev);
-    } catch {
-      /* torn last line */
-    }
-  }
-  return out;
-}
-
-/** Render a draft (plus standing and hash) to the lesson markdown format. */
-export function renderLessonMarkdown(d: DraftLesson, extra: { standing: Standing; hash?: string }): string {
+/** Render a draft (plus standing, hash and focus) to the lesson markdown format. */
+export function renderLessonMarkdown(d: DraftLesson, extra: { standing: Standing; hash?: string; focus?: string }): string {
   const one = (s: string) => String(s ?? "").replace(/\s+/g, " ").trim();
   const fm = [
     "---",
@@ -166,6 +156,7 @@ export function renderLessonMarkdown(d: DraftLesson, extra: { standing: Standing
     `source: ${d.source}`,
     `standing: ${extra.standing}`,
     ...(extra.hash ? [`hash: ${extra.hash}`] : []),
+    ...(extra.focus?.trim() ? [`focus: ${one(extra.focus)}`] : []),
     ...(d.tags.length ? [`tags: ${d.tags.map(one).join(", ")}`] : []),
     `takeaway: ${one(d.takeaway)}`,
     "---",
@@ -210,6 +201,52 @@ export interface IntakeDeps {
   hasClaudeCode: () => boolean;
   /** Fetch a URL's text (injectable for tests). Defaults to global fetch. */
   fetchText?: (url: string, signal: AbortSignal) => Promise<{ status: number; text: string }>;
+  /** Connect to an MCP server for the direct engine (injectable for tests). Defaults to a stdio or HTTP client. */
+  mcpSource?: (spec: McpServerSpec) => Promise<McpSource>;
+}
+
+/** The source a job reads, from its file; old jobs recorded only a url. */
+export function sourceOf(job: IntakeJobFile): IntakeSourceSpec {
+  return job.source ?? (job.url ? { kind: "url", url: job.url } : { kind: "text" });
+}
+
+/** One line naming a source, for lists and notes. */
+export function describeSource(src: IntakeSourceSpec): string {
+  switch (src.kind) {
+    case "url":
+      return src.url;
+    case "text":
+      return "pasted text";
+    case "repo":
+      return `repository ${src.repo}${src.ref ? ` (${src.ref})` : ""}`;
+    case "mcp":
+      return `MCP server ${src.server.name}`;
+  }
+}
+
+const explored = (src: IntakeSourceSpec) => src.kind === "repo" || src.kind === "mcp";
+/** Tools whose output is the librarian's own words, so nothing in it may serve as a quote. */
+const UNQUOTABLE = new Set(["think", "propose_lesson", "TodoWrite"]);
+
+/** Shallow-clone a repository (one branch, no history) into dir; throws with git's output on failure. */
+function cloneRepo(repo: string, ref: string | undefined, dir: string, signal: AbortSignal): Promise<void> {
+  const args = ["clone", "--quiet", "--depth", "1", ...(ref ? ["--branch", ref] : []), "--", repo, dir];
+  return new Promise((resolve, reject) => {
+    execFile("git", args, { signal, timeout: 300_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 1 << 20 }, (err, _out, stderr) => {
+      if (err) reject(new Error(`git clone failed: ${String(stderr || err.message).trim().slice(-500)}`));
+      else resolve();
+    });
+  });
+}
+
+/** The first message's description of a repository: its top-level entries, so the librarian knows where to start. */
+function repoOutline(ws: string): string {
+  try {
+    const names = fs.readdirSync(ws).filter((n) => n !== ".git").sort();
+    return names.slice(0, 60).map((n) => (fs.statSync(path.join(ws, n)).isDirectory() ? `${n}/` : n)).join("\n") + (names.length > 60 ? `\n… ${names.length - 60} more` : "");
+  } catch {
+    return "(unreadable)";
+  }
 }
 
 /**
@@ -244,56 +281,153 @@ export class IntakeOrchestrator {
 
   async run(): Promise<{ ok: boolean; summary: string }> {
     const started = Date.now();
-    // ---- Distil ----
+    const source = sourceOf(this.job);
+    const focus = this.job.focus?.trim() ?? "";
+    // ---- Read or attach the source ----
     this.bus.emitEvent({ type: "phase.started", phase: "plan", round: 0 });
     let sourceText = fs.existsSync(this.sourcePath()) ? fs.readFileSync(this.sourcePath(), "utf8") : "";
-    if (!sourceText && this.job.url) {
+    if (source.kind === "url" && !sourceText) {
       const fetchText = this.deps.fetchText ?? (async (url: string, signal: AbortSignal) => {
         const res = await fetch(url, { signal, headers: { "user-agent": "reins/0.1 (lesson intake)" } });
         return { status: res.status, text: await res.text() };
       });
-      const r = await fetchText(this.job.url, this.control.signal);
-      if (r.status >= 400) throw new Error(`Fetching ${this.job.url} returned HTTP ${r.status}.`);
+      const r = await fetchText(source.url, this.control.signal);
+      if (r.status >= 400) throw new Error(`Fetching ${source.url} returned HTTP ${r.status}.`);
       sourceText = htmlToText(r.text).slice(0, MAX_SOURCE_CHARS);
       fs.writeFileSync(this.sourcePath(), sourceText);
-      this.bus.emitEvent({ type: "note", level: "info", text: `Fetched ${this.job.url}: ${sourceText.length} characters saved to source.md.` });
+      this.bus.emitEvent({ type: "note", level: "info", text: `Fetched ${source.url}: ${sourceText.length} characters saved to source.md.` });
     }
-    const hash = sourceHash(sourceText);
-    const dup = findDuplicate({ hash, url: this.job.url }, this.job.id);
-    if (dup) throw new IntakeRefused(duplicateMessage(dup), dup);
-    this.job.hash = hash;
-    saveJob(this.dir, this.job);
+    // Whole sources are hashed up front, so a re-paste of an adopted article is refused before the model runs.
+    let hash = "";
+    if (!explored(source)) {
+      hash = sourceHash(sourceText);
+      const dup = findDuplicate({ hash, url: this.job.url, focus }, this.job.id);
+      if (dup) throw new IntakeRefused(duplicateMessage(dup), dup);
+      this.job.hash = hash;
+      saveJob(this.dir, this.job);
+    }
+    let mcp: McpSource | null = null;
+    const extraTools: Record<string, import("../tools/registry.js").ToolDef> = {};
+    const extraMcpServers: Record<string, McpServerSpec> = {};
+    if (source.kind === "repo") {
+      const ws = this.config.workspace;
+      if (!fs.existsSync(ws)) {
+        this.bus.emitEvent({ type: "note", level: "info", text: `Cloning ${source.repo}${source.ref ? ` at ${source.ref}` : ""} (shallow) into ${ws}…` });
+        await cloneRepo(source.repo, source.ref, ws, this.control.signal);
+      }
+      this.bus.emitEvent({ type: "note", level: "info", text: `Reading repository ${source.repo} at ${ws}.` });
+    } else if (source.kind === "mcp") {
+      if (this.config.engine === "claude-code") extraMcpServers[source.server.name] = source.server;
+      else {
+        mcp = await (this.deps.mcpSource ?? connectMcpSource)(source.server);
+        Object.assign(extraTools, mcp.tools);
+      }
+      this.bus.emitEvent({ type: "note", level: "info", text: `Attached MCP server ${source.server.name}${mcp ? ` with ${Object.keys(mcp.tools).length} tools` : ""}.` });
+    }
+
+    // ---- What the librarian read: for an explored source, source.md is built from its tool results ----
+    const corpus: string[] = [];
+    const seenFiles = new Set<string>();
+    const record = (r: { name: string; input: unknown; output: string; ok: boolean }) => {
+      // Only what came from the source counts: never the model's own think notes or the proposal's echo.
+      if (!r.ok || !explored(source) || UNQUOTABLE.has(r.name.replace(/^mcp__reins__/, ""))) return;
+      const inp = (r.input ?? {}) as Record<string, unknown>;
+      // A file read is recorded from disk, whole, so a quote may span the numbered lines the tool printed.
+      if (r.name === "read_file" || r.name === "Read") {
+        const rel = String(inp.path ?? inp.file_path ?? "");
+        const abs = path.isAbsolute(rel) ? rel : path.join(this.config.workspace, rel);
+        if (seenFiles.has(abs)) return;
+        try {
+          if (fs.statSync(abs).isFile() && fs.statSync(abs).size <= MAX_SOURCE_CHARS) {
+            seenFiles.add(abs);
+            corpus.push(`# ${path.relative(this.config.workspace, abs) || abs}\n\n${fs.readFileSync(abs, "utf8")}`);
+            return;
+          }
+        } catch {
+          /* not a file: fall through to the tool's own output */
+        }
+      }
+      if (r.output.trim()) corpus.push(`# ${r.name}(${JSON.stringify(inp).slice(0, 200)})\n\n${r.output}`);
+    };
+    const textNow = () => (explored(source) ? corpus.join("\n\n") : sourceText);
 
     const skills = loadSkills(null).map((s) => s.name);
-    const first = [
-      `# Source (source.md, ${sourceText.length} characters${this.job.url ? `, from ${this.job.url}` : ", pasted"})`,
-      sourceText,
+    const targets = [
       `# Targets you may use`,
       `- component: ${COMPONENT_IDS.join(", ")}`,
       `- stage: ${PHASES.join(", ")}`,
       `- skill: ${skills.join(", ") || "(none installed)"}`,
       `- foundation: ${FOUNDATIONS.map((f) => f.id).join(", ")}`,
       `- gap: no target (an idea Reins does not implement yet)`,
-      `# Instructions`,
-      `Distil the source into one lesson and call propose_lesson. Every implication must quote the source verbatim (copy the words exactly) and target one thing. Use today's date (${new Date().toISOString().slice(0, 10)}) only if the source has none.`,
-    ].join("\n\n");
-    const r = await this.loop({
-      role: "librarian",
-      system: librarianPrompt(),
-      tools: ["read_file", "think", "http_fetch"],
-      terminal: ["propose_lesson"],
-      handlers: {
-        propose_lesson: (input: DraftLesson) => {
-          const d = normalizeDraft(input, this.job);
-          const problems = draftProblems(d, sourceText);
-          if (problems.length) throw new Error(`Not proposed; fix these and call propose_lesson again:\n- ${problems.join("\n- ")}`);
-          this.draft = d;
-          fs.writeFileSync(path.join(this.dir, "draft.md"), renderLessonMarkdown(d, { standing: "unreviewed", hash }));
-          return `Proposed ${d.implications.length} implications; the user reviews them next.`;
+    ].join("\n");
+    const today = new Date().toISOString().slice(0, 10);
+    const focusBlock = focus ? `# What to look for\n${focus}` : "";
+    let first: string;
+    let tools: string[];
+    if (source.kind === "repo") {
+      first = [
+        `# Source: git repository ${source.repo}${source.ref ? ` (${source.ref})` : ""}\nChecked out at ${this.config.workspace}. Top-level entries:\n${repoOutline(this.config.workspace)}`,
+        focusBlock,
+        targets,
+        `# Instructions`,
+        `Explore the repository with the file tools, guided by what to look for: list and search first, then read the files that matter (code, docs, comments, commit messages are all fair sources). Then distil what you found into one lesson and call propose_lesson. Every implication must quote a file you read verbatim (copy the words exactly; a code line counts). Learnings keep the repository's own names, numbers and examples. Use today's date (${today}).`,
+      ].filter(Boolean).join("\n\n");
+      tools = ["read_file", "list_files", "search", "think"];
+    } else if (source.kind === "mcp") {
+      const toolList = mcp ? mcp.describe() : `attached as mcp__${source.server.name}__* (listed with your tools)`;
+      first = [
+        `# Source: MCP server ${source.server.name}\nIts tools:\n${toolList}`,
+        focusBlock,
+        targets,
+        `# Instructions`,
+        `Read the source through the server's tools, guided by what to look for: search or list first, then read the items that matter. Then distil what you found into one lesson and call propose_lesson. Every implication must quote a tool result verbatim (copy the words exactly). Learnings keep the source's own names, numbers and examples. Use today's date (${today}) only if the source has none.`,
+      ].filter(Boolean).join("\n\n");
+      tools = ["think", ...Object.keys(extraTools)];
+    } else {
+      first = [
+        `# Source (source.md, ${sourceText.length} characters${source.kind === "url" ? `, from ${source.url}` : ", pasted"})`,
+        sourceText,
+        focusBlock,
+        targets,
+        `# Instructions`,
+        `Distil the source into one lesson and call propose_lesson.${focus ? " Keep to what to look for: implications outside it do not belong in this lesson." : ""} Every implication must quote the source verbatim (copy the words exactly) and target one thing. Use today's date (${today}) only if the source has none.`,
+      ].filter(Boolean).join("\n\n");
+      tools = ["read_file", "think", "http_fetch"];
+    }
+    let r;
+    try {
+      r = await this.loop({
+        role: "librarian",
+        system: librarianPrompt(),
+        tools,
+        terminal: ["propose_lesson"],
+        extraTools,
+        extraMcpServers,
+        onToolResult: record,
+        handlers: {
+          propose_lesson: (input: DraftLesson) => {
+            const d = normalizeDraft(input, this.job);
+            const problems = draftProblems(d, textNow());
+            if (problems.length) throw new Error(`Not proposed; fix these and call propose_lesson again:\n- ${problems.join("\n- ")}`);
+            this.draft = d;
+            fs.writeFileSync(path.join(this.dir, "draft.md"), renderLessonMarkdown(d, { standing: "unreviewed", focus }));
+            return `Proposed ${d.implications.length} implications; the user reviews them next.`;
+          },
         },
-      },
-      maxTurns: this.config.maxTurnsPerPhase,
-    }).run(first);
+        maxTurns: this.config.maxTurnsPerPhase,
+      }).run(first);
+    } finally {
+      await mcp?.close().catch(() => {});
+    }
+    if (explored(source)) {
+      // What the librarian read is the source the quotes are checked against, now and by lessons:check later.
+      sourceText = corpus.join("\n\n");
+      fs.writeFileSync(this.sourcePath(), sourceText);
+      hash = sourceHash(sourceText);
+      this.job.hash = hash;
+      saveJob(this.dir, this.job);
+      this.bus.emitEvent({ type: "note", level: "info", text: `Recorded what the librarian read: ${seenFiles.size} file(s), ${corpus.length} item(s), ${sourceText.length} characters in source.md.` });
+    }
     this.bus.emitEvent({ type: "phase.finished", phase: "plan", round: 0, summary: this.draft ? `Draft with ${this.draft.implications.length} implications.` : "No draft.", usage: r.usage, costUsd: r.costUsd, durationMs: Date.now() - started });
     if (!this.draft) {
       this.job.status = r.reason === "aborted" ? "cancelled" : "failed";
@@ -343,7 +477,7 @@ export class IntakeOrchestrator {
     const standing: Standing = a.edits?.standing === "reviewed" ? "reviewed" : "unreviewed";
     let slug = final.slug;
     for (let n = 2; fs.existsSync(path.join(userLessonsDir(), `${slug}.md`)); n++) slug = `${final.slug}-${n}`;
-    const file = writeUserLesson(slug, renderLessonMarkdown({ ...final, slug }, { standing, hash }));
+    const file = writeUserLesson(slug, renderLessonMarkdown({ ...final, slug }, { standing, hash, focus: this.job.focus }));
     this.job.status = "adopted";
     this.job.lessonFile = file;
     this.job.lessonSlug = slug;
@@ -365,8 +499,9 @@ function normalizeDraft(input: any, job: IntakeJobFile): DraftLesson {
     slug: slugify(String(input?.slug || job.slug)),
     title: String(input?.title ?? "").trim() || job.slug,
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(input?.date)) ? String(input.date) : new Date().toISOString().slice(0, 10),
-    url: String(input?.url || job.url || ""),
-    source: PROVENANCES.includes(input?.source) ? input.source : job.url ? "article" : "note",
+    url: String(input?.url || (/^https?:\/\//i.test(job.url ?? "") ? job.url : "")),
+    // A repository or MCP server is a fact of the job, not the librarian's call; a whole source may be a post, paper, note…
+    source: explored(sourceOf(job)) ? defaultProvenance(sourceOf(job)) : PROVENANCES.includes(input?.source) ? input.source : defaultProvenance(sourceOf(job)),
     takeaway: String(input?.takeaway ?? "").trim(),
     tags: arr(input?.tags).map((t) => t.toLowerCase()),
     learnings: arr(input?.learnings),
@@ -378,6 +513,10 @@ function normalizeDraft(input: any, job: IntakeJobFile): DraftLesson {
       domains: arr(i?.domains).map((d) => d.toLowerCase()),
     })),
   };
+}
+
+function defaultProvenance(src: IntakeSourceSpec): LessonProvenance {
+  return src.kind === "repo" ? "repo" : src.kind === "mcp" ? "mcp" : src.kind === "url" ? "article" : "note";
 }
 
 function saveJob(dir: string, job: IntakeJobFile) {
@@ -407,21 +546,78 @@ function jobDirs(): { dir: string; job: IntakeJobFile }[] {
   return out;
 }
 
-/** An existing lesson, or an intake job still in progress, with the same content hash or URL; null if none. */
-export function findDuplicate(src: { hash?: string; url?: string }, selfId?: string, active?: (id: string) => boolean): IntakeDuplicate | null {
+const sameFocus = (a?: string, b?: string) => normalizeForQuote(a ?? "") === normalizeForQuote(b ?? "");
+
+/**
+ * An existing lesson, or an intake job still in progress, with the same content
+ * hash, or the same URL (page, repository or mcp://name) and the same focus; null
+ * if none. The same source with another focus is another lesson.
+ */
+export function findDuplicate(src: { hash?: string; url?: string; focus?: string }, selfId?: string, active?: (id: string) => boolean): IntakeDuplicate | null {
   const url = src.url?.trim().replace(/\/+$/, "");
   for (const l of listLessons()) {
     if (src.hash && l.hash === src.hash) return { kind: "lesson", slug: l.slug };
-    if (url && l.url && l.url.replace(/\/+$/, "") === url) return { kind: "lesson", slug: l.slug, sameUrl: true };
+    if (url && l.url && l.url.replace(/\/+$/, "") === url && sameFocus(l.focus, src.focus)) return { kind: "lesson", slug: l.slug, sameUrl: true };
   }
   for (const { job } of jobDirs()) {
     // Only a job that can still finish blocks a re-intake; adopted ones are caught above through their lesson file.
     if (job.id === selfId || !["running", "waiting_approval"].includes(job.status)) continue;
     if (active && !active(job.id)) continue;
     if (src.hash && job.hash === src.hash) return { kind: "job", slug: job.slug, jobId: job.id, status: job.status };
-    if (url && job.url && job.url.replace(/\/+$/, "") === url) return { kind: "job", slug: job.slug, jobId: job.id, status: job.status, sameUrl: true };
+    if (url && job.url && job.url.replace(/\/+$/, "") === url && sameFocus(job.focus, src.focus)) return { kind: "job", slug: job.slug, jobId: job.id, status: job.status, sameUrl: true };
   }
   return null;
+}
+
+/** What POST /api/intake and IntakeManager.start accept. */
+export interface IntakeStartInput {
+  url?: string;
+  text?: string;
+  /** A git URL (http(s), ssh, git@ or file://) to clone, or a local directory to read in place. */
+  repo?: string;
+  ref?: string;
+  mcp?: McpServerSpec;
+  /** What to look for; required with repo or mcp. */
+  focus?: string;
+  title?: string;
+  engine?: EngineId;
+}
+
+const REMOTE_REPO = /^(https?:\/\/|ssh:\/\/|git:\/\/|file:\/\/|[\w.-]+@[\w.-]+:)/i;
+
+/** Resolve the start input into a source, or throw with what is wrong. Returns the duplicate key and workspace too. */
+export function resolveSource(input: IntakeStartInput, dir: string): { source: IntakeSourceSpec; url?: string; text?: string; workspace: string } {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const url = str(input.url);
+  const repo = str(input.repo);
+  const focus = str(input.focus);
+  const given = [url && "url", input.text?.trim() && "text", repo && "repo", input.mcp && "mcp"].filter(Boolean);
+  if (given.length > 1) throw new Error(`give one source, not ${given.join(" and ")}`);
+  if (repo) {
+    if (!focus) throw new Error("say what to look for in the repository (focus)");
+    const ref = str(input.ref);
+    if (ref && !/^[\w./-]+$/.test(ref)) throw new Error("ref must be a branch or tag name");
+    const local = repo.replace(/^~(?=$|\/)/, os.homedir());
+    if (fs.existsSync(local)) {
+      if (!fs.statSync(local).isDirectory()) throw new Error(`${repo} is not a directory`);
+      const abs = path.resolve(local);
+      return { source: { kind: "repo", repo: abs, ...(ref ? { ref } : {}) }, url: abs, workspace: abs };
+    }
+    if (!REMOTE_REPO.test(repo)) throw new Error(`${repo} is neither a directory on this machine nor a git URL`);
+    return { source: { kind: "repo", repo, ...(ref ? { ref } : {}) }, url: repo, workspace: path.join(dir, "repo") };
+  }
+  if (input.mcp) {
+    if (!focus) throw new Error("say what to look for on the MCP server (focus)");
+    const problem = mcpSpecProblem(input.mcp);
+    if (problem) throw new Error(problem);
+    const m = input.mcp;
+    const server: McpServerSpec = { name: m.name, ...(m.command ? { command: m.command, args: m.args ?? [] } : {}), ...(m.env ? { env: m.env } : {}), ...(m.url ? { url: m.url } : {}), ...(m.headers ? { headers: m.headers } : {}) };
+    return { source: { kind: "mcp", server }, url: `mcp://${server.name}`, workspace: dir };
+  }
+  const text = typeof input.text === "string" && input.text.trim() ? input.text.slice(0, MAX_SOURCE_CHARS) : undefined;
+  if (!url && !text) throw new Error("give a url, paste the text, name a repository or an MCP server");
+  if (url && !/^https?:\/\//i.test(url)) throw new Error("url must start with http:// or https://");
+  return url ? { source: { kind: "url", url }, url, workspace: dir } : { source: { kind: "text" }, text, workspace: dir };
 }
 
 /** Owns intake jobs: start, events, approvals, cancel. Mirrors RunManager but never touches the runs directory. */
@@ -454,7 +650,7 @@ export class IntakeManager extends EventEmitter {
       job.status = "interrupted";
       job.reason = "The server stopped before this job finished.";
       saveJob(dir, job);
-      const bus = new RunBus(job.id, true, fileStore(path.join(dir, "events.jsonl")));
+      const bus = new RunBus(job.id, true, fileEventStore(path.join(dir, "events.jsonl")));
       bus.on("event", (ev: RunEvent) => this.emit("event", ev));
       bus.emitEvent({ type: "error", message: `${job.reason} Start the intake again from Lessons.`, recoverable: false });
       bus.emitEvent({ type: "run.status", status: "failed", reason: job.reason });
@@ -464,7 +660,7 @@ export class IntakeManager extends EventEmitter {
   }
 
   private track(config: RunConfig, dir: string): ActiveJob {
-    const bus = new RunBus(config.id, true, fileStore(path.join(dir, "events.jsonl")));
+    const bus = new RunBus(config.id, true, fileEventStore(path.join(dir, "events.jsonl")));
     const run: ActiveJob = { config, bus, abort: new AbortController(), pending: new Map(), dir };
     bus.on("event", (ev: RunEvent) => this.emit("event", ev));
     this.active.set(config.id, run);
@@ -503,31 +699,42 @@ export class IntakeManager extends EventEmitter {
     return this.active.has(id);
   }
 
-  /** Start a job from a URL or pasted text. Throws IntakeRefused for a duplicate source. */
-  start(input: { url?: string; text?: string; title?: string; engine?: EngineId }): { id: string; slug: string } {
-    const url = typeof input.url === "string" && input.url.trim() ? input.url.trim() : undefined;
-    const text = typeof input.text === "string" && input.text.trim() ? input.text.slice(0, MAX_SOURCE_CHARS) : undefined;
-    if (!url && !text) throw new Error("give a url or paste the text");
-    if (url && !/^https?:\/\//i.test(url)) throw new Error("url must start with http:// or https://");
-    const dup = findDuplicate({ url, hash: text ? sourceHash(text) : undefined }, undefined, (id) => this.active.has(id));
+  /** Start a job from a URL, pasted text, a git repository or an MCP server. Throws IntakeRefused for a duplicate source. */
+  start(input: IntakeStartInput): { id: string; slug: string } {
+    const focus = typeof input.focus === "string" && input.focus.trim() ? input.focus.trim().slice(0, 1000) : undefined;
+    // The source is resolved against a placeholder dir first (only a remote clone needs the real one).
+    const probe = resolveSource(input, "");
+    const { url, text } = probe;
+    const dup = findDuplicate({ url, hash: text ? sourceHash(text) : undefined, focus }, undefined, (id) => this.active.has(id));
     if (dup) throw new IntakeRefused(duplicateMessage(dup), dup);
     const firstLine = text?.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "") ?? "";
-    const base = slugify(input.title || (url ? (new URL(url).pathname.split("/").filter(Boolean).pop() ?? new URL(url).hostname) : firstLine));
+    const src = probe.source;
+    const baseName =
+      src.kind === "repo"
+        ? path.basename(src.repo.replace(/\/+$/, "").replace(/\.git$/, "")) || "repo"
+        : src.kind === "mcp"
+          ? src.server.name
+          : src.kind === "url"
+            ? (new URL(src.url).pathname.split("/").filter(Boolean).pop() ?? new URL(src.url).hostname)
+            : firstLine;
+    // An explored source is named after what was looked for, so two lessons from one repository tell apart.
+    const base = slugify(input.title || (explored(src) && focus ? `${baseName}-${slugify(focus).slice(0, 32)}` : baseName));
     let slug = base;
     for (let n = 2; fs.existsSync(path.join(userLessonsDir(), slug)) || fs.existsSync(path.join(userLessonsDir(), `${slug}.md`)); n++) slug = `${base}-${n}`;
     const id = `${INTAKE_PREFIX}${slug}`;
     const dir = path.join(userLessonsDir(), slug);
     fs.mkdirSync(dir, { recursive: true });
+    const { source, workspace } = resolveSource(input, dir);
     if (text) fs.writeFileSync(path.join(dir, "source.md"), text);
-    const job: IntakeJobFile = { id, slug, ...(url ? { url } : {}), ...(text ? { hash: sourceHash(text) } : {}), status: "running", createdAt: new Date().toISOString() };
+    const job: IntakeJobFile = { id, slug, ...(url ? { url } : {}), source, ...(focus ? { focus } : {}), ...(text ? { hash: sourceHash(text) } : {}), status: "running", createdAt: new Date().toISOString() };
     saveJob(dir, job);
     const engine: EngineId = input.engine ?? (this.deps.client() ? "anthropic" : this.deps.hasClaudeCode() ? "claude-code" : "anthropic");
     const off = Object.fromEntries(COMPONENT_IDS.map((c) => [c, false])) as RunConfig["components"];
     const config = defaultRunConfig({
       id,
       title: `Lesson intake: ${slug}`,
-      task: `Distil ${url ?? "the pasted text"} into a lesson with typed implications.`,
-      workspace: dir,
+      task: `Distil ${describeSource(source)} into a lesson with typed implications${focus ? `, looking for: ${focus}` : ""}.`,
+      workspace,
       engine,
       // Network is allowed for this job only; nothing else is switched on.
       components: { ...off, thinkTool: true, narration: true },
@@ -551,8 +758,9 @@ export class IntakeManager extends EventEmitter {
   }
 
   private async drive(run: ActiveJob, job: IntakeJobFile, mode: "start" | "resume") {
-    const ask = <T>(request: Omit<ApprovalRequest, "approvalId">) =>
-      new Promise<{ approved: boolean; note?: string; edits?: T }>((resolve) => {
+    // Ask the person, then put the job back to running once they answer (a cancel resolves it as rejected).
+    const ask = async <T>(request: Omit<ApprovalRequest, "approvalId">) => {
+      const r = await new Promise<{ approved: boolean; note?: string; edits?: T }>((resolve) => {
         if (run.abort.signal.aborted) return resolve({ approved: false, note: "cancelled" });
         const reopen = run.reopen && run.reopen.kind === request.kind ? run.reopen : undefined;
         run.reopen = undefined;
@@ -563,21 +771,16 @@ export class IntakeManager extends EventEmitter {
         this.status(run, "waiting_approval");
         run.abort.signal.addEventListener("abort", () => resolve({ approved: false, note: "cancelled" }), { once: true });
       });
+      if (!run.abort.signal.aborted) this.status(run, "running");
+      return r;
+    };
     const control = {
       signal: run.abort.signal,
       waitIfPaused: async () => {},
       drainSteer: () => [],
       remainingBudget: () => budgetOf(run.config).limit,
-      requestApproval: async (_k: "action", title: string, detail: string, payload: unknown) => {
-        const r = await ask({ kind: "action", title, detail, payload });
-        if (!run.abort.signal.aborted) this.status(run, "running");
-        return r;
-      },
-      requestLessonApproval: async (draft: DraftLesson) => {
-        const r = await ask<LessonEdits>({ kind: "lesson", title: "Review the distilled lesson", detail: "Edit or drop implications, set the standing, then approve to add it to your library.", payload: draft });
-        if (!run.abort.signal.aborted) this.status(run, "running");
-        return r;
-      },
+      requestApproval: (_k: "action", title: string, detail: string, payload: unknown) => ask({ kind: "action", title, detail, payload }),
+      requestLessonApproval: (draft: DraftLesson) => ask<LessonEdits>({ kind: "lesson", title: "Review the distilled lesson", detail: "Edit or drop implications, set the standing, then approve to add it to your library.", payload: draft }),
     };
     if (mode === "start") this.status(run, "running");
     try {
@@ -603,7 +806,8 @@ export class IntakeManager extends EventEmitter {
     }
   }
 
-  approve(id: string, approvalId: string, decision: "approve" | "reject", note?: string, edits?: LessonEdits) {
+  /** Answer a pending card. A lesson draft is adopted or dropped; "revise" is not offered here and counts as a rejection. */
+  approve(id: string, approvalId: string, decision: ApprovalDecision, note?: string, edits?: LessonEdits) {
     const run = this.active.get(id);
     const p = run?.pending.get(approvalId);
     if (!run || !p) throw new Error("No such pending approval.");

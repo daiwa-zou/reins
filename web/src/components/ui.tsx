@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { RoleId, RunStatus } from "@shared/types";
 import { ROLE_LABEL } from "../state/derive";
-import { Ban, ChevronRight, CircleCheck, CirclePause, CircleX, Clock, Hand, LoaderCircle } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 
 export function Badge({ tone = "neutral", children, title }: { tone?: "ok" | "warn" | "bad" | "neutral" | "accent"; children: React.ReactNode; title?: string }) {
   return (
@@ -20,18 +20,6 @@ export const STATUS: Record<RunStatus, { tone: "ok" | "warn" | "bad" | "neutral"
   failed: { tone: "bad", label: "Failed" },
   cancelled: { tone: "neutral", label: "Cancelled" },
 };
-
-/** Compact status for list rows: an icon with an accessible label. */
-export function StatusIcon({ status, size = 14 }: { status: RunStatus; size?: number }) {
-  const m = STATUS[status];
-  const color = m.tone === "neutral" ? "var(--fg-faint)" : `var(--${m.tone})`;
-  const Icon = { queued: Clock, running: LoaderCircle, paused: CirclePause, waiting_approval: Hand, completed: CircleCheck, failed: CircleX, cancelled: Ban }[status];
-  return (
-    <span className="inline-flex shrink-0" style={{ color }} role="img" aria-label={m.label} title={m.label}>
-      <Icon size={size} className={status === "running" ? "animate-spin [animation-duration:2.4s]" : status === "waiting_approval" ? "pulse" : undefined} aria-hidden />
-    </span>
-  );
-}
 
 export function StatusBadge({ status }: { status: RunStatus }) {
   const m = STATUS[status];
@@ -126,8 +114,8 @@ export function Modal({ title, onClose, children, width = 720, dismissOnBackdrop
       <div ref={ref} className="card fade-in flex flex-col max-h-[88vh] w-full" style={{ maxWidth: width, boxShadow: "var(--shadow)" }} role="dialog" aria-modal aria-label={typeof title === "string" ? title : undefined}>
         <div className="flex items-center justify-between px-5 py-3 border-b line">
           <div className="font-semibold text-title">{title}</div>
-          <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close">
-            Esc
+          <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose} aria-label="Close" title="Close (Esc)">
+            <X size={16} aria-hidden />
           </button>
         </div>
         <div className="overflow-auto p-5">{children}</div>
@@ -176,6 +164,17 @@ export function useAutoScroll<T extends HTMLElement>(dep: unknown, enabled = tru
     setBehind(false);
   };
   return Object.assign(ref, { behind, jump });
+}
+
+/** A labelled figure with an optional line under it: the stat tiles of Context, Guardrails and Reliability. */
+export function Stat({ label, value, sub, tone, align = "left", card = true, capitalize = false }: { label: string; value: string; sub?: string; tone?: "ok" | "warn" | "bad"; align?: "left" | "right"; card?: boolean; capitalize?: boolean }) {
+  return (
+    <div className={`${card ? "card p-3" : ""} ${align === "right" ? "text-right" : ""}`}>
+      <div className="text-[10.5px] uppercase tracking-wider faint font-semibold">{label}</div>
+      <div className={`text-[17px] font-semibold mt-0.5 ${align === "right" ? "mono" : ""} ${capitalize ? "capitalize" : ""} ${tone ? `text-[var(--${tone})]` : ""}`}>{value}</div>
+      {sub && <div className={`muted ${align === "right" ? "text-[11px]" : "text-[11.5px] mt-0.5"}`}>{sub}</div>}
+    </div>
+  );
 }
 
 export function Meter({ value, max, tone = "accent", height = 6 }: { value: number; max: number; tone?: "accent" | "ok" | "warn" | "bad"; height?: number }) {

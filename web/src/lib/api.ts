@@ -1,4 +1,4 @@
-import type { Composition, IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, RunConfig, RunEvent, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet, UserDomain } from "@shared/types";
+import type { ApprovalDecision, Composition, IntakeJobSummary, EngineId, PresetCompatibility, ContractCriterion, HarnessComponent, Lesson, LessonProblem, Preset, PresetConfig, PublishDraft, RunConfig, RunSummary, ServerInfo, SkillInfo, ChangedFile, TrialSet, UserDomain, McpServerSpec } from "@shared/types";
 
 export type PresetEntry = Preset & { isDefault: boolean; compatibility?: Record<EngineId, PresetCompatibility> };
 export interface PresetList {
@@ -14,6 +14,16 @@ export interface LessonAudit {
   rows: { learning: string; where: string; status: "implemented" | "partial" | "gap" }[];
   gaps: string[];
   counts: { implemented: number; partial: number; gap: number };
+}
+
+/** GET /api/lessons/:slug/derived and the DELETE response: what hangs off a lesson in your library. */
+export interface LessonDerived {
+  slug: string;
+  file: string;
+  intakeJobs: string[];
+  domains: { id: string; label: string; dropped: string[]; deleted: boolean }[];
+  presets: { name: string; deleted: boolean }[];
+  revealsBundled: boolean;
 }
 
 /** POST /api/intake refused the source: it matches a lesson in the library, or an intake job still in progress. */
@@ -56,14 +66,15 @@ export const api = {
   setDefaultPreset: (name: string | null) => post("/api/presets/default", { name }).then((r) => j<{ default: string | null }>(r)),
   skills: (workspace?: string) => fetch(`/api/skills${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""}`).then((r) => j<SkillInfo[]>(r)),
   runs: () => fetch("/api/runs").then((r) => j<RunSummary[]>(r)),
-  run: (id: string) => fetch(`/api/runs/${id}`).then((r) => j<{ config: RunConfig; events: RunEvent[]; active: boolean }>(r)),
   createRun: (body: Partial<RunConfig> & { task: string; workspace: string }) => post("/api/runs", body).then((r) => j<RunConfig>(r)),
   demo: () => post("/api/runs/demo").then((r) => j<RunConfig>(r)),
   deleteRun: (id: string) => fetch(`/api/runs/${id}`, { method: "DELETE" }).then((r) => j<{ ok: true }>(r)),
-  approve: (id: string, approvalId: string, decision: "approve" | "reject", note?: string, criteria?: ContractCriterion[], lesson?: unknown) =>
-    post(`/api/runs/${id}/approve`, { approvalId, decision, note, criteria, lesson }).then((r) => j<{ ok: true }>(r)),
+  approve: (id: string, approvalId: string, decision: ApprovalDecision, note?: string, extra: { criteria?: ContractCriterion[]; lesson?: unknown; publish?: PublishDraft } = {}) =>
+    post(`/api/runs/${id}/approve`, { approvalId, decision, note, ...extra }).then((r) => j<{ ok: true }>(r)),
+  lessonDerived: (slug: string) => fetch(`/api/lessons/${encodeURIComponent(slug)}/derived`).then((r) => j<LessonDerived>(r)),
+  deleteLesson: (slug: string) => fetch(`/api/lessons/${encodeURIComponent(slug)}`, { method: "DELETE" }).then((r) => j<LessonDerived>(r)),
   setStanding: (slug: string, standing: "reviewed" | "unreviewed") => post(`/api/lessons/${encodeURIComponent(slug)}/standing`, { standing }).then((r) => j<Lesson>(r)),
-  startIntake: async (body: { url?: string; text?: string }) => {
+  startIntake: async (body: { url?: string; text?: string; repo?: string; ref?: string; mcp?: McpServerSpec; focus?: string }) => {
     const r = await post("/api/intake", body);
     if (r.status === 409) {
       const b = await r.json().catch(() => ({}));
@@ -72,13 +83,16 @@ export const api = {
     return j<{ id: string; slug: string }>(r);
   },
   intakeJobs: () => fetch("/api/intake").then((r) => j<IntakeJobSummary[]>(r)),
-  composablePresets: () => fetch("/api/presets/composable").then((r) => j<{ efforts: unknown[]; supervisions: unknown[]; domains: Preset[] }>(r)),
   steer: (id: string, text: string) => post(`/api/runs/${id}/steer`, { text }).then((r) => j<{ ok: true }>(r)),
   pause: (id: string) => post(`/api/runs/${id}/pause`).then((r) => j<{ ok: true }>(r)),
   resume: (id: string) => post(`/api/runs/${id}/resume`).then((r) => j<{ ok: true }>(r)),
   cancel: (id: string) => post(`/api/runs/${id}/cancel`).then((r) => j<{ ok: true }>(r)),
   files: (id: string) => fetch(`/api/runs/${id}/files`).then((r) => j<ChangedFile[]>(r)),
-  diff: (id: string, file: string) => fetch(`/api/runs/${id}/diff?file=${encodeURIComponent(file)}`).then((r) => r.text()),
+  diff: (id: string, file: string) =>
+    fetch(`/api/runs/${id}/diff?file=${encodeURIComponent(file)}`).then((r) => {
+      if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+      return r.text();
+    }),
   workspaces: () => fetch("/api/workspaces").then((r) => j<{ recent: string[]; home: string }>(r)),
   checkWorkspace: (p: string) => fetch(`/api/workspaces/check?path=${encodeURIComponent(p)}`).then((r) => j<{ path: string; exists: boolean; git: boolean; files: string[]; suggestions?: { domain: string; reason: string }[] }>(r)),
   trials: (k = 3) => fetch(`/api/trials?k=${k}`).then((r) => j<TrialSet[]>(r)),

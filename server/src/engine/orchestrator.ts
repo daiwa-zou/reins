@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
-import type { ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, RunConfig, TestPlan, Usage, WorkPackage } from "../../../shared/types.js";
+import type { ApprovalDecision, ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, PublishDraft, RunConfig, TestPlan, Usage, WorkPackage } from "../../../shared/types.js";
 import { RunBus } from "./bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
@@ -11,7 +11,7 @@ import { checkRunConfig } from "../../../shared/config.js";
 import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor, type PromptRole } from "../roles/prompts.js";
 import { packageLabel, packageRef, renderBreakdown, renderPackage, singlePackage, validateBreakdown, PACKAGE_MAX_LINES } from "../../../shared/packages.js";
-import { renderTestPlanDoc, renderTestsForBuilder, testsCriterion, validateTestPlan } from "../../../shared/testPlan.js";
+import { renderTestPlanDoc, renderTestsForBuilder, testsCriterion, TESTS_CRITERION_ID, validateTestPlan } from "../../../shared/testPlan.js";
 import { branchNameFor, collectFeedback, prState, Publisher, renderFeedbackForBuilder, renderPrBody, sleep } from "./publish.js";
 import { DEFAULT_PUBLISH } from "../../../shared/components.js";
 import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
@@ -22,13 +22,33 @@ import { EFFORT_TABLE } from "../../../shared/components.js";
 /** The evaluate-phase instruction at max effort (EFFORT_TABLE.max.rerunEveryCriterion). */
 export const MAX_EFFORT_EVALUATE = "Max effort: run every contract criterion's verification step afresh in this round. Do not reuse evidence from earlier rounds or the builder's summary. Then call report_evaluation with a result for every criterion id; a report that omits one is refused.";
 
+/** What the person decided about a pull request draft: approve (with their edits), reject, or revise (the builder redrafts from the note). */
+export interface PublishAnswer {
+  decision: ApprovalDecision;
+  note?: string;
+  /** The draft as edited on the card, when the person changed it. */
+  draft?: PublishDraft;
+}
+
 export interface OrchestratorControl extends LoopControl {
   requestPhaseApproval: (title: string, detail: string, payload: unknown) => Promise<{ approved: boolean; note?: string }>;
   requestContractApproval: (criteria: ContractCriterion[]) => Promise<{ approved: boolean; note?: string; criteria?: ContractCriterion[] }>;
+  /** Show the pull request draft before the branch is pushed. `revision` counts the builder's redrafts so far. Absent: the draft is approved as it is. */
+  requestPublishApproval?: (draft: PublishDraft, detail: { branch: string; base: string; package?: PackageRef; revision: number }) => Promise<PublishAnswer>;
 }
 
 const READ_TOOLS = ["read_file", "list_files", "search", "think", "git_status", "git_diff", "list_lessons", "read_lesson"]; // http_fetch belongs to the intake librarian only
-const WRITE_TOOLS = ["write_file", "edit_file", "bash", "update_progress", "git_commit"];
+const WRITE_TOOLS = ["write_file", "edit_file", "bash", "update_progress", "check_criterion", "git_commit"];
+/** How many times the builder redrafts a pull request on request before the card only offers approve or reject. */
+export const MAX_PR_REVISIONS = 3;
+
+/** A draft from a tool call or the card, with the fallback's fields where the input is missing or malformed. */
+function cleanDraft(input: unknown, fallback: PublishDraft): PublishDraft {
+  const o = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const title = typeof o.title === "string" ? o.title.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+  const body = typeof o.body === "string" ? o.body.trim() : "";
+  return { title: title || fallback.title, body: body || fallback.body };
+}
 
 /**
  * The pipeline: Plan -> Breakdown -> per work package [Contract -> Build -> Evaluate (-> Build ...)] -> Wrap up.
@@ -42,6 +62,8 @@ export class Orchestrator {
   private baseSha: string | null = null;
   private builderHistory: Anthropic.Beta.BetaMessageParam[] | undefined;
   private builderSession: string | undefined;
+  /** The prompt size of the builder's last call, which a continued conversation starts from (0 before the first build). */
+  private builderPrompt = 0;
   private startedAt = Date.now();
 
   private publisher: Publisher;
@@ -64,6 +86,26 @@ export class Orchestrator {
 
   private get publishPolicy() {
     return { ...DEFAULT_PUBLISH, ...(this.config.publish ?? {}) };
+  }
+
+  /** The OS sandbox for a harness-run shell command, when the run has it on. */
+  private sandboxOpts() {
+    return this.config.components.osSandbox ? { workspace: this.config.workspace, allowNetwork: this.config.guardrail.allowNetwork } : undefined;
+  }
+
+  /** `package: ref` for events of a per-package phase; nothing for an implicit single package. */
+  private get pkgField(): { package?: PackageRef } {
+    return this.pkg ? { package: this.pkg } : {};
+  }
+
+  /** The "Work package" section of a role's first message, when the run has explicit packages. */
+  private packageBrief(pkg: WorkPackage): Record<string, string> {
+    return this.pkg ? { "Work package": `${packageLabel(this.pkg)}\n${renderPackage(pkg, this.features)}` } : {};
+  }
+
+  /** "reins: <what> P2 — <package or run title>". */
+  private commitSubject(what: string, pkg: WorkPackage): string {
+    return `reins: ${what}${this.pkg ? ` ${this.pkg.id}` : ""} — ${this.pkg ? pkg.title : this.config.title}`;
   }
 
   /** Lines every role gets in its first message: project memory, the skills index, and the clock (agents are time-blind). */
@@ -111,6 +153,14 @@ export class Orchestrator {
         this.bus.emitEvent({ type: "progress.updated", features: this.features, note: input.note });
         return `Recorded. ${this.features.filter((f) => f.status === "done").length}/${this.features.length} features done.`;
       },
+      // The builder's self-check of one criterion: the contract is checked off live; the evaluator still verifies independently.
+      check_criterion: (input: { id?: unknown; pass?: unknown; evidence?: unknown }) => {
+        const id = String(input?.id ?? "").trim();
+        if (!this.contract.some((c) => c.id === id)) throw new Error(`No criterion ${id || "(none)"} in the contract; the ids are ${this.contract.map((c) => c.id).join(", ")}.`);
+        const pass = input?.pass === true;
+        this.bus.emitEvent({ type: "criterion.checked", role: "builder", id, pass, evidence: String(input?.evidence ?? "").trim().slice(0, 2000) });
+        return `Recorded ${id} as ${pass ? "passing" : "failing"} in your self-check. The evaluator will verify it independently.`;
+      },
     };
   }
 
@@ -123,7 +173,7 @@ export class Orchestrator {
 
   private async phase<T>(phase: Phase, round: number, body: () => Promise<{ result: LoopResult | null; summary: string; value: T }>): Promise<T> {
     const started = Date.now();
-    const pkgField = this.pkg ? { package: this.pkg } : {};
+    const pkgField = this.pkgField;
     this.bus.emitEvent({ type: "phase.started", phase, round, ...pkgField });
     const { result, summary, value } = await body();
     const usage = result?.usage ?? emptyUsage();
@@ -271,8 +321,9 @@ export class Orchestrator {
       if (pi > 0) {
         this.builderHistory = undefined;
         this.builderSession = undefined;
+        this.builderPrompt = 0;
       }
-      const pkgBrief: Record<string, string> = this.pkg ? { "Work package": `${packageLabel(this.pkg)}\n${renderPackage(pkg, this.features)}` } : {};
+      const pkgBrief = this.packageBrief(pkg);
       const failed = (summary: string) => this.finish(false, this.pkg ? `Package ${this.pkg.id} (${this.pkg.title}): ${summary}` : summary);
       if (this.publishing) {
         // Every package starts from the freshly pulled base, on its own branch.
@@ -312,7 +363,6 @@ export class Orchestrator {
   /** One work package: contract, then build/evaluate rounds. Returns the last evaluation on success. */
   private async runPackage(pkgBrief: Record<string, string>, pkg: WorkPackage): Promise<{ ok: true; ev: Evaluation | null } | { ok: false; summary: string }> {
     const ws = this.config.workspace;
-    const label = this.pkg ? ` ${this.pkg.id}` : "";
     // ---- Contract ----
     if (this.config.components.contracts) {
       const stop = await this.phase("contract", 0, async () => {
@@ -370,7 +420,7 @@ export class Orchestrator {
             const v = validateTestPlan(input, this.contract, (f) => fs.existsSync(path.join(ws, f)));
             if (v.problems.length) throw new Error(`Refused: ${v.problems.join(" ")} Fix these and call propose_tests again.`);
             // Red check: the suite must fail before any code is written, or it does not test the new behaviour.
-            const run = await runShell(v.plan.command, ws, this.control.signal, 180_000, undefined, this.config.components.osSandbox ? { workspace: ws, allowNetwork: this.config.guardrail.allowNetwork } : undefined);
+            const run = await runShell(v.plan.command, ws, this.control.signal, 180_000, undefined, this.sandboxOpts());
             const excerpt = run.out.trim().slice(-1500);
             if (run.timedOut) throw new Error(`Refused: the test command timed out after 180 seconds (${v.plan.command}). Make the suite fast and non-interactive, then call propose_tests again.`);
             if (run.code === 0) throw new Error(`Refused: the suite passes before any code is written (${v.plan.command} exited 0), so it does not test the new behaviour. Make each test fail because the behaviour is missing, then call propose_tests again.${excerpt ? `\nOutput:\n${excerpt}` : ""}`);
@@ -392,7 +442,7 @@ export class Orchestrator {
         if (this.checkStop(r)) return { result: r, summary: "Stopped.", value: true };
         if (state.plan && state.red) {
           this.testPlan = state.plan;
-          this.contract = [...this.contract.filter((c) => c.id !== testsCriterion("").id), testsCriterion(state.plan.command)];
+          this.contract = [...this.contract.filter((c) => c.id !== TESTS_CRITERION_ID), testsCriterion(state.plan.command)];
           writeWorkspaceFile(ws, ".reins/contract.json", JSON.stringify(this.contract, null, 2));
           this.bus.emitEvent({ type: "contract.agreed", criteria: this.contract });
           return { result: r, summary: `${state.plan.tests.length} tests written, red before the build (exit ${state.red.exitCode}); T added to the contract.`, value: false };
@@ -401,7 +451,7 @@ export class Orchestrator {
         return { result: r, summary: "No tests proposed.", value: false };
       });
       if (stop) return { ok: false, summary: "Stopped while writing tests." };
-      if (this.testPlan && this.config.components.gitCommits) await this.commit(`reins: tests${label} — ${this.pkg ? pkg.title : this.config.title}`);
+      if (this.testPlan && this.config.components.gitCommits) await this.commit(this.commitSubject("tests", pkg));
     }
 
     // ---- Build / Evaluate rounds ----
@@ -414,15 +464,17 @@ export class Orchestrator {
         if (this.testPlan && !lastEval) extra["Tests to make pass"] = renderTestsForBuilder(this.testPlan);
         if (lastEval) extra["Evaluation of the previous round"] = renderEvaluationForBuilder(lastEval);
         else extra.Instructions = `Follow the session preamble, then implement the features${this.pkg ? ` of this package (${pkg.features.join(", ")}). Build only the features of this package; the others belong to later packages` : ""}. Call finish only when every hard criterion's verification step has been run and passed.`;
-        if (this.config.components.selfVerification) extra["Self-verification"] = "Before finish, run each criterion's verify step yourself and include the observed result in your summary.";
+        if (this.config.components.selfVerification) extra["Self-verification"] = "As you complete the work, run each criterion's verify step yourself and record what you observed with check_criterion (one call per criterion, as soon as it is verified), then include the results in your summary before finish.";
         const loop = this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}, this.shouldResetBuilder() ? undefined : this.builderHistory);
         const r = await loop.run(firstMessage(lastEval ? `build (fix round ${round - 1})` : "build", this.config, extra));
+        // On Claude Code the conversation lives in the SDK session; a placeholder marks it as continued.
         this.builderHistory = this.config.engine === "claude-code" ? (r.messages.length ? r.messages : [{ role: "user", content: "(claude-code session)" }]) : r.messages;
+        this.builderPrompt = r.promptTokens;
         return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
       });
       if (stop) return { ok: false, summary: "Stopped while building." };
 
-      if (this.config.components.gitCommits) await this.commit(`reins: ${lastEval ? `fix round ${round - 1}` : "build"}${label} — ${this.pkg ? pkg.title : this.config.title}`);
+      if (this.config.components.gitCommits) await this.commit(this.commitSubject(lastEval ? `fix round ${round - 1}` : "build", pkg));
 
       if (!this.config.components.evaluator) break;
 
@@ -503,19 +555,24 @@ export class Orchestrator {
       let since = since0;
       let rounds = 0;
       let pr: { number: number; url: string };
-      const body = renderPrBody({ pkg, features: this.features, contract: this.contract, evaluation: ev, testsDoc: readWorkspaceFile(ws, ".reins/tests.md") ?? "", baseSha: branch.baseSha, base: pub.base, runId: this.config.id || "run" });
+      // The draft the person reviews: the package title and a body a reviewer can judge by intent.
+      let draft: PublishDraft = { title: pkg.title, body: renderPrBody({ pkg, features: this.features, contract: this.contract, evaluation: ev, testsDoc: readWorkspaceFile(ws, ".reins/tests.md") ?? "", baseSha: branch.baseSha, base: pub.base, runId: this.config.id || "run" }) };
       if (this.config.pauses.beforePublish) {
-        const a = await this.control.requestPhaseApproval(`Publish ${pkg.title}?`, `The package passed evaluation. Push ${branch.name} and open a pull request onto ${pub.base}?`, { branch: branch.name, base: pub.base, title: pkg.title, body, ...(this.pkg ? { package: this.pkg } : {}) });
-        if (!a.approved) return fail(`Publishing rejected${a.note ? `: ${a.note}` : ""}. The branch ${branch.name} stays local and unpushed.`);
+        const reviewed = await this.reviewDraft(draft, pkg, branch.name, pub.base, (r) => {
+          usage = addUsage(usage, r.usage);
+          cost += r.costUsd;
+        });
+        if (!reviewed.ok) return fail(reviewed.summary);
+        draft = reviewed.draft;
       }
       try {
         await this.publisher.push(ws, pub.remote, branch.name, signal);
-        pr = await this.publisher.open(ws, { base: pub.base, head: branch.name, title: pkg.title, body }, signal);
+        pr = await this.publisher.open(ws, { base: pub.base, head: branch.name, title: draft.title, body: draft.body }, signal);
       } catch (err) {
         return fail(`Could not open the pull request: ${(err as Error).message}`);
       }
       const where = `Pull request #${pr.number} (${pr.url})`;
-      this.bus.emitEvent({ type: "pr.opened", number: pr.number, url: pr.url, branch: branch.name, base: pub.base, ...(this.pkg ? { package: this.pkg } : {}) });
+      this.bus.emitEvent({ type: "pr.opened", number: pr.number, url: pr.url, branch: branch.name, base: pub.base, ...this.pkgField });
       if (policy.mergeWhen === "never") {
         // The next package stacks on this branch; a person merges the pull requests in order.
         pub.base = branch.name;
@@ -549,7 +606,7 @@ export class Orchestrator {
           const ctx = this.projectContext();
           const extra: Record<string, string> = {
             ...ctx,
-            ...(this.pkg ? { "Work package": `${packageLabel(this.pkg)}\n${renderPackage(pkg, this.features)}` } : {}),
+            ...this.packageBrief(pkg),
             Contract: renderContract(this.contract),
             ...(this.testPlan ? { "Tests to keep passing": `Run: ${this.testPlan.command}` } : {}),
             "Review feedback": renderFeedbackForBuilder(feedback, rows, pr.url),
@@ -559,7 +616,7 @@ export class Orchestrator {
           cost += r.costUsd;
           if (this.checkStop(r)) return fail(`Stopped during review round ${rounds} on ${where}.`);
           const summary = String(r.terminalInput?.summary ?? r.finalText.slice(0, 1000)).trim() || `Review round ${rounds} finished without a summary.`;
-          if (this.config.components.gitCommits) await this.commit(`reins: review round ${rounds}${this.pkg ? ` ${this.pkg.id}` : ""} — ${this.pkg ? pkg.title : this.config.title}`);
+          if (this.config.components.gitCommits) await this.commit(this.commitSubject(`review round ${rounds}`, pkg));
           try {
             await this.publisher.push(ws, pub.remote, branch.name, signal);
             await this.publisher.comment(ws, pr.number, `Reins review round ${rounds}: ${summary}`, signal);
@@ -597,6 +654,50 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Show the pull request draft and wait. Approve uses the draft as edited on the
+   * card; reject fails the package with the branch unpushed; revise hands the draft
+   * and the note to the builder, which redrafts, and the card comes back (at most
+   * MAX_PR_REVISIONS redrafts, after which only the card's own edits apply).
+   */
+  private async reviewDraft(initial: PublishDraft, pkg: WorkPackage, branch: string, base: string, spend: (r: LoopResult) => void): Promise<{ ok: true; draft: PublishDraft } | { ok: false; summary: string }> {
+    let draft = initial;
+    const ask = this.control.requestPublishApproval ?? (async (d: PublishDraft): Promise<PublishAnswer> => ({ decision: "approve", draft: d }));
+    for (let revision = 0; ; revision++) {
+      const a = await ask(draft, { branch, base, ...this.pkgField, revision });
+      const edited = cleanDraft(a.draft, draft);
+      if (a.decision === "reject") return { ok: false, summary: `Publishing rejected${a.note ? `: ${a.note}` : ""}. The branch ${branch} stays local and unpushed.` };
+      if (a.decision === "approve") return { ok: true, draft: edited };
+      if (revision >= MAX_PR_REVISIONS) {
+        this.bus.emitEvent({ type: "note", level: "warn", text: `The pull request draft has been redrafted ${revision} times, the most for one package; edit it on the card and approve, or reject.` });
+        draft = edited;
+        continue;
+      }
+      const state: { draft: PublishDraft | null } = { draft: null };
+      const r = await this.loop("builder", "pr_writer", READ_TOOLS, ["propose_pr"], {
+        propose_pr: (input: unknown) => {
+          state.draft = cleanDraft(input, edited);
+          return "Proposed.";
+        },
+      }).run(
+        firstMessage(`publish (draft revision ${revision + 1})`, this.config, {
+          ...this.projectContext(),
+          ...this.packageBrief(pkg),
+          "Current draft": `Title: ${edited.title}\n\n${edited.body}`,
+          "Reviewer's note": a.note?.trim() || "(no note was given; make the draft shorter and clearer without changing its facts)",
+          Instructions: "Revise the pull request title and description as the note asks. Keep every statement true to the diff (git_diff) and the recorded evidence; do not invent results. Then call propose_pr.",
+        }),
+      );
+      spend(r);
+      if (this.checkStop(r)) return { ok: false, summary: `Stopped while redrafting the pull request (${r.reason}).` };
+      if (state.draft) draft = state.draft;
+      else {
+        this.bus.emitEvent({ type: "note", level: "warn", text: `The builder did not call propose_pr (${r.reason}); the draft is unchanged.` });
+        draft = edited;
+      }
+    }
+  }
+
   /** A hard criterion that was not observed to pass (failed or unverified) fails the sprint. */
   private verdictFor(results: CriterionResult[]): "pass" | "fail" {
     return this.contract.some((c) => c.hard && results.find((r) => r.id === c.id)?.pass !== true) ? "fail" : "pass";
@@ -606,17 +707,19 @@ export class Orchestrator {
   private async runInitScript() {
     const ws = this.config.workspace;
     if (!readWorkspaceFile(ws, ".reins/init.sh")) return;
-    const r = await runShell("/bin/zsh .reins/init.sh 2>&1 | tail -40", ws, this.control.signal, 180_000, undefined, this.config.components.osSandbox ? { workspace: ws, allowNetwork: this.config.guardrail.allowNetwork } : undefined);
+    const r = await runShell("/bin/zsh .reins/init.sh 2>&1 | tail -40", ws, this.control.signal, 180_000, undefined, this.sandboxOpts());
     this.bus.emitEvent({ type: "note", level: r.code === 0 && !r.timedOut ? "info" : "warn", text: `init.sh ${r.timedOut ? "timed out" : r.code === 0 ? "succeeded" : `exited ${r.code}`}${r.out.trim() ? `:\n${r.out.trim().slice(0, 1500)}` : ""}` });
   }
 
+  /** Reset with handoff: a continued builder conversation that has grown past resetAtTokens starts afresh from the progress notes. */
   private shouldResetBuilder(): boolean {
     if (!this.builderHistory) return true;
     if (!this.config.components.resetWithHandoff) return false;
-    const est = JSON.stringify(this.builderHistory).length / 3.6;
-    if (est > this.config.context.resetAtTokens) {
+    // The last call's real prompt size (both engines report it); the character estimate only for a history without one.
+    const size = this.builderPrompt || JSON.stringify(this.builderHistory).length / 3.6;
+    if (size > this.config.context.resetAtTokens) {
       const handoff = readWorkspaceFile(this.config.workspace, ".reins/progress.md") ?? "";
-      this.bus.emitEvent({ type: "context.reset", role: "builder", handoff: handoff.slice(-3000), beforeTokens: Math.round(est) });
+      this.bus.emitEvent({ type: "context.reset", role: "builder", handoff: handoff.slice(-3000), beforeTokens: Math.round(size) });
       return true;
     }
     return false;

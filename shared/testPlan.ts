@@ -3,13 +3,11 @@
 // proposal with it, the builder and evaluator briefs are rendered with it, and
 // the web UI and vitest share it.
 import type { ContractCriterion, TestPlan, TestSpec } from "./types.js";
+import { isObj, str } from "./util.js";
 
 export const TEST_KINDS: TestSpec["kind"][] = ["unit", "behavior", "integration", "e2e"];
 /** The contract criterion the tests stage adds: the suite it wrote must pass. */
 export const TESTS_CRITERION_ID = "T";
-
-const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 /**
  * Check a proposed test plan against the contract. Every hard criterion must be

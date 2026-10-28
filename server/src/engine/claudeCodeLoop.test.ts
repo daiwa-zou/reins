@@ -7,7 +7,7 @@ import { execSync } from "node:child_process";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ClaudeCodeLoop, workspaceRelative, zodShape } from "./claudeCodeLoop.js";
+import { ClaudeCodeLoop, MCP_TOOL_NAMES, workspaceRelative, zodShape } from "./claudeCodeLoop.js";
 import { Orchestrator } from "./orchestrator.js";
 import { RunBus } from "./bus.js";
 import { defaultRunConfig } from "../../../shared/components.js";
@@ -352,7 +352,7 @@ describe("ClaudeCodeLoop turn budget", () => {
 
 describe("zodShape", () => {
   it("expresses every Reins tool schema the MCP server exposes", () => {
-    for (const name of ["propose_contract", "review_contract", "report_evaluation", "finish", "update_progress", "think", "list_lessons", "read_lesson"]) {
+    for (const name of MCP_TOOL_NAMES) {
       const schema = (ALL_TOOLS[name]?.schema as any)?.input_schema;
       expect(schema, name).toBeTruthy();
       const shape = zodShape(schema);
@@ -426,6 +426,51 @@ describe("ClaudeCodeLoop token budget", () => {
     ]);
     await loop.run("go");
     expect(calls[0].options.maxBudgetUsd).toBe(4);
+  });
+});
+
+describe("ClaudeCodeLoop MCP server", () => {
+  afterEach(() => vi.mocked(query).mockReset());
+
+  it("offers every structured tool a phase asks for, the breakdown and tests stages' included", async () => {
+    // Every Reins tool without a Claude Code built-in is on the server, so a new stage tool needs no list to be kept current.
+    expect(MCP_TOOL_NAMES).toEqual(expect.arrayContaining(["propose_breakdown", "propose_tests", "propose_contract", "review_contract", "report_evaluation", "finish", "update_progress", "propose_lesson"]));
+    expect(MCP_TOOL_NAMES).not.toContain("bash");
+    expect(MCP_TOOL_NAMES).not.toContain("delegate_scout");
+    const config = defaultRunConfig({ task: "t", workspace: "/tmp/ws", engine: "claude-code" });
+    const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: true }), drainSteer: () => [], remainingBudget: () => 1_000_000 };
+    const names = async (tools: string[], terminal: string[]) => {
+      const loop = new ClaudeCodeLoop(config, new RunBus("test-mcp", false), control, { role: "planner", system: "sys", tools, terminal, handlers: {}, maxTurns: 5 });
+      const client = await reinsClient({ mcpServers: { reins: (loop as any).mcpServer() } } as Options);
+      return (await client.listTools()).tools.map((t) => t.name).sort();
+    };
+    expect(await names(["read_file", "list_files"], ["propose_breakdown"])).toEqual(["propose_breakdown"]);
+    expect(await names(["read_file", "write_file", "bash", "update_progress"], ["propose_tests"])).toEqual(["propose_tests", "update_progress"]);
+  });
+
+  it("ends the phase with a named error, not an engine failure, when the person stops it after repeated denials", async () => {
+    const config = defaultRunConfig({ task: "t", workspace: "/tmp/ws", engine: "claude-code" });
+    const bus = new RunBus("test-cc-denials", false);
+    const events: RunEvent[] = [];
+    bus.on("event", (e: RunEvent) => events.push(e));
+    let asked = 0;
+    const control = { signal: new AbortController().signal, waitIfPaused: async () => {}, requestApproval: async () => ({ approved: false, note: ++asked === 4 ? "enough" : undefined }), drainSteer: () => [], remainingBudget: () => 1_000_000 };
+    const loop = new ClaudeCodeLoop(config, bus, control, { role: "builder", system: "sys", tools: ["read_file", "bash", "finish"], terminal: ["finish"], handlers: {}, maxTurns: 10 });
+    scriptQueries([
+      async function* (call) {
+        yield init("s1");
+        // Three Bash calls the operator declines: the third asks whether to go on, and the answer is no.
+        for (let i = 1; i <= 3; i++) await call.options.canUseTool!("Bash", { command: "git push" }, { signal: call.options.abortController!.signal } as any);
+        if (call.options.abortController!.signal.aborted) throw new Error("Claude Code process aborted by user");
+        yield result("success");
+      },
+    ]);
+    const r = await loop.run("go");
+    expect(asked).toBe(4);
+    expect(r.reason).toBe("error");
+    const errors = events.filter((e): e is Extract<RunEvent, { type: "error" }> => e.type === "error").map((e) => e.message);
+    expect(errors).toEqual(["Stopped after repeated denials: enough"]);
+    expect(control.signal.aborted).toBe(false);
   });
 });
 

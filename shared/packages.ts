@@ -2,14 +2,12 @@
 // pull-request-sized packages. Pure: the orchestrator validates the planner's
 // proposal with it, the web UI renders packages with it, and vitest shares it.
 import type { FeatureItem, PackageRef, WorkPackage } from "./types.js";
+import { isObj, str } from "./util.js";
 
 /** A package that estimates more changed lines than this is refused: a reviewer reads one PR in one sitting. */
 export const PACKAGE_MAX_LINES = 400;
 /** More packages than this means the plan is being listed, not sliced. */
 export const PACKAGE_MAX_COUNT = 12;
-
-const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 /**
  * Check a proposed breakdown against the feature list and normalise it. Every

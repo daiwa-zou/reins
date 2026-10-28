@@ -1,4 +1,5 @@
 import type {
+  ApprovalDecision,
   ApprovalRequest,
   ChangedFile,
   ContextSnapshot,
@@ -32,16 +33,38 @@ export interface ToolCall {
 export type FeedItem =
   | { kind: "phase"; seq: number; ts: string; phase: Phase; round: number; package?: PackageRef; finished?: { summary: string; costUsd: number; durationMs: number } }
   | { kind: "turn"; seq: number; ts: string; role: RoleId; turn: number; thinking?: string; text?: string; calls: ToolCall[]; usage?: Usage; costUsd?: number; stopReason?: string; finishedTs?: string }
-  | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: "approve" | "reject"; note?: string } }
+  | { kind: "approval"; seq: number; ts: string; request: ApprovalRequest; resolved?: { decision: ApprovalDecision; note?: string } }
   | { kind: "contract"; seq: number; ts: string; by: RoleId | "agreed"; criteria: ContractCriterion[]; rationale?: string }
   | { kind: "tests"; seq: number; ts: string; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
   | { kind: "pr"; seq: number; ts: string; what: "opened" | "merged" | "feedback"; number: number; url: string; branch?: string; base?: string; package?: PackageRef; sha?: string; round?: number; comments?: number; checks?: string[]; summary?: string }
-  | { kind: "evaluation"; seq: number; ts: string; round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }
+  | { kind: "evaluation"; seq: number; ts: string; round: number; package?: PackageRef; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }
   | { kind: "context"; seq: number; ts: string; what: "compacted" | "cleared" | "reset"; role: RoleId; detail: string }
   | { kind: "steer"; seq: number; ts: string; text: string; delivered: boolean }
   | { kind: "commit"; seq: number; ts: string; sha: string; message: string; files: number }
   | { kind: "note"; seq: number; ts: string; level: "info" | "warn" | "error"; text: string }
-  | { kind: "summary"; seq: number; ts: string; summary: string; costUsd: number; durationMs: number };
+  | ({ kind: "check" } & CriterionCheck);
+
+/** A role's own check of one criterion (the builder's self-verification), as opposed to the evaluator's verdict. */
+export interface CriterionCheck {
+  seq: number;
+  ts: string;
+  role: RoleId;
+  id: string;
+  pass: boolean;
+  evidence: string;
+}
+
+/** One evaluation round. Rounds restart at 1 for every work package, so `package` tells them apart. */
+export interface EvaluationRound {
+  /** The event's position in the log, to order it against the builder's later checks. */
+  seq: number;
+  round: number;
+  package?: PackageRef;
+  verdict: "pass" | "fail";
+  results: CriterionResult[];
+  summary: string;
+  origin?: EvaluationOrigin;
+}
 
 export interface PullRequestInfo {
   number: number;
@@ -76,13 +99,17 @@ export interface RunModel {
   currentPhase?: PhaseStat;
   feed: FeedItem[];
   calls: ToolCall[];
+  /** The latest agreed contract, and the work package it was agreed for (absent for an implicit single package). */
   contract: ContractCriterion[];
+  contractPackage?: PackageRef;
+  /** The builder's latest self-check per criterion id of the current contract; cleared when a new contract is agreed. */
+  checks: Record<string, CriterionCheck>;
   contractHistory: { by: RoleId; criteria: ContractCriterion[]; rationale: string }[];
   /** The latest tests-stage plan (per package) with its red run. */
   tests?: { plan: TestPlan; red: { exitCode: number | null; excerpt: string } };
   /** Pull requests the publish stage opened, in order, with their merges. */
   pullRequests: PullRequestInfo[];
-  evaluations: { round: number; verdict: "pass" | "fail"; results: CriterionResult[]; summary: string; origin?: EvaluationOrigin }[];
+  evaluations: EvaluationRound[];
   features: FeatureItem[];
   snapshots: (ContextSnapshot & { seq: number })[];
   latestSnapshot: Partial<Record<RoleId, ContextSnapshot>>;
@@ -100,13 +127,18 @@ export interface RunModel {
   lastSeq: number;
   startedTs?: string;
   lastTs?: string;
-  turnsByRole: Partial<Record<RoleId, number>>;
-  costByRole: Partial<Record<RoleId, number>>;
 }
 
 const zeroUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 
-/** Fold an event log (optionally truncated at a seq for scrubbing) into the view model. */
+/**
+ * Fold an event log (optionally truncated at a seq for scrubbing) into the view model.
+ *
+ * Turn tracking: every text, thinking and tool call event of a role attaches to that
+ * role's open turn until its next turn.started or a phase boundary. Events that arrive
+ * mid-turn (context edits, notes, steers, approvals) never close it: the engines emit
+ * them between turn.finished and the turn's text and tool calls.
+ */
 export function derive(events: RunEvent[], upTo = Infinity): RunModel {
   const m: RunModel = {
     status: "queued",
@@ -114,6 +146,7 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
     feed: [],
     calls: [],
     contract: [],
+    checks: {},
     contractHistory: [],
     pullRequests: [],
     evaluations: [],
@@ -131,13 +164,16 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
     toolsLoaded: [],
     errors: [],
     lastSeq: -1,
-    turnsByRole: {},
-    costByRole: {},
   };
   const callsById = new Map<string, ToolCall>();
   const pending = new Map<string, ApprovalRequest>();
   let currentTurn: Extract<FeedItem, { kind: "turn" }> | null = null;
   let currentPhaseIdx = -1;
+  const phasePackage = () => m.phases[currentPhaseIdx]?.package;
+  const pkgField = () => {
+    const p = phasePackage();
+    return p ? { package: p } : {};
+  };
 
   for (const ev of events) {
     if (ev.seq > upTo) break;
@@ -173,9 +209,10 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
         break;
       }
       case "turn.started":
+        // A retried model call starts the same turn again; the superseded item ends here instead of showing as working forever.
+        if (currentTurn && currentTurn.role === ev.role && !currentTurn.finishedTs) currentTurn.finishedTs = ev.ts;
         currentTurn = { kind: "turn", seq: ev.seq, ts: ev.ts, role: ev.role, turn: ev.turn, calls: [] };
         m.feed.push(currentTurn);
-        m.turnsByRole[ev.role] = (m.turnsByRole[ev.role] ?? 0) + 1;
         if (m.phases[currentPhaseIdx]) m.phases[currentPhaseIdx].turns++;
         break;
       case "turn.finished":
@@ -187,7 +224,6 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
           currentTurn.finishedTs = ev.ts;
         }
         m.costUsd += ev.costUsd;
-        m.costByRole[ev.role] = (m.costByRole[ev.role] ?? 0) + ev.costUsd;
         m.usage = { input: m.usage.input + ev.usage.input, output: m.usage.output + ev.usage.output, cacheRead: m.usage.cacheRead + ev.usage.cacheRead, cacheWrite: m.usage.cacheWrite + ev.usage.cacheWrite };
         break;
       case "text":
@@ -226,7 +262,6 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
       case "approval.requested":
         pending.set(ev.request.approvalId, ev.request);
         m.feed.push({ kind: "approval", seq: ev.seq, ts: ev.ts, request: ev.request });
-        currentTurn = null;
         break;
       case "approval.resolved": {
         pending.delete(ev.approvalId);
@@ -237,42 +272,46 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
       case "contract.proposed":
         m.contractHistory.push({ by: ev.by, criteria: ev.criteria, rationale: ev.rationale });
         m.feed.push({ kind: "contract", seq: ev.seq, ts: ev.ts, by: ev.by, criteria: ev.criteria, rationale: ev.rationale });
-        currentTurn = null;
         break;
       case "contract.agreed":
         m.contract = ev.criteria;
+        m.contractPackage = phasePackage();
+        // A new contract starts unchecked; the tests stage re-agrees the same contract with its T criterion, so keep checks for ids that survive.
+        m.checks = Object.fromEntries(Object.entries(m.checks).filter(([id]) => ev.criteria.some((c) => c.id === id)));
         m.feed.push({ kind: "contract", seq: ev.seq, ts: ev.ts, by: "agreed", criteria: ev.criteria });
-        currentTurn = null;
         break;
+      case "criterion.checked": {
+        const check: CriterionCheck = { seq: ev.seq, ts: ev.ts, role: ev.role, id: ev.id, pass: ev.pass, evidence: ev.evidence };
+        m.checks[ev.id] = check;
+        m.feed.push({ kind: "check", ...check });
+        break;
+      }
       case "tests.agreed":
         m.tests = { plan: ev.plan, red: ev.red };
         m.feed.push({ kind: "tests", seq: ev.seq, ts: ev.ts, plan: ev.plan, red: ev.red });
-        currentTurn = null;
         break;
       case "pr.opened":
         m.pullRequests.push({ number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, ...(ev.package ? { package: ev.package } : {}), openedTs: ev.ts });
         m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "opened", number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, ...(ev.package ? { package: ev.package } : {}) });
-        currentTurn = null;
         break;
       case "pr.feedback": {
         const pr = m.pullRequests.find((p) => p.number === ev.number);
         if (pr) pr.rounds = [...(pr.rounds ?? []), { round: ev.round, comments: ev.comments, checks: ev.checks, summary: ev.summary, ts: ev.ts }];
         m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "feedback", number: ev.number, url: ev.url, round: ev.round, comments: ev.comments, checks: ev.checks, summary: ev.summary });
-        currentTurn = null;
         break;
       }
       case "pr.merged": {
         const pr = m.pullRequests.find((p) => p.number === ev.number);
         if (pr) pr.merged = { sha: ev.sha, ts: ev.ts };
         m.feed.push({ kind: "pr", seq: ev.seq, ts: ev.ts, what: "merged", number: ev.number, url: ev.url, branch: ev.branch, base: ev.base, sha: ev.sha });
-        currentTurn = null;
         break;
       }
-      case "evaluation.result":
-        m.evaluations.push({ round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
-        m.feed.push({ kind: "evaluation", seq: ev.seq, ts: ev.ts, round: ev.round, verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin });
-        currentTurn = null;
+      case "evaluation.result": {
+        const round: EvaluationRound = { seq: ev.seq, round: ev.round, ...pkgField(), verdict: ev.verdict, results: ev.results, summary: ev.summary, origin: ev.origin };
+        m.evaluations.push(round);
+        m.feed.push({ kind: "evaluation", ts: ev.ts, ...round });
         break;
+      }
       case "progress.updated":
         m.features = ev.features;
         break;
@@ -283,22 +322,18 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
       case "context.compacted":
         m.contextEvents.push({ seq: ev.seq, role: ev.role, what: "compacted", detail: `${Math.round(ev.beforeTokens / 1000)}k → ${Math.round(ev.afterTokens / 1000)}k tokens` });
         m.feed.push({ kind: "context", seq: ev.seq, ts: ev.ts, what: "compacted", role: ev.role, detail: ev.summary });
-        currentTurn = null;
         break;
       case "context.cleared":
         m.contextEvents.push({ seq: ev.seq, role: ev.role, what: "cleared", detail: `${ev.clearedToolResults} tool results, ${Math.round(ev.tokensFreed / 1000)}k tokens freed` });
         m.feed.push({ kind: "context", seq: ev.seq, ts: ev.ts, what: "cleared", role: ev.role, detail: `Cleared ${ev.clearedToolResults} stale tool results (${Math.round(ev.tokensFreed / 1000)}k tokens freed).` });
-        currentTurn = null;
         break;
       case "context.reset":
         m.contextEvents.push({ seq: ev.seq, role: ev.role, what: "reset", detail: `fresh conversation from handoff (${Math.round(ev.beforeTokens / 1000)}k tokens before)` });
         m.feed.push({ kind: "context", seq: ev.seq, ts: ev.ts, what: "reset", role: ev.role, detail: ev.handoff });
-        currentTurn = null;
         break;
       case "steer.received":
         m.steers.push({ text: ev.text, delivered: false, ts: ev.ts });
         m.feed.push({ kind: "steer", seq: ev.seq, ts: ev.ts, text: ev.text, delivered: false });
-        currentTurn = null;
         break;
       case "steer.delivered": {
         const s = m.steers.find((x) => x.text === ev.text && !x.delivered);
@@ -310,7 +345,6 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
       case "git.commit":
         m.commits.push({ sha: ev.sha, message: ev.message, files: ev.files, ts: ev.ts });
         m.feed.push({ kind: "commit", seq: ev.seq, ts: ev.ts, sha: ev.sha, message: ev.message, files: ev.files });
-        currentTurn = null;
         break;
       case "files.changed":
         m.files = ev.files;
@@ -318,15 +352,13 @@ export function derive(events: RunEvent[], upTo = Infinity): RunModel {
       case "error":
         m.errors.push(ev.message);
         m.feed.push({ kind: "note", seq: ev.seq, ts: ev.ts, level: "error", text: ev.message });
-        currentTurn = null;
         break;
       case "note":
         m.feed.push({ kind: "note", seq: ev.seq, ts: ev.ts, level: ev.level, text: ev.text });
-        currentTurn = null;
         break;
       case "run.summary":
+        // The end card renders it from `summary`; it is not a feed item of its own.
         m.summary = { summary: ev.summary, costUsd: ev.costUsd, durationMs: ev.durationMs };
-        m.feed.push({ kind: "summary", seq: ev.seq, ts: ev.ts, summary: ev.summary, costUsd: ev.costUsd, durationMs: ev.durationMs });
         break;
     }
   }

@@ -34,12 +34,16 @@ export function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-export function pct(n: number): string {
-  return `${Math.round(n * 100)}%`;
+/** "2026-10-26 14:05" in local time, for compact lists. */
+export function dateTime(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function basename(p: string): string {
-  return p.split("/").filter(Boolean).pop() ?? p;
+export function pct(n: number): string {
+  return `${Math.round(n * 100)}%`;
 }
 
 export function tilde(p: string, home?: string): string {

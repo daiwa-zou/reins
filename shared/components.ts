@@ -380,6 +380,9 @@ export const FOUNDATIONS: Foundation[] = [
  */
 export const COMPONENT_IDS = COMPONENTS.map((c) => c.id) as ComponentId[];
 
+/** A component's label for messages; the id itself when it is not in the catalogue. */
+export const componentLabel = (id: string): string => COMPONENTS.find((c) => c.id === id)?.label ?? id;
+
 export function defaultComponents(): Record<ComponentId, boolean> {
   const out = {} as Record<ComponentId, boolean>;
   for (const c of COMPONENTS) out[c.id] = c.defaultOn;
@@ -459,7 +462,7 @@ export interface SupervisionRow {
 export const SUPERVISION_TABLE: Record<Supervision, SupervisionRow> = {
   unattended: { label: "Unattended", chip: "Unattended", meaning: "Never pauses; the guardrail runs in auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeMerge: false }, mode: "auto", actionClassifier: true },
   "ask-to-publish": { label: "Ask before publishing", chip: "Ask to publish", meaning: "Runs unattended until a package is ready to go out, then asks once before pushing its branch and opening the pull request; auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeMerge: false }, mode: "auto", actionClassifier: true },
-  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract, each evaluation and before each merge; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: false, beforeMerge: true }, mode: "auto", actionClassifier: true },
+  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract, each evaluation, to review each pull request draft and before each merge; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: true, beforeMerge: true }, mode: "auto", actionClassifier: true },
   "ask-every-write": { label: "Ask before every write", chip: "Ask every write", meaning: "Every pause is on and the guardrail asks before anything that is not read-only.", pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeMerge: true }, mode: "ask", actionClassifier: false },
 };
 

@@ -3,9 +3,9 @@ import { ExternalLink, Layers, Plus } from "lucide-react";
 import { presetChip, presetDomains } from "@shared/presets";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
-import { api, type LessonAudit } from "../lib/api";
+import { api, type LessonAudit, type LessonDerived } from "../lib/api";
 import { FOUNDATIONS } from "@shared/components";
-import { ImplicationsByKind, IntakeForm, IntakeJobs, IntakeNotice, StandingControl } from "../components/LessonImplications";
+import { DeleteLesson, derivedLines, ImplicationsByKind, IntakeForm, IntakeJobs, IntakeNotice, StandingControl } from "../components/LessonImplications";
 import type { LessonProblem } from "@shared/types";
 
 /**
@@ -29,12 +29,15 @@ export function LessonsPanel() {
   const [problems, setProblems] = useState<{ problems: LessonProblem[]; userDir: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [deleted, setDeleted] = useState<LessonDerived | null>(null);
+  const refreshDomains = useStore((s) => s.refreshDomains);
+  const refreshIntake = useStore((s) => s.refreshIntake);
   const openModal = useStore((s) => s.openModal);
   const openDomainBuilder = useStore((s) => s.openDomainBuilder);
   const userDomains = useStore((s) => s.userDomains);
   // Domains New run can pick (unreviewed lessons do not shape runs yet), the user's own included.
   const knownDomains = useMemo(() => [...presetDomains(lessons), ...userDomains.map((u) => u.id)], [lessons, userDomains]);
-  const startWithDomain = (d: string) => openModal("newRun", { __compose: { domains: [d] } } as any);
+  const startWithDomain = (d: string) => openModal("newRun", { __compose: { domains: [d] } });
 
   const reload = async () => {
     await refreshLessons();
@@ -71,12 +74,11 @@ export function LessonsPanel() {
   );
   const select = (slug: string | null) => navigate({ section: "lessons", lesson: slug });
   const userProblems = (problems?.problems ?? []).filter((p) => p.source !== "bundled" || p.level === "error");
-  const userCount = lessons.filter((l) => l.source === "user").length;
 
   if (!lessons.length && loaded)
     return (
       <div className="h-full overflow-auto p-6 flex flex-col items-center gap-4" data-lessons-empty>
-        <Empty title="No lessons yet" body="The library ships empty and the harness needs none. Run `npm run lessons:examples` to add the 30 distilled Anthropic engineering posts, write one from docs/lesson-template.md into $REINS_HOME/lessons, or distil one from a source below." />
+        <Empty title="No lessons yet" body="The library ships empty and the harness needs none. Run `npm run lessons:examples` to add the 30 distilled Anthropic engineering posts, write one from docs/lesson-template.md into $REINS_HOME/lessons, or distil one below from a web page, pasted text, a git repository or an MCP server." />
         <div className="card p-4 w-full max-w-2xl">
           <IntakeNotice />
           <IntakeForm inline />
@@ -129,7 +131,7 @@ export function LessonsPanel() {
           </div>
         </details>
         <div className="faint text-[11px]">
-          {shown.length} of {lessons.length} lessons{userCount ? ` · ${userCount} yours` : ""}
+          {shown.length} of {lessons.length} lessons
         </div>
         <div className="flex flex-col gap-0.5">
           {shown.map((l) => (
@@ -138,7 +140,6 @@ export function LessonsPanel() {
               <div className="faint text-[10.5px] mt-0.5 flex items-center gap-1.5">
                 {l.date}
                 <span>· {(l.items ?? []).filter((i) => !i.implicit).length} implications</span>
-                {l.source === "user" && <Badge tone="accent">yours</Badge>}
                 {(l.domains ?? []).map((d) => (
                   <Badge key={d} title="A domain this lesson shapes">
                     {presetChip(d)}
@@ -155,6 +156,17 @@ export function LessonsPanel() {
           {open && <IntakeNotice />}
           {!open && (
             <>
+              {deleted && (
+                <div className="card p-3 text-[12.5px] flex items-start gap-2" role="status" data-lesson-deleted>
+                  <span className="flex-1">
+                    Deleted <span className="mono">{deleted.slug}</span>
+                    {derivedLines(deleted).length ? ` and, with it: ${derivedLines(deleted).join("; ")}.` : ". Nothing else was derived from it."}
+                  </span>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setDeleted(null)} aria-label="Dismiss">
+                    OK
+                  </button>
+                </div>
+              )}
               <IntakeJobs />
               <details className="card p-4 text-small leading-relaxed" data-add-lesson open={addOpen} onToggle={(e) => setAddOpen((e.target as HTMLDetailsElement).open)}>
                 <summary className="cursor-pointer font-semibold">Add a lesson</summary>
@@ -166,7 +178,7 @@ export function LessonsPanel() {
                     <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
                       docs/lesson-template.md
                     </a>{" "}
-                    and run <code className="mono">npm run lessons:check</code> to lint it. Or let an agent draft one from a post:
+                    and run <code className="mono">npm run lessons:check</code> to lint it. Or let an agent draft one from a web page, pasted text, a git repository or an MCP server, with a note on what to look for:
                   </p>
                   <button className="btn btn-sm self-start" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
                     Reload
@@ -204,7 +216,6 @@ export function LessonsPanel() {
                 <button key={l.slug} className="card p-4 text-left hover:brightness-[0.98]" onClick={() => select(l.slug)}>
                   <div className="flex items-center gap-2">
                     <div className="font-semibold flex-1">{l.title}</div>
-                    {l.source === "user" && <Badge tone="accent">yours</Badge>}
                     {(l.domains ?? []).map((d) => (
                       <Badge key={d}>{presetChip(d)}</Badge>
                     ))}
@@ -225,7 +236,7 @@ export function LessonsPanel() {
                 const usedDomains = l.standing === "unreviewed" ? [] : (l.domains ?? []).filter((d) => knownDomains.includes(d));
                 const fx = [l.enables?.length ? `on: ${l.enables.join(", ")}` : "", l.disables?.length ? `off: ${l.disables.join(", ")}` : "", l.guidance ? "guidance" : ""].filter(Boolean).join("; ");
                 return (
-                  <article key={l.slug} id={`lesson-${l.slug}`} className="card p-5 fade-in">
+                  <article key={l.slug} id={`lesson-${l.slug}`} className="card p-5 fade-in relative">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-[17px] font-semibold tracking-tight leading-tight">{l.title}</h2>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -239,22 +250,32 @@ export function LessonsPanel() {
                             <ExternalLink size={14} aria-hidden />
                           </a>
                         )}
+                        <DeleteLesson
+                          lesson={l}
+                          onDeleted={async (d) => {
+                            setDeleted(d);
+                            // The library, the domains built from it and the intake list all changed.
+                            await Promise.all([refreshDomains(), refreshIntake()]);
+                            await reload();
+                            navigate({ lesson: null }, { replace: true });
+                          }}
+                        />
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11.5px] muted">
                       <span>{l.date}</span>
                       {l.provenance && <Badge>{l.provenance}</Badge>}
                       <StandingControl lesson={l} />
-                      {l.source === "user" && (
-                        <Badge tone="accent" title={`From ${problems?.userDir ?? "$REINS_HOME/lessons"}`}>
-                          yours
-                        </Badge>
-                      )}
                       {l.tags.map((t) => (
                         <Badge key={t}>{t}</Badge>
                       ))}
                     </div>
                     <p className="mt-3 leading-relaxed text-[14px]">{l.takeaway}</p>
+                    {l.focus && (
+                      <p className="mt-2 text-[12px] muted" data-lesson-focus title="What the intake job was told to look for in its source">
+                        <span className="font-semibold">Looking for:</span> {l.focus}
+                      </p>
+                    )}
                     {(informs.length > 0 || founds.length > 0 || usedDomains.length > 0) && (
                       <div className="mt-4 rounded-lg border line p-3 flex flex-col gap-2 text-[12px]" data-used-by>
                         <h3 className="text-[13px] font-semibold">Used by</h3>

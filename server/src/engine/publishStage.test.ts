@@ -194,30 +194,61 @@ describe("the publish stage", () => {
     fs.rmSync(remote, { recursive: true, force: true });
   });
 
-  it("the beforePublish pause asks before the branch is pushed, and a rejection leaves the branch local", async () => {
+  it("the beforePublish pause shows the pull request draft before the branch is pushed, and a rejection leaves the branch local", async () => {
     const ws = tmpWorkspace();
     const { remote, base } = withRemote(ws);
     const gh = fakeGh(ws, { "1": [prView.approved] });
     const cfg = cfgFor(ws, { components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false }, pauses: { ...noPauses, beforePublish: true } });
-    const approvals: { title: string; detail: string; payload: any }[] = [];
-    const run = async (approve: boolean) => {
-      const { client } = fakeClient([...packageRound("P1", "hello.txt")]);
-      const bus = new RunBus("t-prepublish", false);
-      const events = collect(bus);
-      const r = await new Orchestrator(client, cfg, bus, control({ requestPhaseApproval: async (title, detail, payload) => (approvals.push({ title, detail, payload }), { approved: approve, note: approve ? undefined : "not today" }) }), { publisher: new Publisher({ gh: gh.command }) }).run();
-      return { r, events };
-    };
-    const rejected = await run(false);
-    expect(rejected.r.ok).toBe(false);
-    expect(rejected.r.summary).toBe("Publishing rejected: not today. The branch reins/run1-p1-greet stays local and unpushed.");
-    expect(approvals).toHaveLength(1);
-    expect(approvals[0].title).toBe("Publish Greet?");
-    expect(approvals[0].detail).toMatch(/Push reins\/run1-p1-greet and open a pull request onto main/);
-    expect(approvals[0].payload).toMatchObject({ branch: "reins/run1-p1-greet", base, title: "Greet" });
-    expect(approvals[0].payload.body).toContain("## Definition of done");
+    const asked: { draft: any; detail: any }[] = [];
+    const { client } = fakeClient([...packageRound("P1", "hello.txt")]);
+    const bus = new RunBus("t-prepublish", false);
+    const events = collect(bus);
+    const r = await new Orchestrator(client, cfg, bus, control({ requestPublishApproval: async (draft, detail) => (asked.push({ draft, detail }), { decision: "reject", note: "not today" }) }), { publisher: new Publisher({ gh: gh.command }) }).run();
+    expect(r.ok).toBe(false);
+    expect(r.summary).toBe("Publishing rejected: not today. The branch reins/run1-p1-greet stays local and unpushed.");
+    expect(asked).toHaveLength(1);
+    expect(asked[0].detail).toMatchObject({ branch: "reins/run1-p1-greet", base, revision: 0 });
+    expect(asked[0].draft.title).toBe("Greet");
+    expect(asked[0].draft.body).toContain("## Definition of done");
     expect(gh.read().prs).toEqual({});
     expect(remoteLog(remote, base)).toEqual(["init"]);
-    expect(prEvents(rejected.events, "pr.opened")).toHaveLength(0);
+    expect(prEvents(events, "pr.opened")).toHaveLength(0);
+    fs.rmSync(ws, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+
+  it("requesting changes sends the draft and the note to the builder, which redrafts; the edited, approved draft opens the pull request", async () => {
+    const ws = tmpWorkspace();
+    const { remote } = withRemote(ws);
+    const gh = fakeGh(ws, { "1": [prView.approved] });
+    const cfg = cfgFor(ws, { components: { planner: false, testsFirst: false, osSandbox: false, actionClassifier: false }, pauses: { ...noPauses, beforePublish: true } });
+    const asked: { draft: any; detail: any }[] = [];
+    const { client, calls } = fakeClient([
+      ...packageRound("P1", "hello.txt"),
+      // The builder's redraft, after the reviewer's note.
+      (params) => {
+        const text = lastUserText(params);
+        expect(text).toContain("Reviewer's note");
+        expect(text).toContain("make it shorter");
+        expect(text).toContain("Current draft");
+        return { content: [toolUse("pr1", "propose_pr", { title: "Add hello.txt", body: "Adds the greeting file.\n\nVerified: cat hello.txt" })], stop_reason: "tool_use" };
+      },
+    ]);
+    const answers: any[] = [{ decision: "revise", note: "make it shorter" }, { decision: "approve", draft: { title: "Add hello.txt (P1)", body: "Adds the greeting file.\n\nVerified: cat hello.txt\n\nEdited by the reviewer." } }];
+    const bus = new RunBus("t-revise", false);
+    const events = collect(bus);
+    const r = await new Orchestrator(client, cfg, bus, control({ requestPublishApproval: async (draft, detail) => (asked.push({ draft, detail }), answers.shift()) }), { publisher: new Publisher({ gh: gh.command }) }).run();
+    expect(r.ok).toBe(true);
+    expect(calls).toHaveLength(6);
+    expect(asked.map((a) => a.detail.revision)).toEqual([0, 1]);
+    expect(asked[1].draft).toEqual({ title: "Add hello.txt", body: "Adds the greeting file.\n\nVerified: cat hello.txt" });
+    const pr = gh.read().prs["1"];
+    expect(pr.title).toBe("Add hello.txt (P1)");
+    expect(pr.body).toContain("Edited by the reviewer.");
+    expect(prEvents(events, "pr.opened")).toHaveLength(1);
+    // The redraft's model turns are counted inside the publish phase.
+    const publish = events.find((e) => e.type === "phase.finished" && e.phase === "publish") as Extract<RunEvent, { type: "phase.finished" }>;
+    expect(publish.usage.input).toBeGreaterThan(0);
     fs.rmSync(ws, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
   });

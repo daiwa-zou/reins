@@ -515,6 +515,27 @@ const reportEvaluation = tool(
   { examples: [{ results: [{ id: "C1", pass: true, evidence: "curl localhost:3000/health -> 200 {\"status\":\"ok\",\"uptime\":3}" }, { id: "C2", pass: false, evidence: "Started from / with an absolute path: sha is \"unknown\" although .git exists; execSync inherits cwd." }], summary: "1 of 2 criteria pass; C2 fails because the sha lookup depends on the working directory." }] }
 );
 
+const checkCriterion = tool(
+  "check_criterion",
+  "Record that you ran one contract criterion's verification step yourself and what you observed, so the contract is checked off as you go. One call per criterion, as soon as you have verified it; pass is what you observed, never what you intend. The evaluator still verifies every criterion independently.",
+  {
+    id: { type: "string", description: "The criterion id, e.g. C2" },
+    pass: { type: "boolean", description: "Whether the verification step passed when you ran it" },
+    evidence: { type: "string", description: "The command you ran and the relevant lines of its output" },
+  },
+  ["id", "pass", "evidence"],
+  async (input, ctx) => ctx.handlers.check_criterion?.(input) ?? "Recorded.",
+  { examples: [{ id: "C1", pass: true, evidence: "curl -s localhost:3000/health -> 200 {\"status\":\"ok\",\"uptime\":3}" }] },
+);
+
+const proposePr = tool(
+  "propose_pr",
+  "Hand over the revised pull request title and description (Markdown). Keep every statement true to the diff and the evidence. This ends your turn.",
+  { title: { type: "string", description: "One line, at most 200 characters" }, body: { type: "string", description: "The pull request description in Markdown" } },
+  ["title", "body"],
+  async (input, ctx) => ctx.handlers.propose_pr?.(input) ?? "Proposed.",
+);
+
 const finish = tool(
   "finish",
   "Declare this phase complete. Only call after the required outputs exist and the verification steps you were given have been run. Summarize what was done and anything left open.",
@@ -570,7 +591,7 @@ const proposeLesson = tool(
 );
 
 export const ALL_TOOLS: Record<string, ToolDef> = Object.fromEntries(
-  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeBreakdown, proposeTests, proposeContract, reviewContract, reportEvaluation, finish, proposeLesson].map((t) => [
+  [readFile, writeFile, editFile, listFiles, search, bash, think, updateProgress, checkCriterion, gitStatus, gitDiff, gitCommit, httpFetch, listLessonsTool, readLesson, readSkill, delegateScout, proposeBreakdown, proposeTests, proposeContract, reviewContract, reportEvaluation, proposePr, finish, proposeLesson].map((t) => [
     (t.schema as Anthropic.Beta.BetaTool).name,
     t,
   ]),

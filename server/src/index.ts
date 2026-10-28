@@ -7,28 +7,40 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ClientMessage, RunEvent, ServerInfo, ServerMessage } from "../../shared/types.js";
+import type { ClientMessage, RunConfig, RunEvent, ServerInfo, ServerMessage } from "../../shared/types.js";
 import { COMPONENTS, FOUNDATIONS, HARNESS_VERSION, MODELS } from "../../shared/components.js";
 import { RunManager } from "./engine/runManager.js";
 import { ensureHome, REINS_HOME } from "./store/runStore.js";
-import { getLesson, LessonNotFound, loadLessonLibrary, setLessonStanding } from "./lessons.js";
+import { LessonNotFound, getLesson, loadLessonLibrary, setLessonStanding } from "./lessons.js";
+import { deleteLesson, lessonDerived } from "./lessonAdmin.js";
 import { IntakeManager, IntakeRefused, isIntakeId } from "./intake/intake.js";
 import { suggestDomains } from "./workspace.js";
 import { composablePresets, deletePreset, listPresets, PresetCompositionError, PresetNotFound, savePreset, setDefaultPreset } from "./presets.js";
 import { PresetValidationError } from "../../shared/config.js";
 import { deleteDomain, DomainNotFound, DomainValidationError, listDomains, saveDomain } from "./domains.js";
 import { loadSkills } from "./skills.js";
-import { changedFiles, fileDiff, headSha } from "./workspace.js";
+import { changedFiles, fileDiff } from "./workspace.js";
 import { loadDemoEvents } from "./engine/replay.js";
 import { allTrialSets } from "./engine/trials.js";
 import { sandboxAvailable } from "./tools/sandbox.js";
 import { listAudits } from "./audit.js";
 import { probeDirectEngine } from "./engine/loop.js";
-import { defaultRunConfig } from "../../shared/components.js";
+import { DEFAULT_MODEL, defaultRunConfig } from "../../shared/components.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.REINS_PORT ?? 5191);
 ensureHome();
+
+/** A path from a request: `~` expanded, resolved to absolute. */
+const expandPath = (p: unknown) => path.resolve(String(p ?? "").replace(/^~/, os.homedir()));
+const isDir = (p: string) => fs.existsSync(p) && fs.statSync(p).isDirectory();
+/** The `k` of a trial set from the query string, 3 when absent or not a number, clamped to 1..10. */
+const kParam = (raw: string | undefined) => Math.max(1, Math.min(10, Math.round(Number(raw)) || 3));
+/** The commit a run started from, recorded in its Environment note; null when the workspace was not a git repo. */
+const runBaseSha = (id: string): string | null => {
+  const env = manager.events(id).find((e): e is Extract<RunEvent, { type: "note" }> => e.type === "note" && e.text.startsWith("Environment"));
+  return env?.text.match(/repo at ([0-9a-f]{7})/)?.[1] ?? null;
+};
 
 // Optional local settings (API key) saved from the UI. Stored only on this machine.
 const SETTINGS_FILE = path.join(REINS_HOME, "settings.json");
@@ -100,7 +112,10 @@ app.get("/api/intake", (c) => c.json(intake.list()));
 app.post("/api/intake", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   try {
-    return c.json(intake.start({ url: body?.url, text: body?.text, title: body?.title, engine: body?.engine === "claude-code" || body?.engine === "anthropic" ? body.engine : undefined }), 201);
+    return c.json(
+      intake.start({ url: body?.url, text: body?.text, repo: body?.repo, ref: body?.ref, mcp: body?.mcp, focus: body?.focus, title: body?.title, engine: body?.engine === "claude-code" || body?.engine === "anthropic" ? body.engine : undefined }),
+      201,
+    );
   } catch (e) {
     if (e instanceof IntakeRefused) return c.json({ error: e.message, duplicate: e.duplicate }, 409);
     return c.json({ error: (e as Error).message }, 400);
@@ -109,6 +124,21 @@ app.post("/api/intake", async (c) => {
 app.get("/api/lessons/:slug", (c) => {
   const l = getLesson(c.req.param("slug"));
   return l ? c.json(l) : c.json({ error: "no such lesson" }, 404);
+});
+// Lesson management: what hangs off a lesson, and deleting it with all of that.
+app.get("/api/lessons/:slug/derived", (c) => {
+  try {
+    return c.json(lessonDerived(c.req.param("slug")));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, e instanceof LessonNotFound ? 404 : 400);
+  }
+});
+app.delete("/api/lessons/:slug", (c) => {
+  try {
+    return c.json(deleteLesson(c.req.param("slug")));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, e instanceof LessonNotFound ? 404 : 400);
+  }
 });
 
 // Presets: built-ins from shared/config.ts plus the user's own in $REINS_HOME/presets.json.
@@ -171,9 +201,8 @@ app.delete("/api/domains/:id", (c) => {
 
 // Skills: read-only listing of what loadSkills() would give a run in this workspace.
 app.get("/api/skills", (c) => {
-  const q = c.req.query("workspace");
-  const ws = path.resolve(String(q || info().defaultWorkspace).replace(/^~/, os.homedir()));
-  const exists = fs.existsSync(ws) && fs.statSync(ws).isDirectory();
+  const ws = expandPath(c.req.query("workspace") || info().defaultWorkspace);
+  const exists = isDir(ws);
   try {
     // A skill links to lessons through its `lessons:` frontmatter and the [skill:<name>] implications that target it.
     const impls = loadLessonLibrary().lessons.flatMap((l) => l.items.filter((i) => i.kind === "skill").map((i) => ({ slug: l.slug, target: i.target })));
@@ -197,35 +226,33 @@ app.post("/api/settings/test", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const client = manager.client;
   if (!client) return c.json({ ok: false, error: "No API key configured." });
-  const cfg = defaultRunConfig({ task: "connection test", workspace: os.tmpdir(), roles: body.model ? { builder: { model: body.model, effort: "low" } } as any : undefined });
-  cfg.roles.builder.effort = "low";
+  // The probe runs as the builder at low effort, on the chosen model (the default when none is named).
+  const builder = { model: typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL, effort: "low" as const };
+  const cfg = defaultRunConfig({ task: "connection test", workspace: os.tmpdir(), roles: { builder } as RunConfig["roles"] });
   return c.json(await probeDirectEngine(client, cfg));
 });
 app.get("/api/runs", (c) => c.json(manager.listRuns()));
-app.get("/api/trials", (c) => c.json(allTrialSets(Number(c.req.query("k") ?? 3))));
+app.get("/api/trials", (c) => c.json(allTrialSets(kParam(c.req.query("k")))));
 app.post("/api/runs/:id/repeat", (c) => {
-  const k = Math.max(1, Math.min(10, Number(c.req.query("k") ?? 3)));
-  if (!manager.config(c.req.param("id"))) return c.json({ error: `No such run: ${c.req.param("id")}` }, 404);
+  const id = c.req.param("id");
+  const k = kParam(c.req.query("k"));
+  if (!manager.config(id)) return c.json({ error: `No such run: ${id}` }, 404);
   const fresh = c.req.query("fresh") === "1";
-  manager.repeat(c.req.param("id"), k, fresh).catch((e) => console.error("repeat failed", e));
+  manager.repeat(id, k, fresh).catch((e) => console.error("repeat failed", e));
   return c.json({ ok: true, k, fresh });
 });
 app.get("/api/runs/:id", (c) => {
   const id = c.req.param("id");
-  if (isIntakeId(id)) {
-    const cfg = intake.config(id);
-    if (!cfg) return c.json({ error: "not found" }, 404);
-    return c.json({ config: cfg, events: intake.events(id), pending: intake.pendingApprovals(id), active: intake.isActive(id) });
-  }
-  const cfg = manager.config(c.req.param("id"));
+  const m = isIntakeId(id) ? intake : manager;
+  const cfg = m.config(id);
   if (!cfg) return c.json({ error: "not found" }, 404);
-  return c.json({ config: cfg, events: manager.events(cfg.id), pending: manager.pendingApprovals(cfg.id), active: manager.isActive(cfg.id) });
+  return c.json({ config: cfg, events: m.events(id), pending: m.pendingApprovals(id), active: m.isActive(id) });
 });
-app.get("/api/runs/:id/events", (c) => c.json(eventsFor(c.req.param("id"), Number(c.req.query("from") ?? 0))));
+app.get("/api/runs/:id/events", (c) => c.json(eventsFor(c.req.param("id"), Number(c.req.query("from") ?? 0) || 0)));
 app.post("/api/runs", async (c) => {
   const body = await c.req.json();
   if (!body.task || !body.workspace) return c.json({ error: "task and workspace are required" }, 400);
-  const ws = path.resolve(String(body.workspace).replace(/^~/, os.homedir()));
+  const ws = expandPath(body.workspace);
   if (body.engine !== "replay" && !fs.existsSync(ws)) return c.json({ error: `Workspace does not exist: ${ws}` }, 400);
   const s = loadSettings();
   s.recentWorkspaces = [ws, ...(s.recentWorkspaces ?? []).filter((w) => w !== ws)].slice(0, 8);
@@ -265,8 +292,12 @@ app.post("/api/runs/:id/approve", async (c) => {
   const body = await c.req.json();
   try {
     const id = c.req.param("id");
-    if (isIntakeId(id)) intake.approve(id, body.approvalId, body.decision, body.note, body.lesson);
-    else manager.approve(id, body.approvalId, body.decision, body.note, body.criteria);
+    const decision = body.decision;
+    if (decision !== "approve" && decision !== "reject" && decision !== "revise") throw new Error('decision must be "approve", "reject" or "revise"');
+    const note = typeof body.note === "string" ? body.note.slice(0, 4000) : undefined;
+    const draft = body.publish && typeof body.publish === "object" ? { title: String(body.publish.title ?? ""), body: String(body.publish.body ?? "") } : undefined;
+    if (isIntakeId(id)) intake.approve(id, body.approvalId, decision, note, body.lesson);
+    else manager.approve(id, body.approvalId, decision, note, { criteria: body.criteria, draft });
     return c.json({ ok: true });
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);
@@ -295,25 +326,22 @@ for (const action of ["pause", "resume", "cancel"] as const) {
     }
   });
 }
+// Changed files and diffs are against the commit the run started from; a workspace that is no longer a git repo gives an empty answer, never an error.
 app.get("/api/runs/:id/files", async (c) => {
   const cfg = manager.config(c.req.param("id"));
   if (!cfg) return c.json({ error: "not found" }, 404);
-  const base = (manager.events(cfg.id).find((e) => e.type === "note" && e.text.startsWith("Environment")) as any)?.text?.match(/repo at ([0-9a-f]{7})/)?.[1] ?? null;
   try {
-    const sha = base ? (await headSha(cfg.workspace)) && base : null;
-    return c.json(await changedFiles(cfg.workspace, sha));
-  } catch (e) {
+    return c.json(await changedFiles(cfg.workspace, runBaseSha(cfg.id)));
+  } catch {
     return c.json([]);
   }
 });
 app.get("/api/runs/:id/diff", async (c) => {
   const cfg = manager.config(c.req.param("id"));
   if (!cfg) return c.json({ error: "not found" }, 404);
-  const file = c.req.query("file") ?? "";
-  const base = (manager.events(cfg.id).find((e) => e.type === "note" && e.text.startsWith("Environment")) as any)?.text?.match(/repo at ([0-9a-f]{7})/)?.[1] ?? null;
   try {
-    return c.text(await fileDiff(cfg.workspace, base, file));
-  } catch (e) {
+    return c.text(await fileDiff(cfg.workspace, runBaseSha(cfg.id), c.req.query("file") ?? ""));
+  } catch {
     return c.text("");
   }
 });
@@ -324,8 +352,8 @@ app.get("/api/runs/:id/tool-output/:toolUseId", (c) => {
 });
 app.get("/api/workspaces", (c) => c.json({ recent: loadSettings().recentWorkspaces ?? [], home: os.homedir() }));
 app.get("/api/workspaces/check", (c) => {
-  const p = path.resolve(String(c.req.query("path") ?? "").replace(/^~/, os.homedir()));
-  const exists = fs.existsSync(p) && fs.statSync(p).isDirectory();
+  const p = expandPath(c.req.query("path"));
+  const exists = isDir(p);
   const git = exists && fs.existsSync(path.join(p, ".git"));
   const files = exists ? fs.readdirSync(p).filter((f) => !f.startsWith(".")).slice(0, 12) : [];
   return c.json({ path: p, exists, git, files, suggestions: exists ? suggestDomains(p) : [] });
@@ -371,8 +399,9 @@ wss.on("connection", (ws) => {
     try {
       const msg = JSON.parse(raw.toString()) as ClientMessage;
       if (msg.type === "subscribe") {
+        // Subscribe before reading the log, so an event appended in between is not lost; the client merges by seq.
         subs.get(ws)!.add(msg.runId);
-        for (const ev of eventsFor(msg.runId, msg.fromSeq ?? 0)) send(ws, { type: "event", event: ev });
+        send(ws, { type: "events", runId: msg.runId, events: eventsFor(msg.runId, msg.fromSeq ?? 0) });
       } else if (msg.type === "unsubscribe") subs.get(ws)!.delete(msg.runId);
     } catch {
       /* ignore */
@@ -391,12 +420,8 @@ intake.on("event", (ev: RunEvent) => {
   const jobs = intake.list();
   for (const ws of subs.keys()) send(ws, { type: "intake", jobs });
 });
-let runsTimer: NodeJS.Timeout | null = null;
+// The manager already throttles "runs" to about one push per second across all runs.
 manager.on("runs", () => {
-  if (runsTimer) return;
-  runsTimer = setTimeout(() => {
-    runsTimer = null;
-    const runs = manager.listRuns();
-    for (const ws of subs.keys()) send(ws, { type: "runs", runs });
-  }, 150);
+  const runs = manager.listRuns();
+  for (const ws of subs.keys()) send(ws, { type: "runs", runs });
 });

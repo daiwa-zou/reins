@@ -7,8 +7,7 @@ import { useNow } from "../lib/useNow";
 import { api } from "../lib/api";
 import { startDemo } from "../lib/demo";
 import { groupRuns, runContextLine } from "../state/runGroups";
-
-const LIVE = ["running", "paused", "waiting_approval", "queued"];
+import { isLive } from "../state/derive";
 
 /** The Runs column: a title, New run, a filter, then the runs by urgency (Needs you, Running, Earlier), two lines each. */
 export function RunList() {
@@ -61,7 +60,7 @@ function Row({ r }: { r: RunSummary }) {
   const selected = useStore((s) => s.selectedRunId === r.id && s.section === "runs");
   const selectRun = useStore((s) => s.selectRun);
   const toastMsg = useStore((s) => s.toastMsg);
-  const live = LIVE.includes(r.status);
+  const live = isLive(r.status);
   const now = useNow(true);
   const m = STATUS[r.status];
   const dot = m.tone === "neutral" ? "var(--fg-faint)" : `var(--${m.tone})`;

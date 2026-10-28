@@ -18,10 +18,11 @@ export function trialFromEvents(config: RunConfig, events: RunEvent[]): Trial {
   if (!durationMs && events.length) durationMs = Date.parse(events[events.length - 1].ts) - Date.parse(events[0].ts);
   // A run killed by a server restart says nothing about the agent; count it like a cancel, not a failure.
   const last = [...events].reverse().find((e) => e.type === "run.status") as Extract<RunEvent, { type: "run.status" }> | undefined;
-  const status = s.status === "failed" && /^Interrupted/.test(last?.reason ?? "") ? "cancelled" : s.status;
+  const interrupted = /^Interrupted/.test(last?.reason ?? "");
+  const status = s.status === "failed" && interrupted ? "cancelled" : s.status;
   const errors = events.filter((e): e is Extract<RunEvent, { type: "error" }> => e.type === "error").map((e) => e.message);
   const infra = /Interrupted|Model call failed|engine failed|rate limit|overloaded|connection|timed out|Transient API error/i;
-  const failureKind: Trial["failureKind"] = status === "completed" && verdict === "pass" ? "none" : errors.some((m) => infra.test(m)) || /^Interrupted/.test(last?.reason ?? "") ? "infra" : "agent";
+  const failureKind: Trial["failureKind"] = status === "completed" && verdict === "pass" ? "none" : interrupted || errors.some((m) => infra.test(m)) ? "infra" : "agent";
   return { runId: config.id, title: config.task, status, verdict, costUsd: s.costUsd, durationMs, fixRounds, createdAt: config.createdAt, engine: config.engine, model: config.roles.builder.model, harnessVersion, failureKind, originWorkspace: config.origin?.workspace, fresh: config.origin?.fresh };
 }
 

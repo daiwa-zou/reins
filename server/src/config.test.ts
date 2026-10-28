@@ -98,7 +98,7 @@ describe("presets", () => {
   });
 
   it("Full (medium + check-in) differs from the defaults only by the effort and supervision tables", () => {
-    expect(diffFromDefaults(applyPreset(base(), preset("Full"))).map((d) => d.path)).toEqual(["components.contracts", "components.scouts", "pauses.afterPlan", "pauses.afterContract", "pauses.afterEvaluation"]);
+    expect(diffFromDefaults(applyPreset(base(), preset("Full"))).map((d) => d.path)).toEqual(["components.contracts", "components.scouts", "pauses.afterPlan", "pauses.afterContract", "pauses.afterEvaluation", "pauses.beforePublish"]);
     expect(diffFromDefaults(base())).toEqual([]);
   });
 

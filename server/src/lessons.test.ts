@@ -25,6 +25,14 @@ takeaway: Short takeaway. Second sentence.
 const errors = (raw: string, slug = "x") => parseLesson(slug, raw).problems.filter((p) => p.level === "error").map((p) => p.message);
 
 describe("parseLesson", () => {
+  it("keeps the intake focus and the repo/mcp provenances", () => {
+    const raw = "---\ntitle: T\ndate: 2026-01-02\nsource: repo\nfocus:   how   retries work \ntakeaway: x\n---\n\n## Learnings\n- a b\n\n## Harness implications\n- [stage:build] Do it.\n  > a b\n";
+    const { lesson, problems } = parseLesson("x", raw, "user");
+    expect(problems.filter((p) => p.level === "error")).toEqual([]);
+    expect(lesson).toMatchObject({ provenance: "repo", focus: "how retries work" });
+    expect(parseLesson("y", raw.replace("source: repo", "source: mcp"), "user").lesson?.provenance).toBe("mcp");
+  });
+
   it("parses a good file, unquoting values", () => {
     const { lesson, problems } = parseLesson("good", GOOD);
     expect(problems).toEqual([]);

@@ -386,14 +386,23 @@ export interface GuardrailDecision {
   rationale: string;
 }
 
-export type ApprovalKind = "contract" | "action" | "phase" | "lesson";
+export type ApprovalKind = "contract" | "action" | "phase" | "lesson" | "publish";
+
+/** "revise" is only meaningful for a publish approval: the builder redrafts the pull request from the note and the card comes back. */
+export type ApprovalDecision = "approve" | "reject" | "revise";
+
+/** The pull request a publish approval shows: editable before the branch is pushed. */
+export interface PublishDraft {
+  title: string;
+  body: string;
+}
 
 export interface ApprovalRequest {
   approvalId: string;
   kind: ApprovalKind;
   title: string;
   detail: string;
-  /** For actions: the tool call. For contracts: the criteria. For phases: the phase. */
+  /** For actions: the tool call. For contracts: the criteria. For phases: the phase. For publish: the draft (PublishDraft plus branch, base, package, revision). */
   payload: unknown;
 }
 
@@ -456,9 +465,11 @@ export type RunEvent = Base &
     | { type: "tools.loaded"; role: RoleId; names: string[] }
     | ({ type: "guardrail.decision"; role: RoleId } & GuardrailDecision)
     | { type: "approval.requested"; request: ApprovalRequest }
-    | { type: "approval.resolved"; approvalId: string; decision: "approve" | "reject"; note?: string }
+    | { type: "approval.resolved"; approvalId: string; decision: ApprovalDecision; note?: string }
     | { type: "contract.proposed"; by: RoleId; criteria: ContractCriterion[]; rationale: string }
     | { type: "contract.agreed"; criteria: ContractCriterion[] }
+    /** A role ran a criterion's verification step itself and recorded what it saw (the builder's self-check; the evaluator's verdict is evaluation.result). */
+    | { type: "criterion.checked"; role: RoleId; id: string; pass: boolean; evidence: string }
     | { type: "breakdown.agreed"; packages: WorkPackage[]; rationale: string }
     | { type: "tests.agreed"; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
     | { type: "pr.opened"; number: number; url: string; branch: string; base: string; package?: PackageRef }
@@ -551,11 +562,32 @@ export interface Lesson {
   standing: Standing;
   /** sha256 of the source text an intake job distilled this lesson from (frontmatter `hash:`). */
   hash?: string;
+  /** What the intake job was told to look for in its source (frontmatter `focus:`); the same source with another focus is another lesson. */
+  focus?: string;
 }
 
 export type ImplicationKind = "component" | "stage" | "skill" | "foundation" | "gap" | "effort";
 export type Standing = "bundled" | "reviewed" | "unreviewed";
-export type LessonProvenance = "post" | "article" | "paper" | "postmortem" | "note";
+export type LessonProvenance = "post" | "article" | "paper" | "postmortem" | "note" | "repo" | "mcp";
+
+/** An MCP server an intake job may read from: a command to spawn (stdio) or an HTTP endpoint. */
+export interface McpServerSpec {
+  /** Short name; the server's tools appear as mcp__<name>__<tool>. */
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+/** Where an intake job reads from. */
+export type IntakeSourceSpec =
+  | { kind: "url"; url: string }
+  | { kind: "text" }
+  /** A git URL (cloned shallowly) or a local directory (read in place); `ref` is a branch or tag for a clone. */
+  | { kind: "repo"; repo: string; ref?: string }
+  | { kind: "mcp"; server: McpServerSpec };
 
 /** One claim a lesson makes about the harness: the atomic link between lessons, components, stages and skills. */
 export interface Implication {
@@ -648,6 +680,10 @@ export interface IntakeJobSummary {
   id: string;
   slug: string;
   url?: string;
+  /** Absent for jobs recorded before sources other than a URL or pasted text existed. */
+  source?: IntakeSourceSpec;
+  /** What the librarian was told to look for. */
+  focus?: string;
   status: "running" | "waiting_approval" | "adopted" | "rejected" | "failed" | "refused" | "cancelled" | "interrupted";
   createdAt: string;
   updatedAt?: string;
@@ -658,7 +694,10 @@ export interface IntakeJobSummary {
 }
 
 export type ServerMessage =
+  /** One live event. */
   | { type: "event"; event: RunEvent }
+  /** The stored events of a run from the subscriber's `fromSeq`, in one frame, so a reconnect or a first open does not replay them one by one. */
+  | { type: "events"; runId: string; events: RunEvent[] }
   | { type: "intake"; jobs: IntakeJobSummary[] }
   | { type: "runs"; runs: RunSummary[] }
   | { type: "hello"; info: ServerInfo };

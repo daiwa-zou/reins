@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import type { ApprovalRequest, ContractCriterion } from "@shared/types";
+import type { ApprovalDecision, ApprovalRequest, ContractCriterion, PublishDraft } from "@shared/types";
 import { api } from "../lib/api";
-import { useStore } from "../state/store";
+import { useStore, type ApprovalDraft as ApprovalDraftFields } from "../state/store";
 import { Pre, Badge } from "./ui";
 import { dropImplication, editImplication, IMPLICATION_KINDS, initLessonDraft, parseDomains, setDraftStanding, toLessonEdits, type DraftLessonPayload, type LessonDraftState } from "../state/lessonDraft";
 
@@ -22,6 +22,10 @@ const CONSEQUENCE: Record<ApprovalRequest["kind"], { approve: string; reject: st
     approve: "Adopt: the lesson, with your edits, is written to your lesson library with the standing you picked.",
     reject: "Drop: the draft is discarded and nothing is written to your library.",
   },
+  publish: {
+    approve: "Approve: the branch is pushed and the pull request is opened with the title and description as shown (your edits included).",
+    reject: "Request changes: the builder rewrites the draft from your note and this card comes back. Reject: the branch stays local and the run ends here.",
+  },
 };
 
 /**
@@ -38,14 +42,23 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
   const note = draft?.note ?? "";
   // A lesson approval (intake job): the implications to keep, edited, and the standing.
   const lesson: LessonDraftState = draft?.lesson ?? initLessonDraft(request.kind === "lesson" ? (request.payload as DraftLessonPayload) : null);
-  const setCriteria = (next: ContractCriterion[]) => setDraft(request.approvalId, { criteria: next, note, lesson: draft?.lesson });
-  const setNote = (next: string) => setDraft(request.approvalId, { criteria, note: next, lesson: draft?.lesson });
-  const setLesson = (next: LessonDraftState) => setDraft(request.approvalId, { criteria, note, lesson: next });
+  const payload = request.payload as any;
+  // A pull request draft (publish cards): the title and description as proposed, then as edited here.
+  const publish: PublishDraft = draft?.publish ?? (request.kind === "publish" ? { title: String(payload?.title ?? ""), body: String(payload?.body ?? "") } : { title: "", body: "" });
+  const patch = (p: Partial<ApprovalDraftFields>) => setDraft(request.approvalId, { criteria, note, lesson: draft?.lesson, publish: draft?.publish, ...p });
+  const setCriteria = (next: ContractCriterion[]) => patch({ criteria: next });
+  const setNote = (next: string) => patch({ note: next });
+  const setLesson = (next: LessonDraftState) => patch({ lesson: next });
+  const setPublish = (next: PublishDraft) => patch({ publish: next });
 
-  const decide = async (decision: "approve" | "reject") => {
+  const decide = async (decision: ApprovalDecision) => {
     setBusy(true);
     try {
-      await api.approve(runId, request.approvalId, decision, note || undefined, request.kind === "contract" ? criteria : undefined, request.kind === "lesson" ? toLessonEdits(lesson) : undefined);
+      await api.approve(runId, request.approvalId, decision, note || undefined, {
+        criteria: request.kind === "contract" ? criteria : undefined,
+        lesson: request.kind === "lesson" ? toLessonEdits(lesson) : undefined,
+        publish: request.kind === "publish" ? publish : undefined,
+      });
       setDraft(request.approvalId, null);
     } catch (e) {
       toastMsg((e as Error).message, "error");
@@ -59,9 +72,10 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
     const max = criteria.reduce((m, c) => Math.max(m, Number(c.id.replace(/\D/g, "")) || 0), 0);
     return `C${max + 1}`;
   };
-  const invalid = request.kind === "contract" ? criteria.filter((c) => !c.text.trim() || !c.verify.trim()).length : 0;
-  const payload = request.payload as any;
+  const invalid = request.kind === "contract" ? criteria.filter((c) => !c.text.trim() || !c.verify.trim()).length : request.kind === "publish" && !publish.title.trim() ? 1 : 0;
   const rationale = request.kind === "action" ? request.detail : null;
+  const isPublish = request.kind === "publish";
+  const revision = isPublish ? Number(payload?.revision ?? 0) : 0;
 
   return (
     <div className="card p-4 border-l-4 fade-in" style={{ borderLeftColor: "var(--warn)", boxShadow: "var(--shadow)" }} role="region" aria-label={request.title}>
@@ -110,6 +124,28 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
 
       {request.kind === "lesson" && <LessonDraftEditor payload={payload as DraftLessonPayload} state={lesson} onChange={setLesson} />}
 
+      {isPublish && (
+        <div className="mt-3 flex flex-col gap-2" data-publish-draft>
+          <div className="text-[12px] muted flex flex-wrap gap-x-3 gap-y-1">
+            <span>
+              <span className="faint">branch</span> <span className="mono">{payload?.branch}</span>
+            </span>
+            <span>
+              <span className="faint">onto</span> <span className="mono">{payload?.base}</span>
+            </span>
+            {revision > 0 && <span className="faint">redrafted {revision} time{revision === 1 ? "" : "s"} on your request</span>}
+          </div>
+          <label className="flex flex-col gap-1 text-[12px] font-semibold">
+            Title
+            <input className="input font-normal" value={publish.title} maxLength={200} onChange={(e) => setPublish({ ...publish, title: e.target.value })} aria-label="Pull request title" placeholder="One line" />
+          </label>
+          <label className="flex flex-col gap-1 text-[12px] font-semibold">
+            Description <span className="faint font-normal">(Markdown; this is the pull request body)</span>
+            <textarea className="input mono font-normal" style={{ fontSize: 11.5, lineHeight: 1.5 }} rows={14} value={publish.body} onChange={(e) => setPublish({ ...publish, body: e.target.value })} aria-label="Pull request description" />
+          </label>
+        </div>
+      )}
+
       {request.kind === "phase" && payload != null && (
         <div className="mt-3">
           <Pre max={1200}>{typeof payload === "string" ? payload : payload.spec ?? JSON.stringify(payload, null, 2)}</Pre>
@@ -125,17 +161,23 @@ export function ApprovalCard({ request, runId, disabled = false }: { request: Ap
       )}
 
       <div className="flex items-center gap-2 mt-3">
-        <input className="input" placeholder="Optional note to the agent (why, or what to do instead)" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note to the agent" />
+        <input className="input" placeholder={isPublish ? "What should change in the draft? (needed to request changes)" : "Optional note to the agent (why, or what to do instead)"} value={note} onChange={(e) => setNote(e.target.value)} aria-label={isPublish ? "What should change" : "Note to the agent"} />
         <button className="btn" disabled={busy || disabled} onClick={() => decide("reject")}>
           Reject
         </button>
-        <button className="btn btn-primary" disabled={busy || disabled || invalid > 0} onClick={() => decide("approve")} title={invalid ? `${invalid} criterion(s) need both a text and a verify step` : undefined}>
-          {request.kind === "contract" ? "Approve contract" : request.kind === "lesson" ? `Adopt lesson (${toLessonEdits(lesson).implications.length} implication${toLessonEdits(lesson).implications.length === 1 ? "" : "s"})` : "Approve"}
+        {isPublish && (
+          <button className="btn" disabled={busy || disabled || !note.trim()} onClick={() => decide("revise")} title={note.trim() ? "The builder rewrites the draft from your note" : "Write what should change first"} data-request-changes>
+            Request changes
+          </button>
+        )}
+        <button className="btn btn-primary" disabled={busy || disabled || invalid > 0} onClick={() => decide("approve")} title={invalid ? (isPublish ? "The title cannot be empty" : `${invalid} criterion(s) need both a text and a verify step`) : undefined}>
+          {request.kind === "contract" ? "Approve contract" : request.kind === "lesson" ? `Adopt lesson (${toLessonEdits(lesson).implications.length} implication${toLessonEdits(lesson).implications.length === 1 ? "" : "s"})` : isPublish ? "Approve and open the pull request" : "Approve"}
         </button>
       </div>
       <div className="text-[11.5px] muted mt-2 leading-relaxed">
         {CONSEQUENCE[request.kind].approve} {CONSEQUENCE[request.kind].reject}
-        {invalid > 0 && <span className="text-[var(--warn)]"> {invalid} criterion(s) still need both a text and a verify step.</span>}
+        {invalid > 0 && !isPublish && <span className="text-[var(--warn)]"> {invalid} criterion(s) still need both a text and a verify step.</span>}
+        {invalid > 0 && isPublish && <span className="text-[var(--warn)]"> The title cannot be empty.</span>}
         {disabled && <span className="text-[var(--warn)]"> You are viewing the past; go back to live to decide.</span>}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import type { RunModel } from "../state/derive";
 import { useStore } from "../state/store";
+import { ROLE_LABEL } from "../state/derive";
 import { Badge, RoleChip, Empty } from "../components/ui";
 import { CallRow } from "./Stage";
 import { clock } from "../lib/format";
@@ -57,9 +58,9 @@ export function Transcript({ model }: { model: RunModel }) {
           Role
           <select className="input" style={{ width: "auto", padding: "4px 8px", fontSize: 12 }} value={role} onChange={(e) => setRole(e.target.value as RoleId | "all")} aria-label="Which role's events to show">
             <option value="all">All roles</option>
-            {(["planner", "builder", "evaluator", "scout", "classifier"] as RoleId[]).map((r) => (
+            {(Object.keys(ROLE_LABEL) as RoleId[]).map((r) => (
               <option key={r} value={r}>
-                {r[0].toUpperCase() + r.slice(1)}
+                {ROLE_LABEL[r]}
               </option>
             ))}
           </select>

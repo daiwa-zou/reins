@@ -1,6 +1,6 @@
 import React from "react";
 import type { RunModel } from "../state/derive";
-import { Badge, Empty, RoleChip } from "../components/ui";
+import { Badge, Empty, RoleChip, Stat } from "../components/ui";
 import { useStore } from "../state/store";
 import { clock } from "../lib/format";
 
@@ -17,10 +17,10 @@ export function GuardrailsPanel({ model }: { model: RunModel }) {
     <div className="h-full overflow-auto p-4">
       <div className="max-w-4xl mx-auto flex flex-col gap-4">
         <div className="grid md:grid-cols-4 gap-3">
-          <Tile label="Mode" value={cfg?.guardrail.mode ?? "—"} sub={cfg?.guardrail.mode === "auto" ? "rules decide; the classifier settles the ambiguous" : cfg?.guardrail.mode === "ask" ? "anything not read-only asks you" : "everything but hard denies runs"} />
-          <Tile label="Network" value={cfg?.guardrail.allowNetwork ? "allowed" : "off"} sub="downloads and remote calls need approval when off" />
-          <Tile label="Decisions" value={String(decisions.length)} sub={`${counts.allow} allow · ${counts.ask} ask · ${counts.deny} deny`} />
-          <Tile label="Asked you" value={String(bySource.user)} sub={`${bySource.classifier} settled by the classifier`} tone={bySource.user > 5 ? "warn" : undefined} />
+          <Stat capitalize label="Mode" value={cfg?.guardrail.mode ?? "—"} sub={cfg?.guardrail.mode === "auto" ? "rules decide; the classifier settles the ambiguous" : cfg?.guardrail.mode === "ask" ? "anything not read-only asks you" : "everything but hard denies runs"} />
+          <Stat capitalize label="Network" value={cfg?.guardrail.allowNetwork ? "allowed" : "off"} sub="downloads and remote calls need approval when off" />
+          <Stat label="Decisions" value={String(decisions.length)} sub={`${counts.allow} allow · ${counts.ask} ask · ${counts.deny} deny`} />
+          <Stat label="Asked you" value={String(bySource.user)} sub={`${bySource.classifier} settled by the classifier`} tone={bySource.user > 5 ? "warn" : undefined} />
         </div>
 
         <div className="card p-4 text-[12.5px] leading-relaxed">
@@ -96,14 +96,4 @@ function describe(name: string, input: any): string {
   if (name === "bash") return `$ ${input?.command ?? ""}`;
   if (input?.path) return `${name} ${input.path}`;
   return name;
-}
-
-function Tile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" }) {
-  return (
-    <div className="card p-3">
-      <div className="text-[10.5px] uppercase tracking-wider faint font-semibold">{label}</div>
-      <div className={`text-[17px] font-semibold mt-0.5 capitalize ${tone === "warn" ? "text-[var(--warn)]" : ""}`}>{value}</div>
-      {sub && <div className="muted text-[11.5px] mt-0.5">{sub}</div>}
-    </div>
-  );
 }

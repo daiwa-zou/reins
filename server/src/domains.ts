@@ -2,18 +2,18 @@
 //   { "domains": [{ "id", "label", "description", "implications": ["slug#n", ...], "createdAt" }] }
 // Ids are slugs inside that file, never paths.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { UserDomain } from "../../shared/types.js";
 import { DOMAIN_ID, validateUserDomain } from "../../shared/domains.js";
 import { presetDomains } from "../../shared/presets.js";
 import { listLessons } from "./lessons.js";
+import { reinsHome } from "./store/runStore.js";
 
 export class DomainValidationError extends Error {}
 export class DomainNotFound extends Error {}
 
 export function domainsFile(): string {
-  return path.join(process.env.REINS_HOME ?? path.join(os.homedir(), ".reins"), "domains.json");
+  return path.join(reinsHome(), "domains.json");
 }
 
 function read(): UserDomain[] {
@@ -58,6 +58,35 @@ export function saveDomain(body: unknown): UserDomain {
   const stored: UserDomain = { ...domain, createdAt: prev?.createdAt ?? new Date().toISOString() };
   write([...current.filter((d) => d.id !== domain.id), stored]);
   return stored;
+}
+
+/** What deleting a lesson does to the user's domains: implications dropped per domain, and domains that would be left empty (removed). */
+export interface DomainPrune {
+  id: string;
+  label: string;
+  /** Implication ids of the lesson this domain picked. */
+  dropped: string[];
+  /** Nothing else was in it, so the whole domain goes. */
+  deleted: boolean;
+}
+
+/** Drop every implication of `slug` from the user's domains; a domain built only from it is deleted. `dry` reports without writing. */
+export function pruneLessonFromDomains(slug: string, dry = false): DomainPrune[] {
+  const current = read();
+  const out: DomainPrune[] = [];
+  const kept: UserDomain[] = [];
+  for (const d of current) {
+    const dropped = d.implications.filter((iid) => iid.split("#")[0] === slug);
+    if (!dropped.length) {
+      kept.push(d);
+      continue;
+    }
+    const rest = d.implications.filter((iid) => !dropped.includes(iid));
+    out.push({ id: d.id, label: d.label, dropped, deleted: !rest.length });
+    if (rest.length) kept.push({ ...d, implications: rest });
+  }
+  if (out.length && !dry) write(kept);
+  return out;
 }
 
 export function deleteDomain(id: string): void {

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ContextSnapshot, RoleId, RunConfig, Usage } from "../../../shared/types.js";
+import type { ContextSnapshot, RoleId, RunConfig, Usage, McpServerSpec } from "../../../shared/types.js";
 import { CONTEXT_LIMIT_TOKENS } from "../../../shared/components.js";
 import { narrateToolCall } from "../../../shared/narrate.js";
 import { RunBus } from "./bus.js";
@@ -12,9 +12,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { REINS_HOME } from "../store/runStore.js";
 import { budgetExhaustedMessage } from "../../../shared/budget.js";
+import { roleSettings } from "../../../shared/config.js";
 import { TURNS_REMAINING_NUDGE_AT, forcedCallNote, forcedTerminalMessage, turnsRemainingNote, turnsRemainingNudge } from "./turnBudget.js";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
+
+/** Tools that only write inside the workspace or hand structured output to the harness: allowed in every guardrail mode, never asked about. */
+const WORKSPACE_TOOLS = new Set(["write_file", "edit_file", "update_progress", "git_commit", "check_criterion", "propose_contract", "review_contract", "propose_breakdown", "propose_tests", "propose_pr", "report_evaluation", "finish", "propose_lesson"]);
 
 export interface LoopControl {
   signal: AbortSignal;
@@ -39,6 +43,12 @@ export interface LoopOptions {
   maxTurns: number;
   /** Carry on an existing conversation (same role, later round). */
   messages?: Msg[];
+  /** Tools beyond the registry (an MCP server's, for the direct engine), by name; `tools` must list them too. */
+  extraTools?: Record<string, ToolDef>;
+  /** MCP servers the Claude Code engine attaches for this conversation (their tools arrive as mcp__<name>__*). */
+  extraMcpServers?: Record<string, McpServerSpec>;
+  /** Every tool result, untruncated, before the model sees it (intake records what the librarian read). */
+  onToolResult?: (r: { name: string; input: unknown; output: string; ok: boolean }) => void;
 }
 
 export interface LoopResult {
@@ -52,6 +62,8 @@ export interface LoopResult {
   costUsd: number;
   turns: number;
   finalText: string;
+  /** The prompt size (input + cache read + cache write) of the last model call, 0 when none was made: what a continued conversation would start from. */
+  promptTokens: number;
 }
 
 /**
@@ -71,9 +83,14 @@ export class AgentLoop {
   private systemRoleFailed = false;
   private examplesFailed = false;
   private taskBudgetFailed = false;
+  private betasOverride = false;
   private denials = { consecutive: 0, total: 0 };
   /** The turn a turns-remaining nudge was last injected for, so a retried call does not get it twice. */
   private nudgedTurn = 0;
+  /** The prompt size of the last model call (see LoopResult.promptTokens). */
+  private lastPrompt = 0;
+  /** The message of the last unrecoverable model-call failure, with the API's own detail when it gave one. */
+  lastError: string | undefined;
 
   constructor(
     private client: Anthropic,
@@ -90,14 +107,14 @@ export class AgentLoop {
   }
 
   private settings() {
-    return this.config.roles[this.opts.role as "planner"] ?? this.config.roles.planner;
+    return roleSettings(this.config, this.opts.role);
   }
 
   private toolSchemas(): Anthropic.Beta.BetaToolUnion[] {
     const out: Anthropic.Beta.BetaToolUnion[] = [];
     const useSearch = this.config.components.toolSearch;
     for (const name of this.opts.tools) {
-      const def = ALL_TOOLS[name];
+      const def = this.toolDef(name);
       if (!def) continue;
       if (name === "think" && !this.config.components.thinkTool) continue;
       if (name === "http_fetch" && !this.config.guardrail.allowNetwork) continue;
@@ -246,46 +263,12 @@ export class AgentLoop {
           this.turn--;
           continue;
         }
-        (this.bus as any).lastError = `${(err as Error).message}${(err as any)?.error?.error?.message ? ` — ${(err as any).error.error.message}` : ""}`;
-        this.bus.emitEvent({ type: "error", message: `Model call failed: ${(err as Error).message}`, recoverable: false, detail: String((err as any)?.error?.error?.message ?? "") });
+        const detail = String((err as any)?.error?.error?.message ?? "");
+        this.lastError = `${(err as Error).message}${detail ? ` — ${detail}` : ""}`;
+        this.bus.emitEvent({ type: "error", message: `Model call failed: ${(err as Error).message}`, recoverable: false, detail });
         return this.result("error", finalText);
       }
-
-      const u: Usage = {
-        input: message.usage.input_tokens,
-        output: message.usage.output_tokens,
-        cacheRead: message.usage.cache_read_input_tokens ?? 0,
-        cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
-      };
-      this.usage = addUsage(this.usage, u);
-      const turnCost = costUsd(message.model, u);
-      this.cost += turnCost;
-      const fallback = (message.usage as any).iterations?.some((i: any) => i.type === "fallback_message") ? message.model : undefined;
-      this.bus.emitEvent({ type: "turn.finished", role, turn: this.turn, usage: u, costUsd: turnCost, stopReason: message.stop_reason ?? "", model: this.settings().model, fallbackModel: fallback });
-      this.bus.emitEvent({ type: "context.snapshot", snapshot: this.snapshot(u.input + u.cacheRead + u.cacheWrite) });
-
-      // Compaction block means the server summarized earlier history.
-      for (const b of message.content as any[]) {
-        if (b.type === "compaction") {
-          this.bus.emitEvent({ type: "context.compacted", role, beforeTokens: u.input + u.cacheRead + u.cacheWrite, afterTokens: estimateTokens(b.content ?? ""), summary: String(b.content ?? "").slice(0, 2000) });
-        }
-      }
-      const cleared = (message as any).context_management?.applied_edits;
-      if (Array.isArray(cleared)) {
-        for (const e of cleared) if (e.type === "clear_tool_uses_20250919") this.bus.emitEvent({ type: "context.cleared", role, clearedToolResults: e.cleared_tool_uses ?? 0, tokensFreed: e.cleared_input_tokens ?? 0 });
-      }
-
-      for (const b of message.content) {
-        if (b.type === "text" && b.text.trim()) {
-          finalText = b.text;
-          this.bus.emitEvent({ type: "text", role, text: b.text });
-        } else if (b.type === "thinking" && (b as any).thinking?.trim()) {
-          this.bus.emitEvent({ type: "thinking", role, text: (b as any).thinking });
-        }
-      }
-
-      // Always append the full content so compaction/thinking blocks survive.
-      this.messages.push({ role: "assistant", content: message.content as any });
+      finalText = this.recordTurn(message) ?? finalText;
 
       if (message.stop_reason === "refusal") {
         this.bus.emitEvent({ type: "error", message: `The model declined to continue (${(message as any).stop_details?.category ?? "policy"}).`, recoverable: false });
@@ -325,8 +308,8 @@ export class AgentLoop {
       const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
       let terminal: { name: string; input: any } | null = null;
       // Read-only tools run in parallel; everything else in order.
-      const readOnly = toolUses.filter((t) => ALL_TOOLS[t.name]?.readOnly);
-      const others = toolUses.filter((t) => !ALL_TOOLS[t.name]?.readOnly);
+      const readOnly = toolUses.filter((t) => this.toolDef(t.name)?.readOnly);
+      const others = toolUses.filter((t) => !this.toolDef(t.name)?.readOnly);
       const roResults = await Promise.all(readOnly.map((t) => this.execute(t)));
       results.push(...roResults.map((r) => r.block));
       for (const t of others) {
@@ -343,7 +326,52 @@ export class AgentLoop {
   }
 
   private result(reason: LoopResult["reason"], finalText: string, terminal?: { name: string; input: any } | null, forced = false): LoopResult {
-    return { reason, terminalTool: terminal?.name, terminalInput: terminal?.input, ...(forced ? { forced } : {}), messages: this.messages, usage: this.usage, costUsd: this.cost, turns: this.turn, finalText };
+    return { reason, terminalTool: terminal?.name, terminalInput: terminal?.input, ...(forced ? { forced } : {}), messages: this.messages, usage: this.usage, costUsd: this.cost, turns: this.turn, finalText, promptTokens: this.lastPrompt };
+  }
+
+  /**
+   * Book one model response: usage and cost, the turn.finished and context
+   * events, the text and thinking blocks for the Stage, and the full content
+   * appended to the history (so compaction and thinking blocks survive).
+   * Returns the last non-empty text block, if any.
+   */
+  private recordTurn(message: Anthropic.Beta.BetaMessage): string | undefined {
+    const role = this.opts.role;
+    const u: Usage = {
+      input: message.usage.input_tokens,
+      output: message.usage.output_tokens,
+      cacheRead: message.usage.cache_read_input_tokens ?? 0,
+      cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
+    };
+    this.usage = addUsage(this.usage, u);
+    const turnCost = costUsd(message.model, u);
+    this.cost += turnCost;
+    const prompt = u.input + u.cacheRead + u.cacheWrite;
+    this.lastPrompt = prompt;
+    const fallback = (message.usage as any).iterations?.some((i: any) => i.type === "fallback_message") ? message.model : undefined;
+    this.bus.emitEvent({ type: "turn.finished", role, turn: this.turn, usage: u, costUsd: turnCost, stopReason: message.stop_reason ?? "", model: this.settings().model, fallbackModel: fallback });
+    this.bus.emitEvent({ type: "context.snapshot", snapshot: this.snapshot(prompt) });
+
+    // Compaction block means the server summarized earlier history.
+    for (const b of message.content as any[]) {
+      if (b.type === "compaction") this.bus.emitEvent({ type: "context.compacted", role, beforeTokens: prompt, afterTokens: estimateTokens(b.content ?? ""), summary: String(b.content ?? "").slice(0, 2000) });
+    }
+    const cleared = (message as any).context_management?.applied_edits;
+    if (Array.isArray(cleared)) {
+      for (const e of cleared) if (e.type === "clear_tool_uses_20250919") this.bus.emitEvent({ type: "context.cleared", role, clearedToolResults: e.cleared_tool_uses ?? 0, tokensFreed: e.cleared_input_tokens ?? 0 });
+    }
+
+    let finalText: string | undefined;
+    for (const b of message.content) {
+      if (b.type === "text" && b.text.trim()) {
+        finalText = b.text;
+        this.bus.emitEvent({ type: "text", role, text: b.text });
+      } else if (b.type === "thinking" && (b as any).thinking?.trim()) {
+        this.bus.emitEvent({ type: "thinking", role, text: (b as any).thinking });
+      }
+    }
+    this.messages.push({ role: "assistant", content: message.content as any });
+    return finalText;
   }
 
   /**
@@ -366,19 +394,7 @@ export class AgentLoop {
       this.bus.emitEvent({ type: "note", level: "warn", text: `The forced ${this.opts.terminal.join(" or ")} call failed (${(err as Error).message.slice(0, 200)}); the phase ends without a report.` });
       return this.result(reason, finalText);
     }
-    const u: Usage = { input: message.usage.input_tokens, output: message.usage.output_tokens, cacheRead: message.usage.cache_read_input_tokens ?? 0, cacheWrite: message.usage.cache_creation_input_tokens ?? 0 };
-    this.usage = addUsage(this.usage, u);
-    const turnCost = costUsd(message.model, u);
-    this.cost += turnCost;
-    this.bus.emitEvent({ type: "turn.finished", role, turn: this.turn, usage: u, costUsd: turnCost, stopReason: message.stop_reason ?? "", model: this.settings().model });
-    this.bus.emitEvent({ type: "context.snapshot", snapshot: this.snapshot(u.input + u.cacheRead + u.cacheWrite) });
-    for (const b of message.content) {
-      if (b.type === "text" && b.text.trim()) {
-        finalText = b.text;
-        this.bus.emitEvent({ type: "text", role, text: b.text });
-      }
-    }
-    this.messages.push({ role: "assistant", content: message.content as any });
+    finalText = this.recordTurn(message) ?? finalText;
     const toolUses = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
     if (!toolUses.length) return this.result(reason, finalText);
     let terminal: { name: string; input: any } | null = null;
@@ -473,15 +489,15 @@ export class AgentLoop {
     }
     return false;
   }
-  private betasOverride = false;
 
   private async execute(t: Anthropic.Beta.BetaToolUseBlock): Promise<{ ok: boolean; block: Anthropic.Beta.BetaToolResultBlockParam }> {
     const role = this.opts.role;
-    const def: ToolDef | undefined = ALL_TOOLS[t.name];
+    const def: ToolDef | undefined = this.toolDef(t.name);
     const narration = narrateToolCall(t.name, t.input);
     this.bus.emitEvent({ type: "tool.called", role, toolUseId: t.id, name: t.name, input: t.input, narration });
     const started = Date.now();
     const done = (ok: boolean, output: string) => {
+      this.opts.onToolResult?.({ name: t.name, input: t.input, output, ok });
       const tr = truncate(output);
       if (tr.truncated) saveFullOutput(this.bus.runId, t.id, output);
       this.bus.emitEvent({ type: "tool.result", role, toolUseId: t.id, name: t.name, ok, output: tr.text, truncated: tr.truncated, durationMs: Date.now() - started });
@@ -551,17 +567,20 @@ export class AgentLoop {
     return r.finalText.trim() || `The scout ran out of turns (${r.reason}) without a written answer.`;
   }
 
+  /** A registry tool, or one of the extra tools this conversation was given. */
+  private toolDef(name: string): ToolDef | undefined {
+    return this.opts.extraTools?.[name] ?? ALL_TOOLS[name];
+  }
+
   private async gate(t: Anthropic.Beta.BetaToolUseBlock): Promise<{ verdict: "allow" | "ask" | "deny"; rationale: string }> {
     const role = this.opts.role;
-    const def = ALL_TOOLS[t.name];
+    const def = this.toolDef(t.name)!;
     const emit = (verdict: "allow" | "ask" | "deny", source: "rule" | "classifier" | "policy", rule: string, rationale: string) => {
       this.bus.emitEvent({ type: "guardrail.decision", role, toolUseId: t.id, tool: t.name, verdict, source, rule, rationale });
       return { verdict, rationale };
     };
     if (def.readOnly) return emit("allow", "policy", "read-only", "Read-only tool; runs without asking.");
-    if (t.name === "write_file" || t.name === "edit_file" || t.name === "update_progress" || t.name === "git_commit" || t.name === "propose_contract" || t.name === "review_contract" || t.name === "report_evaluation" || t.name === "finish") {
-      return emit("allow", "policy", "in-workspace", "Writes are confined to the workspace.");
-    }
+    if (WORKSPACE_TOOLS.has(t.name)) return emit("allow", "policy", "in-workspace", "Writes are confined to the workspace.");
     if (t.name === "bash") {
       const cmd = String((t.input as any)?.command ?? "");
       const rule = classifyBash(cmd, this.config.guardrail);
@@ -612,10 +631,7 @@ export async function probeDirectEngine(client: Anthropic, config: RunConfig): P
   const started = Date.now();
   try {
     const r = await loop.run("Reply with the single word ok. Do not call tools.");
-    if (r.reason === "error") {
-      const err = (bus as any).lastError as string | undefined;
-      return { ok: false, error: err ?? "Model call failed; see the run log." };
-    }
+    if (r.reason === "error") return { ok: false, error: loop.lastError ?? "Model call failed; see the run log." };
     return { ok: true, model: config.roles.builder.model, usage: r.usage, degraded, ms: Date.now() - started };
   } catch (err) {
     return { ok: false, error: (err as Error).message, status: (err as any)?.status };

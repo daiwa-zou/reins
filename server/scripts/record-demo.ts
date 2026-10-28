@@ -57,7 +57,7 @@ function snapshot(role: RoleId, prompt: number, turn: number): ContextSnapshot {
   };
 }
 
-type Call = { name: string; input: any; output: string; ok?: boolean; ms?: number; guard?: { verdict: "allow" | "ask" | "deny"; source: "rule" | "classifier" | "policy" | "user"; rule: string; rationale: string }; ask?: { title: string; detail: string } };
+type Call = { name: string; input: any; output: string; ok?: boolean; ms?: number; guard?: { verdict: "allow" | "ask" | "deny"; source: "rule" | "classifier" | "policy" | "user"; rule: string; rationale: string }; ask?: { title: string; detail: string }; after?: () => void };
 
 function turn(role: Exclude<RoleId, "classifier">, opts: { thinking?: string; text?: string; calls?: Call[]; output?: number; growth?: number; stop?: string }) {
   turnNo[role] = (turnNo[role] ?? 0) + 1;
@@ -80,11 +80,17 @@ function turn(role: Exclude<RoleId, "classifier">, opts: { thinking?: string; te
       emit({ type: "approval.resolved", approvalId: `ap_${id}`, decision: "approve" }, 4000);
       emit({ type: "guardrail.decision", role, toolUseId: id, tool: c.name, verdict: "allow", source: "user", rule: "approval", rationale: "Approved by you." }, 100);
     }
+    c.after?.();
     emit({ type: "tool.result", role, toolUseId: id, name: c.name, ok: c.ok ?? true, output: c.output, truncated: false, durationMs: c.ms ?? 180 }, c.ms ?? 500);
   }
 }
 
-function phase(phaseName: "plan" | "contract" | "build" | "evaluate" | "wrapup", round: number, body: () => string) {
+/** The builder's self-check of one criterion: the tool call plus the criterion.checked event the handler emits. */
+function check(id: string, pass: boolean, evidence: string): Call {
+  return { name: "check_criterion", input: { id, pass, evidence }, output: `Recorded ${id} as ${pass ? "passing" : "failing"} in your self-check. The evaluator will verify it independently.`, after: () => emit({ type: "criterion.checked", role: "builder", id, pass, evidence }, 60) };
+}
+
+function phase(phaseName: "plan" | "contract" | "build" | "evaluate" | "publish" | "wrapup", round: number, body: () => string) {
   const start = clock;
   const before = events.filter((e) => e.type === "turn.finished").length;
   emit({ type: "phase.started", phase: phaseName, round }, 600);
@@ -220,7 +226,18 @@ phase("build", 1, () => {
     growth: 1300,
   });
   turn("builder", {
-    text: "C1-C4 verified by hand. Now the README and the no-.git fallback check.",
+    text: "C1-C4 verified by hand; recording each check so the contract shows it.",
+    calls: [
+      check("C1", true, 'curl localhost:3999/health -> {"status":"ok","uptime":1,"sha":"3f9c2a1"}'),
+      check("C2", true, "uptime 1, then 2 one second later"),
+      check("C3", true, "sha 3f9c2a1 equals git rev-parse --short HEAD"),
+      check("C4", true, "npm test: 3 pass, 0 fail"),
+    ],
+    growth: 900,
+    output: 400,
+  });
+  turn("builder", {
+    text: "Now the README and the no-.git fallback check.",
     calls: [
       { name: "edit_file", input: { path: "README.md", old_text: "## Endpoints", new_text: "## Endpoints\n\n### GET /health\nLiveness check. Returns `{ \"status\": \"ok\", \"uptime\": <seconds since start>, \"sha\": <short git sha or \"unknown\"> }`.\n" }, output: "Edited README.md" },
       { name: "bash", input: { command: "rm -rf /tmp/sample-api-nogit && mkdir -p /tmp/sample-api-nogit && rsync -a --exclude .git ./ /tmp/sample-api-nogit/ && cd /tmp/sample-api-nogit && PORT=3998 timeout 6 node src/server.js & sleep 1; curl -s localhost:3998/health; wait" }, output: '{"status":"ok","uptime":1,"sha":"unknown"}', guard: { verdict: "ask", source: "classifier", rule: "ask:recursive delete", rationale: "Recursive delete is limited to a scratch directory under /tmp and the copy is needed to test the no-.git path named in the contract." }, ask: { title: "Running `rm -rf /tmp/sample-api-nogit && mkdir -p /tmp/sample-api-nogit && rsync ...`", detail: "Recursive delete outside the workspace (a /tmp scratch copy) to test the no-.git fallback." }, ms: 7600 },
@@ -231,6 +248,9 @@ phase("build", 1, () => {
   const f2 = features.map((f) => ({ ...f, status: "done" as const }));
   turn("builder", {
     calls: [
+      check("C5", true, "README.md:9 ### GET /health"),
+      check("C6", true, 'copy without .git -> {"status":"ok","uptime":1,"sha":"unknown"}'),
+      check("C7", true, "plain curl with no headers -> 200"),
       { name: "update_progress", input: { features: f2, note: "All 4 features implemented and verified by hand (C1-C7). Server verified on PORT=3999; no-.git fallback verified from a /tmp copy." }, output: "Recorded. 4/4 features done." },
       { name: "tool_search_tool_regex", input: { pattern: "git.*commit" }, output: "git_commit" },
     ],
@@ -307,6 +327,7 @@ phase("build", 2, () => {
   });
   turn("builder", {
     calls: [
+      check("C3", true, "started from /: sha 8d1e4b7 equals git rev-parse --short HEAD"),
       { name: "update_progress", input: { features: features.map((f) => ({ ...f, status: "done" as const })), note: "Fix round 1: sha resolved with cwd=__dirname so it is correct regardless of the launch directory. Resolved once at module load (operator note)." }, output: "Recorded. 4/4 features done." },
       { name: "git_commit", input: { message: "Resolve git sha relative to the app directory" }, output: "Committed a41c0de" },
       { name: "finish", input: { summary: "Fixed C3: build-info.js resolves the sha with cwd=__dirname. Verified from / and via npm test (3 pass).", open_items: [] }, output: "Finished." },
@@ -348,6 +369,37 @@ phase("evaluate", 2, () => {
   });
   emit({ type: "evaluation.result", round: 2, results, verdict: "pass", summary: "All 7 criteria pass. The cwd fix is correct and the fallback still works." }, 50);
   return "PASS: all 7 criteria.";
+});
+
+// The publish stage: the draft pull request is shown before the push (on replay this is a real card you can edit and answer), then opened and merged.
+phase("publish", 0, () => {
+  const branch = "reins/demo-p1-add-a-health-endpoint";
+  const prBody = [
+    "## Work package P1: Add a /health endpoint with uptime and tests",
+    "",
+    ...features.map((f) => `- ${f.id}: ${f.title}`),
+    "",
+    "The whole task as one package.",
+    "",
+    "## Definition of done",
+    "",
+    "| id | kind | criterion | verify | result | evidence |",
+    "|---|---|---|---|---|---|",
+    ...revised.map((c) => `| ${c.id} | ${c.hard ? "hard" : "soft"} | ${c.text} | \`${c.verify.replace(/`/g, "'")}\` | PASS | re-verified in round 2 |`),
+    "",
+    "All 7 criteria pass. The cwd fix is correct and the fallback still works.",
+    "",
+    "---",
+    "Built on `main` at 3f9c2a1 by Reins run demo.",
+    "",
+  ].join("\n");
+  emit({ type: "note", level: "info", text: `Branch ${branch} cut from main at 3f9c2a1.` }, 300);
+  emit({ type: "approval.requested", request: { approvalId: "ap_publish", kind: "publish", title: "Review the pull request for P1: Add a /health endpoint with uptime and tests", detail: `Edit the title and description, then approve to push ${branch} and open the pull request onto main. Or write what should change and request changes: the builder redrafts and this card comes back. Reject leaves the branch local and ends the run.`, payload: { title: "Add a /health endpoint with uptime and tests", body: prBody, branch, base: "main", revision: 0 } } }, 400);
+  emit({ type: "approval.resolved", approvalId: "ap_publish", decision: "approve" }, 8000);
+  emit({ type: "pr.opened", number: 42, url: "https://github.com/you/sample-api/pull/42", branch, base: "main" }, 1800);
+  emit({ type: "note", level: "info", text: "Waiting for an approving review and green checks on pull request #42 (looking every 60 seconds)." }, 300);
+  emit({ type: "pr.merged", number: 42, url: "https://github.com/you/sample-api/pull/42", branch, base: "main", sha: "c0ffee1" }, 2500);
+  return "Pull request #42 merged (squash) into main at c0ffee1.";
 });
 
 phase("wrapup", 0, () => "4/4 features done.");

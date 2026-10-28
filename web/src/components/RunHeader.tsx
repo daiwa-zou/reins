@@ -5,8 +5,8 @@ import type { RunModel } from "../state/derive";
 import { isLive } from "../state/derive";
 import { StatusBadge } from "./ui";
 import { api } from "../lib/api";
-import { money, duration, tilde, nextTitle, tokens } from "../lib/format";
-import { budgetOf, countedTokens } from "@shared/budget";
+import { money, duration, tilde, nextTitle } from "../lib/format";
+import { budgetProgress } from "../state/budget";
 import { useNow } from "../lib/useNow";
 import { runElapsed } from "../lib/time";
 import { runChipLabel } from "@shared/presets";
@@ -100,7 +100,7 @@ export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
         {!live && (
           <button
             className="btn btn-sm"
-            onClick={() => openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, title: nextTitle(cfg.title), engine: cfg.engine === "replay" ? availableEngine() : cfg.engine } as any)}
+            onClick={() => openModal("newRun", { ...cfg, id: undefined, createdAt: undefined, title: nextTitle(cfg.title), engine: cfg.engine === "replay" ? availableEngine() : cfg.engine })}
             title="Start a new run with the same task and settings. Repeated runs show up together in Reliability."
           >
             <RotateCcw size={13} aria-hidden /> Run again
@@ -113,18 +113,23 @@ export function RunHeader({ model, at }: { model: RunModel; at?: RunModel }) {
 
 /** The budget as a slim gauge in the engine's unit, with the list-price figure beside it (an estimate on a subscription). */
 function BudgetInline({ model, est }: { model: RunModel; est: boolean }) {
-  const cfg = model.config!;
-  const b = budgetOf(cfg);
-  const spent = b.kind === "tokens" ? countedTokens(model.usage) : model.costUsd;
-  const frac = b.limit ? Math.min(1, spent / b.limit) : 0;
-  const fmt = (n: number) => (b.kind === "tokens" ? tokens(n) : money(n));
+  const b = budgetProgress(model.config!, model);
+  // A run from before the token budget has no cap on record: say what it spent, without a gauge against a cap it never had.
+  if (!b.recorded)
+    return (
+      <span className="inline-flex items-center gap-2 shrink-0" title="This run predates the token budget, so no cap was recorded or enforced for it" data-budget-inline>
+        <span className="mono">{b.fmt(b.spent)} tokens spent</span>
+        <span className="faint">· no cap recorded · ≈ {money(model.costUsd)} at list price, not billed</span>
+      </span>
+    );
   return (
-    <span className="inline-flex items-center gap-2 shrink-0" title={b.kind === "tokens" ? "Tokens counted against the subscription (cache reads at a tenth) of the run's token budget" : "Spent of the dollar budget"} data-budget-inline>
+    <span className="inline-flex items-center gap-2 shrink-0" title={b.kind === "tokens" ? "This run's budget: tokens counted against the subscription (cache reads at a tenth) against the cap set for it; the run stops at the cap" : "This run's budget: spent of its dollar cap; the run stops at the cap"} data-budget-inline>
+      <span className="faint">budget</span>
       <span className="inline-block w-20 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg-sunk)" }} aria-hidden>
-        <span className="block h-full" style={{ width: `${Math.round(frac * 100)}%`, background: frac > 0.9 ? "var(--bad)" : frac > 0.7 ? "var(--warn)" : "var(--accent)" }} />
+        <span className="block h-full" style={{ width: `${Math.round(b.frac * 100)}%`, background: `var(--${b.tone})` }} />
       </span>
       <span className="mono">
-        {fmt(spent)} of {fmt(b.limit)}
+        {b.fmt(b.spent)} of {b.fmt(b.limit)}
         {b.kind === "tokens" ? " tokens" : ""}
       </span>
       {est && <span className="faint">≈ {money(model.costUsd)} at list price, not billed</span>}

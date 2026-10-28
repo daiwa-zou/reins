@@ -396,7 +396,18 @@ describe("Orchestrator", () => {
       },
       // build
       { content: [toolUse("b1", "write_file", { path: "hello.txt", content: "hello\n" }), toolUse("b2", "update_progress", { features: [{ ...features[0], status: "done" }], note: "built" })], stop_reason: "tool_use" },
-      { content: [toolUse("b3", "finish", { summary: "built", open_items: [] })], stop_reason: "tool_use" },
+      // The builder's self-check: a real criterion is checked off; an unknown id is refused with the known ids.
+      (params) => {
+        expect(params.tools.map((t: any) => t.name)).toContain("check_criterion");
+        return { content: [toolUse("b2a", "check_criterion", { id: "C1", pass: true, evidence: "cat hello.txt -> hello" }), toolUse("b2b", "check_criterion", { id: "C9", pass: true, evidence: "?" })], stop_reason: "tool_use" };
+      },
+      (params) => {
+        const results = params.messages[params.messages.length - 1].content;
+        expect(results[0].content).toContain("Recorded C1 as passing");
+        expect(results[1].is_error).toBe(true);
+        expect(results[1].content).toContain("No criterion C9");
+        return { content: [toolUse("b3", "finish", { summary: "built", open_items: [] })], stop_reason: "tool_use" };
+      },
       // evaluate
       (params) => {
         expect(params.messages[0].content).toContain("hello.txt contains hello");
@@ -428,6 +439,8 @@ describe("Orchestrator", () => {
     expect(execSync("git status --short", { cwd: ws, encoding: "utf8" }).trim()).toBe("");
     const evalEv = events.find((e): e is Extract<RunEvent, { type: "evaluation.result" }> => e.type === "evaluation.result")!;
     expect(evalEv.verdict).toBe("pass");
+    const checks = events.filter((e): e is Extract<RunEvent, { type: "criterion.checked" }> => e.type === "criterion.checked");
+    expect(checks).toEqual([expect.objectContaining({ role: "builder", id: "C1", pass: true, evidence: "cat hello.txt -> hello" })]);
     fs.rmSync(ws, { recursive: true, force: true });
   });
 

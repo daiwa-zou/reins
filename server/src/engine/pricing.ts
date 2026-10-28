@@ -1,8 +1,9 @@
 import { MODELS } from "../../../shared/components.js";
 import type { Usage } from "../../../shared/types.js";
 
+/** List price for a model id; a dated variant ("claude-opus-5-5-20260101") prices like its base model, anything unknown like the first (most expensive mainstream) entry. */
 export function costUsd(model: string, u: Usage): number {
-  const m = MODELS.find((x) => x.id === model) ?? MODELS[0];
+  const m = MODELS.find((x) => x.id === model) ?? MODELS.find((x) => model.startsWith(x.id + "-")) ?? MODELS[0];
   const writePerM = m.inputPerM * 1.25;
   return (
     (u.input * m.inputPerM + u.output * m.outputPerM + u.cacheRead * m.cacheReadPerM + u.cacheWrite * writePerM) /

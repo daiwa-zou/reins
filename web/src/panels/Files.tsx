@@ -1,36 +1,65 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { RunModel } from "../state/derive";
 import { Empty } from "../components/ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import type { ChangedFile } from "@shared/types";
 
+/** How long after the latest tool call the Changes view asks the server for the current file list and diff. */
+const REFRESH_DEBOUNCE_MS = 1500;
+
+/**
+ * Changed files and diffs against the commit the run started from. The event
+ * log carries the list at phase boundaries (files.changed); for a live run the
+ * server is asked again a moment after each tool call, since a call may have
+ * changed files. While rewinding, only the rewound model's list is shown.
+ */
 export function FilesPanel({ model }: { model: RunModel }) {
   const runId = useStore((s) => s.selectedRunId)!;
+  const scrubbing = useStore((s) => s.scrubSeq) !== null;
   const [files, setFiles] = useState<ChangedFile[]>(model.files);
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  // Only the newest diff request may set the diff; an older response arriving late is ignored.
+  const diffRequest = useRef(0);
   const isDemo = model.config?.engine === "replay";
+  const fetchLive = !isDemo && !scrubbing;
+  const calls = model.calls.length;
 
   useEffect(() => {
     setFiles(model.files);
   }, [model.files]);
+  useEffect(() => {
+    setSelected(null);
+    setDiff("");
+  }, [runId]);
 
   useEffect(() => {
-    if (isDemo) return;
-    api.files(runId).then((f) => f.length && setFiles(f)).catch(() => {});
-  }, [runId, model.lastSeq, isDemo]);
+    if (!fetchLive) return;
+    let live = true;
+    const t = setTimeout(() => api.files(runId).then((f) => live && setFiles(f)).catch(() => {}), calls ? REFRESH_DEBOUNCE_MS : 0);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [runId, calls, fetchLive]);
 
   useEffect(() => {
-    if (!selected || isDemo) return;
+    if (!selected || !fetchLive) return;
+    const id = ++diffRequest.current;
     setLoading(true);
-    api
-      .diff(runId, selected)
-      .then(setDiff)
-      .catch(() => setDiff(""))
-      .finally(() => setLoading(false));
-  }, [selected, runId, model.lastSeq, isDemo]);
+    const t = setTimeout(
+      () =>
+        api
+          .diff(runId, selected)
+          .then((d) => id === diffRequest.current && setDiff(d))
+          .catch(() => id === diffRequest.current && setDiff(""))
+          .finally(() => id === diffRequest.current && setLoading(false)),
+      calls ? REFRESH_DEBOUNCE_MS : 0,
+    );
+    return () => clearTimeout(t);
+  }, [selected, runId, calls, fetchLive]);
 
   if (!files.length) return <Empty title="No file changes yet" body="Files the agent creates, edits or deletes in the workspace appear here with their diffs. Notes under .reins/ are excluded." />;
 
@@ -64,6 +93,8 @@ export function FilesPanel({ model }: { model: RunModel }) {
           <Empty title="Select a file" body={`${files.length} files changed · +${files.reduce((a, f) => a + f.additions, 0)} −${files.reduce((a, f) => a + f.deletions, 0)}`} />
         ) : isDemo ? (
           <Empty title="Diffs are not available for the recorded demo" body="In a live run this shows the diff of the selected file against the commit the run started from, refreshed as the agent works." />
+        ) : scrubbing ? (
+          <Empty title="Diffs show the workspace as it is now" body="Go back to live to see the current diff of this file; the file list above is as it was at the rewound point." />
         ) : loading ? (
           <div className="muted">Loading diff…</div>
         ) : (

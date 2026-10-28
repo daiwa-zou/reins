@@ -19,12 +19,11 @@ const PARTS: { key: PartKey; label: string; color: string }[] = [
  * thresholds (clear, compact, reset). The point is to make the "attention
  * budget" visible at all times, not just when it runs out.
  */
-export function ContextGauge({ model, compact = false, role }: { model: RunModel; compact?: boolean; role?: RoleId }) {
+export function ContextGauge({ model, role }: { model: RunModel; role: RoleId }) {
   const cfg = model.config;
-  const roles = (Object.keys(model.latestSnapshot) as RoleId[]).filter((r) => !role || r === role);
-  if (!roles.length) return <div className="muted text-[12px]">No model calls yet.</div>;
-  const active = role ?? roles[roles.length - 1];
-  const snap = model.latestSnapshot[active]!;
+  const snap = model.latestSnapshot[role];
+  if (!snap) return <div className="muted text-[12px]">No model calls yet.</div>;
+  const active = role;
   const compactAt = cfg?.components.compaction ? cfg.context.compactAtTokens : null;
   const resetAt = cfg?.components.resetWithHandoff ? cfg.context.resetAtTokens : null;
   const ceiling = Math.max(snap.limit, 1);
@@ -50,28 +49,17 @@ export function ContextGauge({ model, compact = false, role }: { model: RunModel
         {compactAt && <Marker at={compactAt / ceiling} label={`compaction at ${tokens(compactAt)}`} color="var(--warn)" />}
         {resetAt && <Marker at={resetAt / ceiling} label={`reset at ${tokens(resetAt)}`} color="var(--bad)" />}
       </div>
-      {!compact && (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] muted">
-          {PARTS.map((p) => (
-            <span key={p.key} className="inline-flex items-center gap-1">
-              <span className="w-2 h-2 rounded-sm" style={{ background: p.color }} />
-              {p.label} <span className="mono">{tokens(snap.composition[p.key])}</span>
-            </span>
-          ))}
-          <span className="faint">composition is estimated; total is measured</span>
-        </div>
-      )}
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] muted">
+        {PARTS.map((p) => (
+          <span key={p.key} className="inline-flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm" style={{ background: p.color }} />
+            {p.label} <span className="mono">{tokens(snap.composition[p.key])}</span>
+          </span>
+        ))}
+        <span className="faint">composition is estimated; total is measured</span>
+      </div>
       {anxious && compactAt && (
         <div className="text-[11px] text-[var(--warn)]">Approaching the compaction threshold. Watch for the agent wrapping up early ("context anxiety").</div>
-      )}
-      {compact && roles.length > 1 && (
-        <div className="flex gap-2 text-[11px] muted">
-          {roles.map((r) => (
-            <span key={r}>
-              <span className={`role-${r} font-medium`}>{ROLE_LABEL[r]}</span> {tokens(model.latestSnapshot[r]!.promptTokens)}
-            </span>
-          ))}
-        </div>
       )}
     </div>
   );

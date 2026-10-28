@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import type { RunModel } from "../state/derive";
 import { useStore } from "../state/store";
 import { Meter } from "./ui";
-import { budgetOf, countedTokens } from "@shared/budget";
+import { budgetProgress } from "../state/budget";
 import { money, tokens } from "../lib/format";
 
 /**
@@ -11,20 +11,20 @@ import { money, tokens } from "../lib/format";
  * (features done, contract criteria passing) and budget. Phases live in the
  * stepper, the contract in its tab, changes in Changes and context in Details.
  */
-export function Overview({ model }: { model: RunModel; live: RunModel }) {
+export function Overview({ model }: { model: RunModel }) {
   const setOverviewOpen = useStore((s) => s.setOverviewOpen);
   const navigate = useStore((s) => s.navigate);
   const cfg = model.config;
   if (!cfg) return null;
   // Tokens on Claude Code (usage counts against the subscription), dollars on the direct engine.
-  const b = budgetOf(cfg);
-  const spent = b.kind === "tokens" ? countedTokens(model.usage) : model.costUsd;
-  const budget = b.limit;
-  const spentFrac = budget ? spent / budget : 0;
+  const b = budgetProgress(cfg, model);
   const fmt = (n: number) => (b.kind === "tokens" ? `${tokens(n)} tokens` : money(n));
   const done = model.features.filter((f) => f.status === "done").length;
   const latestEval = model.evaluations[model.evaluations.length - 1];
-  const passing = latestEval ? latestEval.results.filter((r) => r.pass).length : 0;
+  // Verified by the evaluator once a round is in; until then, what the builder has checked off itself.
+  const checked = Object.values(model.checks).filter((c) => c.pass).length;
+  const passing = latestEval ? latestEval.results.filter((r) => r.pass).length : checked;
+  const criteriaLabel = latestEval ? "Criteria verified" : checked ? "Criteria checked by the builder" : "Contract criteria";
 
   return (
     <aside aria-label="Overview" className="w-[264px] shrink-0 border-l line overflow-auto flex flex-col" style={{ background: "var(--bg-elev)" }}>
@@ -67,27 +67,39 @@ export function Overview({ model }: { model: RunModel; live: RunModel }) {
 
           <button type="button" className="w-full text-left mt-3 rounded-md hover:bg-[var(--bg-sunk)] -mx-1 px-1 py-0.5" onClick={() => navigate({ section: "runs", view: "contract" })} title="Open the Contract">
             <div className="flex items-baseline justify-between text-small mb-1">
-              <span>Contract criteria passing</span>
-              <span className="mono muted">{model.contract.length ? `${latestEval ? passing : "–"}/${model.contract.length}` : "–"}</span>
+              <span>{criteriaLabel}</span>
+              <span className="mono muted">{model.contract.length ? `${passing}/${model.contract.length}` : "–"}</span>
             </div>
-            <Meter value={passing} max={Math.max(1, model.contract.length)} tone={latestEval && passing < model.contract.length ? "warn" : "ok"} />
-            {!latestEval && <div className="faint text-small mt-1">{model.contract.length ? "Not evaluated yet." : "No contract yet."}</div>}
+            <Meter value={passing} max={Math.max(1, model.contract.length)} tone={latestEval ? (passing < model.contract.length ? "warn" : "ok") : "accent"} />
+            {!latestEval && <div className="faint text-small mt-1">{model.contract.length ? (checked ? "Builder's own checks; the evaluator has not verified yet." : "Not checked yet.") : "No contract yet."}</div>}
           </button>
         </section>
 
         <section aria-labelledby="ov-budget">
           <h2 id="ov-budget" className="section-label mb-2">
-            Budget
+            This run's budget
           </h2>
-          <div className="flex items-baseline justify-between text-small mb-1">
-            <span>{Math.round(spentFrac * 100)}% used</span>
-            <span className="muted">
-              cap <span className="mono">{fmt(budget)}</span>
-            </span>
-          </div>
-          <Meter value={spent} max={budget} tone={spentFrac > 0.9 ? "bad" : spentFrac > 0.7 ? "warn" : "accent"} />
+          {b.recorded ? (
+            <>
+              <div className="flex items-baseline justify-between text-small mb-1">
+                <span>{Math.round(b.frac * 100)}% used</span>
+                <span className="muted">
+                  cap <span className="mono">{fmt(b.limit)}</span>
+                </span>
+              </div>
+              <Meter value={b.spent} max={b.limit} tone={b.tone} />
+            </>
+          ) : (
+            <div className="text-small">
+              <span className="mono">{fmt(b.spent)}</span> spent <span className="faint">· no cap recorded (the run predates the token budget)</span>
+            </div>
+          )}
           <div className="muted text-small mt-1.5">
-            <span className="mono">{fmt(Math.max(0, budget - spent))}</span> left before the run stops
+            {b.recorded && (
+              <>
+                <span className="mono">{fmt(Math.max(0, b.limit - b.spent))}</span> left before the run stops
+              </>
+            )}
             {b.kind === "tokens" && (
               <span className="faint">
                 {" "}

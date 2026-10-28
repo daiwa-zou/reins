@@ -22,11 +22,11 @@ function isTextEntry(t: EventTarget | null): boolean {
   if (!el || !el.tagName) return false;
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable;
 }
-/** Space and Enter activate a focused control, so they are left to it. */
+/** Space and Enter activate a focused control (a button, a link, a disclosure's summary), so they are left to it. */
 function isControl(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null;
   if (!el || !el.tagName) return false;
-  return el.tagName === "BUTTON" || el.tagName === "A" || !!el.closest?.("[role=button],[role=tab],[role=switch],[role=menuitem],[role=menuitemradio]");
+  return el.tagName === "BUTTON" || el.tagName === "A" || el.tagName === "SUMMARY" || !!el.closest?.("[role=button],[role=tab],[role=switch],[role=menuitem],[role=menuitemradio]");
 }
 
 export function App() {
@@ -82,10 +82,11 @@ export function App() {
         case "help":
           return openModal("help");
         case "close":
-          return;
+          return; // dialogs and menus close themselves on Escape; the entry is here so Help lists it
         case "pauseResume": {
           if (isControl(e.target)) return;
-          if (!s.selectedRunId || !isLive(liveModel.status)) return;
+          // Only the run you are looking at: a run stays selected while another section is open.
+          if (s.section !== "runs" || !s.selectedRunId || !isLive(liveModel.status)) return;
           e.preventDefault();
           const action = liveModel.status === "paused" ? api.resume : api.pause;
           action(s.selectedRunId).catch((err) => toastMsg(err.message, "error"));

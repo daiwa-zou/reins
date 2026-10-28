@@ -3,12 +3,11 @@ import fs from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
-import type { ApprovalRequest, ContractCriterion, RunConfig, RunEvent, RunSummary } from "../../../shared/types.js";
+import type { ApprovalDecision, ApprovalRequest, ContractCriterion, PublishDraft, RunConfig, RunEvent, RunSummary } from "../../../shared/types.js";
 import { defaultRunConfig } from "../../../shared/components.js";
 import { RunBus } from "./bus.js";
 import { Orchestrator, type OrchestratorControl } from "./orchestrator.js";
-import { listRunIds, loadConfig, readEvents, saveConfig, summarize, deleteRun as deleteRunDir } from "../store/runStore.js";
-import { REINS_HOME } from "../store/runStore.js";
+import { listRunIds, loadConfig, readEvents, REINS_HOME, saveConfig, summarize, deleteRun as deleteRunDir } from "../store/runStore.js";
 import { startReplay } from "./replay.js";
 import { execFileSync } from "node:child_process";
 import { budgetOf } from "../../../shared/budget.js";
@@ -17,9 +16,20 @@ import { resolveRunInput } from "../presets.js";
 /** Events that change a run's summary row (phase, round, cost), so the run list is pushed again. */
 const SUMMARY_EVENTS = new Set<RunEvent["type"]>(["phase.started", "phase.finished", "turn.finished", "run.summary"]);
 
+/** What the person answered on an approval card. `approved` is `decision === "approve"`; the extras depend on the card's kind. */
+interface ApprovalAnswer {
+  decision: ApprovalDecision;
+  approved: boolean;
+  note?: string;
+  /** Contract cards: the criteria as edited. */
+  criteria?: ContractCriterion[];
+  /** Publish cards: the title and body as edited. */
+  draft?: PublishDraft;
+}
+
 interface PendingApproval {
   request: ApprovalRequest;
-  resolve: (r: { approved: boolean; note?: string; criteria?: ContractCriterion[] }) => void;
+  resolve: (r: ApprovalAnswer) => void;
 }
 
 interface ActiveRun {
@@ -160,44 +170,62 @@ export class RunManager extends EventEmitter {
     this.notifyRuns();
   }
 
-  private control(run: ActiveRun): OrchestratorControl {
-    const ask = (request: Omit<ApprovalRequest, "approvalId">) =>
-      new Promise<{ approved: boolean; note?: string; criteria?: ContractCriterion[] }>((resolve) => {
-        if (run.abort.signal.aborted) return resolve({ approved: false, note: "cancelled" });
-        const approvalId = nanoid(8);
-        const full = { ...request, approvalId };
-        run.pending.set(approvalId, { request: full, resolve });
-        run.bus.emitEvent({ type: "approval.requested", request: full });
-        this.status(run, "waiting_approval");
-        const onAbort = () => resolve({ approved: false, note: "cancelled" });
-        run.abort.signal.addEventListener("abort", onAbort, { once: true });
+  /** Resolves when the run is not paused. */
+  private waitIfPaused(run: ActiveRun): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (!run.paused) return resolve();
+      run.pauseWaiters.push(resolve);
+    });
+  }
+
+  /**
+   * Put an approval card on the Stage and wait for the answer. A cancel
+   * resolves it as rejected; afterwards the run shows running again (or paused,
+   * when it was paused while waiting).
+   */
+  private async ask(run: ActiveRun, request: Omit<ApprovalRequest, "approvalId">): Promise<ApprovalAnswer> {
+    const cancelled: ApprovalAnswer = { decision: "reject", approved: false, note: "cancelled" };
+    const r = await new Promise<ApprovalAnswer>((resolve) => {
+      if (run.abort.signal.aborted) return resolve(cancelled);
+      const approvalId = nanoid(8);
+      const full = { ...request, approvalId };
+      const onAbort = () => resolve(cancelled);
+      run.pending.set(approvalId, {
+        request: full,
+        resolve: (answer) => {
+          run.abort.signal.removeEventListener("abort", onAbort);
+          resolve(answer);
+        },
       });
+      run.bus.emitEvent({ type: "approval.requested", request: full });
+      this.status(run, "waiting_approval");
+      run.abort.signal.addEventListener("abort", onAbort, { once: true });
+    });
+    if (!run.abort.signal.aborted) this.status(run, run.paused ? "paused" : "running");
+    return r;
+  }
+
+  private control(run: ActiveRun): OrchestratorControl {
     return {
       signal: run.abort.signal,
-      waitIfPaused: () =>
-        new Promise<void>((resolve) => {
-          if (!run.paused) return resolve();
-          run.pauseWaiters.push(resolve);
-        }),
+      waitIfPaused: () => this.waitIfPaused(run),
       drainSteer: () => run.steer.splice(0),
       remainingBudget: () => {
         const b = budgetOf(run.config);
         return b.kind === "tokens" ? b.limit - run.tokens() : b.limit - run.costUsd();
       },
-      requestApproval: async (_kind, title, detail, payload) => {
-        const r = await ask({ kind: "action", title, detail, payload });
-        if (!run.abort.signal.aborted) this.status(run, "running");
-        return r;
-      },
-      requestPhaseApproval: async (title, detail, payload) => {
-        const r = await ask({ kind: "phase", title, detail, payload });
-        if (!run.abort.signal.aborted) this.status(run, "running");
-        return r;
-      },
-      requestContractApproval: async (criteria) => {
-        const r = await ask({ kind: "contract", title: "Approve the definition of done", detail: "Edit, remove or add criteria, then approve. The evaluator will hold the builder to exactly this list.", payload: criteria });
-        if (!run.abort.signal.aborted) this.status(run, "running");
-        return r;
+      requestApproval: (_kind, title, detail, payload) => this.ask(run, { kind: "action", title, detail, payload }),
+      requestPhaseApproval: (title, detail, payload) => this.ask(run, { kind: "phase", title, detail, payload }),
+      requestContractApproval: (criteria) => this.ask(run, { kind: "contract", title: "Approve the definition of done", detail: "Edit, remove or add criteria, then approve. The evaluator will hold the builder to exactly this list.", payload: criteria }),
+      requestPublishApproval: async (draft, detail) => {
+        const what = detail.package ? `${detail.package.id}: ${detail.package.title}` : "this package";
+        const a = await this.ask(run, {
+          kind: "publish",
+          title: `Review the pull request for ${what}`,
+          detail: `Edit the title and description, then approve to push ${detail.branch} and open the pull request onto ${detail.base}. Or write what should change and request changes: the builder redrafts and this card comes back. Reject leaves the branch local and ends the run.`,
+          payload: { ...draft, branch: detail.branch, base: detail.base, revision: detail.revision, ...(detail.package ? { package: detail.package } : {}) },
+        });
+        return { decision: a.decision, note: a.note, draft: a.draft };
       },
     };
   }
@@ -236,22 +264,9 @@ export class RunManager extends EventEmitter {
     try {
       await startReplay(run.bus, run.config, {
         signal: run.abort.signal,
-        waitIfPaused: () =>
-          new Promise<void>((resolve) => {
-            if (!run.paused) return resolve();
-            run.pauseWaiters.push(resolve);
-          }),
+        waitIfPaused: () => this.waitIfPaused(run),
         drainSteer: () => run.steer.splice(0),
-        ask: (request) =>
-          new Promise((resolve) => {
-            if (run.abort.signal.aborted) return resolve({ approved: false });
-            const approvalId = nanoid(8);
-            run.pending.set(approvalId, { request: { ...request, approvalId }, resolve });
-            run.bus.emitEvent({ type: "approval.requested", request: { ...request, approvalId } });
-            this.status(run, "waiting_approval");
-            run.abort.signal.addEventListener("abort", () => resolve({ approved: false }), { once: true });
-          }),
-        resumed: () => this.status(run, "running"),
+        ask: (request) => this.ask(run, request),
       });
       this.status(run, run.abort.signal.aborted ? "cancelled" : "completed", "Replay finished.");
     } finally {
@@ -259,40 +274,45 @@ export class RunManager extends EventEmitter {
     }
   }
 
-  approve(runId: string, approvalId: string, decision: "approve" | "reject", note?: string, criteria?: ContractCriterion[]) {
+  /** The live run, or an error that says why there is none. */
+  private live(runId: string): ActiveRun {
+    const run = this.active.get(runId);
+    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
+    return run;
+  }
+
+  /** Answer a pending card. `revise` only means something on a publish card; elsewhere it counts as a rejection. */
+  approve(runId: string, approvalId: string, decision: ApprovalDecision, note?: string, extra: { criteria?: ContractCriterion[]; draft?: PublishDraft } = {}) {
     const run = this.active.get(runId);
     const p = run?.pending.get(approvalId);
     if (!run || !p) throw new Error("That approval is no longer pending: it was already decided, the run finished, or the server restarted. Reload to see the current state.");
+    if (decision === "revise" && p.request.kind !== "publish") throw new Error("Only a pull request draft can be sent back for changes.");
     run.pending.delete(approvalId);
     run.bus.emitEvent({ type: "approval.resolved", approvalId, decision, note });
-    p.resolve({ approved: decision === "approve", note, criteria });
+    p.resolve({ decision, approved: decision === "approve", note, criteria: extra.criteria, draft: extra.draft });
   }
 
   steer(runId: string, text: string) {
-    const run = this.active.get(runId);
-    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
+    const run = this.live(runId);
     run.steer.push(text);
     run.bus.emitEvent({ type: "steer.received", text, deliveredTo: "next" });
   }
 
   pause(runId: string) {
-    const run = this.active.get(runId);
-    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
+    const run = this.live(runId);
     run.paused = true;
     this.status(run, "paused");
   }
 
   resume(runId: string) {
-    const run = this.active.get(runId);
-    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
+    const run = this.live(runId);
     run.paused = false;
     run.pauseWaiters.splice(0).forEach((w) => w());
     this.status(run, run.pending.size ? "waiting_approval" : "running");
   }
 
   cancel(runId: string) {
-    const run = this.active.get(runId);
-    if (!run) throw new Error(`Run ${runId} is not running (it finished, was stopped, or the server restarted). Use Run again to start a new one.`);
+    const run = this.live(runId);
     run.abort.abort();
     run.paused = false;
     run.pauseWaiters.splice(0).forEach((w) => w());

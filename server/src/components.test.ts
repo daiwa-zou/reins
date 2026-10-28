@@ -34,7 +34,8 @@ describe("tiers and the Effort / Supervision tables", () => {
     expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeMerge: false });
     // Ask before publishing: unattended until a package is ready to go out, then one prompt.
     expect(SUPERVISION_TABLE["ask-to-publish"].pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeMerge: false });
-    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: false, beforeMerge: true });
+    // Check in at gates reviews each pull request draft before it is opened, and asks again before the merge.
+    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: true, beforeMerge: true });
     expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeMerge: true });
     expect(PAUSE_KEYS).toEqual(["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforePublish", "beforeMerge"]);
     expect(PAUSE_GATE.beforePublish).toBe("publish");

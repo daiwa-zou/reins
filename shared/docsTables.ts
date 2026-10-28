@@ -2,10 +2,9 @@
 // docs:tables script writes them into docs/configuring.md between markers, and
 // server/src/docs.test.ts fails when a block differs from its renderer.
 import { COMPONENTS, EFFORT_COMPONENTS, EFFORT_LEVELS, EFFORT_TABLE, PAUSE_KEYS, SUPERVISION_LEVELS, SUPERVISION_TABLE, TIER_LABEL } from "./components.js";
+import { ENGINE_LABEL } from "./config.js";
 
-const ENGINE_NAME = { anthropic: "Direct API", "claude-code": "Claude Code" } as const;
 const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
-const label = (id: string) => COMPONENTS.find((c) => c.id === id)?.label ?? id;
 
 export function renderEffortTable(): string {
   const head = `| | ${EFFORT_LEVELS.map((e) => EFFORT_TABLE[e].label.toLowerCase()).join(" | ")} |`;
@@ -27,7 +26,7 @@ export function renderSupervisionTable(): string {
 export function renderComponentsTable(): string {
   const rows = COMPONENTS.map((c) => {
     const req = (c.requires ?? []).map((r) => `\`${r.id}\` (${cell(r.reason)})`).join("; ") || "–";
-    return `| \`${c.id}\` | ${cell(c.label)} | ${TIER_LABEL[c.tier]} | ${cell(c.short)} | ${cell(c.whenOff)} | ${c.engines.map((e) => ENGINE_NAME[e]).join(", ")} | ${req} | ${c.defaultOn ? "on" : "off"} |`;
+    return `| \`${c.id}\` | ${cell(c.label)} | ${TIER_LABEL[c.tier]} | ${cell(c.short)} | ${cell(c.whenOff)} | ${c.engines.map((e) => ENGINE_LABEL[e]).join(", ")} | ${req} | ${c.defaultOn ? "on" : "off"} |`;
   });
   return ["| id | Component | Tier | What it does | When off | Engines | Requires | Default |", "|---|---|---|---|---|---|---|---|", ...rows].join("\n");
 }

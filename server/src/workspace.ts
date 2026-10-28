@@ -36,8 +36,9 @@ export async function headSha(cwd: string): Promise<string | null> {
 export async function changedFiles(cwd: string, base: string | null): Promise<ChangedFile[]> {
   if (!(await isGitRepo(cwd))) return [];
   const out: ChangedFile[] = [];
-  const numstat = base ? await git(cwd, ["diff", "--numstat", "-M", base]) : await git(cwd, ["diff", "--numstat", "-M"]);
-  const status = base ? await git(cwd, ["diff", "--name-status", "-M", base]) : await git(cwd, ["diff", "--name-status", "-M"]);
+  const since = base ? [base] : [];
+  const numstat = await git(cwd, ["diff", "--numstat", "-M", ...since]);
+  const status = await git(cwd, ["diff", "--name-status", "-M", ...since]);
   const kinds = new Map<string, ChangedFile["kind"]>();
   for (const line of status.split("\n")) {
     const [s, a, b] = line.split("\t");

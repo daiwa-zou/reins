@@ -7,8 +7,8 @@
 // that domain, oldest first (then by slug), so a newer lesson wins a conflict.
 import type { ComponentId, Composition, EngineId, GuardrailMode, HarnessEffort, Lesson, Phase, Preset, PresetBasis, PresetCompatibility, PresetConfig, RunConfig, Supervision, UserDomain } from "./types.js";
 import { lessonInDomain, namedDomains, stageLessonsFor } from "./implications.js";
-import { domainEffects, tagUserDomains } from "./domains.js";
-import { cleanGuidance, COMPONENTS, DEFAULT_COMPOSITION, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, type EffortComponentId, GUIDANCE_MAX_LINES, isEffort, isSupervision, PAUSE_GATE, PAUSE_KEYS, type PauseKey, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "./components.js";
+import { DOMAIN_ID, domainEffects, tagUserDomains } from "./domains.js";
+import { cleanGuidance, componentLabel as label, COMPONENTS, DEFAULT_COMPOSITION, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, type EffortComponentId, GUIDANCE_MAX_LINES, isEffort, isSupervision, PAUSE_GATE, PAUSE_KEYS, type PauseKey, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "./components.js";
 import { ENGINE_LABEL, sanitizePresetName } from "./config.js";
 
 export interface PresetRecipe {
@@ -67,8 +67,7 @@ export const PRESET_RECIPES: PresetRecipe[] = [
 ];
 
 const DIRECT_ONLY = (engine: EngineId) => COMPONENTS.filter((c) => !c.engines.includes(engine)).map((c) => c.id);
-const label = (id: ComponentId) => COMPONENTS.find((c) => c.id === id)?.label ?? id;
-const isDomain = (d: string) => /^[a-z0-9][a-z0-9-]{0,39}$/.test(d);
+const isDomain = (d: string) => DOMAIN_ID.test(d);
 
 /** Components a preset leaves on, with defaults for the ones it does not name. */
 function onComponents(cfg: PresetConfig): ComponentId[] {

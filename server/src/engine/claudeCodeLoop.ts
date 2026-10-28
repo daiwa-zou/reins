@@ -1,4 +1,4 @@
-import { createSdkMcpServer, query, tool, type CanUseTool, type HookCallback, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool, type CanUseTool, type HookCallback, type McpServerConfig, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { RoleId, RunConfig, Usage } from "../../../shared/types.js";
 import { CONTEXT_LIMIT_TOKENS } from "../../../shared/components.js";
@@ -11,7 +11,26 @@ import { classifyBash, confinePath, mentionsOutsidePaths } from "../guardrails/p
 import { sniffInjection } from "../guardrails/classifier.js";
 import { TURNS_REMAINING_NUDGE_AT, forcedCallNote, forcedTerminalMessage, turnsRemainingNote, turnsRemainingNudge } from "./turnBudget.js";
 import { budgetExhaustedMessage, budgetOf, countedTokens } from "../../../shared/budget.js";
+import { roleSettings } from "../../../shared/config.js";
 import path from "node:path";
+
+/**
+ * Reins tools Claude Code has a built-in for (Read, Write, Edit, Glob, Grep,
+ * Bash, WebFetch): never exposed on the MCP server. Every other tool in the
+ * registry that a phase asks for is, so a new structured tool needs no list here.
+ */
+const BUILTIN_EQUIVALENTS = new Set(["read_file", "write_file", "edit_file", "list_files", "search", "bash", "git_status", "git_diff", "git_commit", "http_fetch"]);
+
+/** The Reins tool names the MCP server can offer (the structured end-of-phase tools, think, lessons and skills). */
+export const MCP_TOOL_NAMES = Object.keys(ALL_TOOLS).filter((n) => !BUILTIN_EQUIVALENTS.has(n) && n !== "delegate_scout"); // scouts need the direct API client
+
+/** The agent subprocess environment: credentials scrubbed, plus what the SDK needs to find the Claude Code login. The API key is deliberately not passed: the SDK's Bash tool inherits this env. */
+function sdkEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(scrubbedEnv())) if (v !== undefined) env[k] = v;
+  for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
+  return env;
+}
 
 /**
  * The same role loop, driven by the Claude Agent SDK (Claude Code's own
@@ -28,6 +47,8 @@ export class ClaudeCodeLoop {
   private terminal: { name: string; input: any } | null = null;
   /** The API response currently being streamed (several SDK messages share one message.id). */
   private open: { id: string; usage: Usage; model: string; stopReason: string } | null = null;
+  /** The prompt size of the last API response (see LoopResult.promptTokens). */
+  private lastPrompt = 0;
   /** tool_use ids of Reins MCP calls seen in assistant blocks, by tool name, consumed by the handler. */
   private mcpIds = new Map<string, string[]>();
   private pending = new Map<string, { name: string; input: unknown; started: number; gated?: boolean }>();
@@ -38,15 +59,22 @@ export class ClaudeCodeLoop {
   private nudgedTurn = 0;
   /** How often the Stop hook has sent the model back to call its terminal tool (at most twice, as in the direct engine). */
   private stopNudges = 0;
+  /** Aborts the query in flight (the SDK subprocess), on the run's abort or when the harness stops the phase itself. */
+  private queryAbort: AbortController | null = null;
+  /** Set when the harness ends the phase on its own (repeated denials); the phase then fails with this message instead of an engine error. */
+  private stopped: string | null = null;
 
-  /** Deny-and-continue with escalation, as in the direct engine: 3 in a row or 20 total pause for a human. */
+  /** Deny-and-continue with escalation, as in the direct engine: 3 in a row or 20 total pause for a human; a rejection stops the phase. */
   private async noteDenial(): Promise<void> {
     this.denials.consecutive++;
     this.denials.total++;
     if (this.denials.consecutive === 3 || this.denials.total === 20) {
       this.bus.emitEvent({ type: "note", level: "warn", text: `${this.denials.consecutive} denials in a row (${this.denials.total} total) for the ${this.opts.role}; pausing for you.` });
-      const { approved } = await this.control.requestApproval("action", "The agent keeps hitting denials. Continue?", `The ${this.opts.role} has had ${this.denials.consecutive} actions denied in a row (${this.denials.total} in this phase). Approve to let it keep trying, reject to stop the phase.`, { denials: this.denials });
-      if (!approved) this.control.signal.dispatchEvent(new Event("abort"));
+      const { approved, note } = await this.control.requestApproval("action", "The agent keeps hitting denials. Continue?", `The ${this.opts.role} has had ${this.denials.consecutive} actions denied in a row (${this.denials.total} in this phase). Approve to let it keep trying, reject to stop the phase.`, { denials: this.denials });
+      if (!approved) {
+        this.stopped = `Stopped after repeated denials${note ? `: ${note}` : "."}`;
+        this.queryAbort?.abort();
+      }
       this.denials.consecutive = 0;
     }
   }
@@ -68,16 +96,13 @@ export class ClaudeCodeLoop {
   private mcpServer(only?: string[]) {
     const role = this.opts.role;
     const defs = [];
-    const structured = ["propose_contract", "review_contract", "report_evaluation", "finish", "update_progress", "think", "list_lessons", "read_lesson", "read_skill", "delegate_scout", "propose_lesson"];
-    for (const name of structured) {
+    for (const name of MCP_TOOL_NAMES) {
       // Terminal tools arrive in opts.terminal, not opts.tools; both must be exposed.
       if (!this.opts.tools.includes(name) && !this.opts.terminal.includes(name)) continue;
       if (only && !only.includes(name)) continue;
       const def = ALL_TOOLS[name];
-      if (!def) continue;
       if (name === "think" && !this.config.components.thinkTool) continue;
       if (name === "read_skill" && !this.config.components.skills) continue;
-      if (name === "delegate_scout") continue; // scouts need the direct API client
       const schema = def.schema as any;
       defs.push(
         tool(
@@ -99,6 +124,7 @@ export class ClaudeCodeLoop {
                 signal: this.control.signal,
                 handlers: this.opts.handlers,
               });
+              this.opts.onToolResult?.({ name, input, output: out, ok: true });
               this.bus.emitEvent({ type: "tool.result", role, toolUseId: id, name, ok: true, output: out, truncated: false, durationMs: Date.now() - started });
               const isTerminal = this.opts.terminal.includes(name);
               if (isTerminal && !this.terminal) this.terminal = { name, input };
@@ -115,6 +141,22 @@ export class ClaudeCodeLoop {
     // alwaysLoad: the SDK defers MCP tools behind tool search by default; the
     // structured end-of-phase tools must always be in the prompt.
     return createSdkMcpServer({ name: "reins", version: "0.2.0", tools: defs, alwaysLoad: true });
+  }
+
+  /** The MCP servers this conversation attaches beyond Reins' own (an intake job reading a source), in the SDK's config shape. */
+  private attachedServers(): Record<string, McpServerConfig> {
+    const out: Record<string, McpServerConfig> = {};
+    for (const [name, spec] of Object.entries(this.opts.extraMcpServers ?? {})) {
+      // alwaysLoad: the librarian must see the source's tools in its first prompt, not behind tool search.
+      if (spec.url) out[name] = { type: "http", url: spec.url, headers: spec.headers, alwaysLoad: true };
+      else if (spec.command) out[name] = { type: "stdio", command: spec.command, args: spec.args ?? [], env: spec.env, alwaysLoad: true };
+    }
+    return out;
+  }
+
+  private attachedServersNote(): string {
+    const names = Object.keys(this.opts.extraMcpServers ?? {});
+    return names.length ? `\n\nThe source's own tools are attached as ${names.map((n) => `mcp__${n}__*`).join(", ")}; read the source through them.` : "";
   }
 
   /** Find the tool.called id for this permission request (same name, same input, not yet gated). */
@@ -223,18 +265,10 @@ export class ClaudeCodeLoop {
 
   async run(firstUserMessage?: string): Promise<LoopResult> {
     const role = this.opts.role;
-    const s = this.config.roles[role as "planner"] ?? this.config.roles.planner;
+    const s = roleSettings(this.config, role);
     const steer = this.control.drainSteer();
     const prompt = [firstUserMessage ?? "Continue.", ...steer.map((n) => `Operator note: ${n}`)].join("\n\n");
     for (const n of steer) this.bus.emitEvent({ type: "steer.delivered", text: n, role });
-
-    // The subprocess gets a scrubbed environment plus what the SDK itself needs to authenticate.
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(scrubbedEnv())) if (v !== undefined) env[k] = v;
-    // The Claude Code login (CLAUDE_CONFIG_DIR) is the credential here. The API
-    // key is deliberately NOT passed: the SDK's Bash tool inherits this env, so
-    // the agent could read it.
-    for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
 
     const canWrite = this.opts.tools.includes("write_file");
     const canShell = this.opts.tools.includes("bash");
@@ -252,7 +286,8 @@ export class ClaudeCodeLoop {
       systemPrompt:
         this.opts.system +
         (canWrite ? "" : "\n\nYou may read" + (canShell ? " and run commands" : "") + " but must not create or edit files in this phase.") +
-        "\n\nThe Reins tools (propose_breakdown, propose_contract, review_contract, propose_tests, report_evaluation, finish, update_progress, think, read_skill, lessons) are available as mcp__reins__* tools and are always loaded; call them directly." +
+        "\n\nThe Reins tools (propose_breakdown, propose_contract, review_contract, propose_tests, report_evaluation, propose_pr, finish, update_progress, check_criterion, think, read_skill, lessons) are available as mcp__reins__* tools and are always loaded; call them directly." +
+        this.attachedServersNote() +
         "\n\nShell commands run in the user's login shell, where cat, mv, cp and rm may be aliased to interactive or colourising variants that hang or garble output without a tty. Use the Read, Write and Edit tools for files, and in shell commands write \\cat, \\mv, \\cp, \\rm (or /bin/ paths) to bypass aliases. Never run interactive commands.",
       // Restrict the built-in tool set with `tools`, and keep allowedTools empty so
       // every call (built-in and mcp__reins__*) falls through to canUseTool.
@@ -261,7 +296,7 @@ export class ClaudeCodeLoop {
       disallowedTools: canWrite ? [] : ["Edit", "Write", "MultiEdit", "NotebookEdit"],
       permissionMode: "default",
       canUseTool: this.canUseTool,
-      mcpServers: { reins: this.mcpServer() },
+      mcpServers: { reins: this.mcpServer(), ...this.attachedServers() },
       hooks: this.opts.terminal.length ? { PostToolBatch: [{ hooks: [this.turnBudgetHook] }], Stop: [{ hooks: [this.stopHook] }] } : undefined,
       // Only Reins' own server: the user's MCP servers, connectors and hooks stay out of the harness.
       settingSources: [],
@@ -269,13 +304,11 @@ export class ClaudeCodeLoop {
       ...(this.config.components.osSandbox
         ? { sandbox: { enabled: true, autoAllowBashIfSandboxed: false, ...(this.config.guardrail.allowNetwork ? {} : { network: { allowedDomains: [], strictAllowlist: true } }) } }
         : {}),
-      env,
-      abortController: new AbortController(),
+      env: sdkEnv(),
+      abortController: this.armAbort(),
       resume: this.sessionId,
       includePartialMessages: false,
     };
-    const onAbort = () => options.abortController?.abort();
-    this.control.signal.addEventListener("abort", onAbort, { once: true });
 
     let finalText = "";
     let reason: LoopResult["reason"] = "end_turn";
@@ -283,10 +316,7 @@ export class ClaudeCodeLoop {
       await this.control.waitIfPaused();
       const q = query({ prompt, options });
       for await (const msg of q as AsyncIterable<SDKMessage>) {
-        if (this.control.signal.aborted) {
-          reason = "aborted";
-          break;
-        }
+        if (this.control.signal.aborted || this.stopped) break;
         await this.control.waitIfPaused();
         this.handle(msg, (t) => (finalText = t));
         if (msg.type === "result") {
@@ -305,14 +335,18 @@ export class ClaudeCodeLoop {
         }
       }
     } catch (err) {
-      if (this.control.signal.aborted) reason = "aborted";
-      else {
+      if (!this.control.signal.aborted && !this.stopped) {
         reason = "error";
         this.bus.emitEvent({ type: "error", message: `Claude Code engine failed: ${(err as Error).message}`, recoverable: false, detail: (err as Error).stack });
       }
     } finally {
       this.closeTurn();
-      this.control.signal.removeEventListener("abort", onAbort);
+      this.disarmAbort();
+    }
+    if (this.control.signal.aborted) reason = "aborted";
+    else if (this.stopped) {
+      reason = "error";
+      this.bus.emitEvent({ type: "error", message: this.stopped, recoverable: false });
     }
     let forced = false;
     if (!this.terminal && (reason === "max_turns" || reason === "end_turn") && this.opts.terminal.length && this.sessionId && !this.control.signal.aborted) {
@@ -320,7 +354,23 @@ export class ClaudeCodeLoop {
       forced = Boolean(this.terminal);
     }
     if (this.terminal) reason = "terminal";
-    return { reason, terminalTool: this.terminal?.name, terminalInput: this.terminal?.input, ...(forced ? { forced } : {}), messages: [], usage: this.usage, costUsd: this.cost, turns: this.turn, finalText };
+    return { reason, terminalTool: this.terminal?.name, terminalInput: this.terminal?.input, ...(forced ? { forced } : {}), messages: [], usage: this.usage, costUsd: this.cost, turns: this.turn, finalText, promptTokens: this.lastPrompt };
+  }
+
+  /** A fresh controller for one query, aborted when the run is cancelled. */
+  private armAbort(): AbortController {
+    this.disarmAbort();
+    const ac = new AbortController();
+    this.queryAbort = ac;
+    this.control.signal.addEventListener("abort", this.onRunAbort, { once: true });
+    return ac;
+  }
+
+  private onRunAbort = () => this.queryAbort?.abort();
+
+  private disarmAbort() {
+    this.control.signal.removeEventListener("abort", this.onRunAbort);
+    this.queryAbort = null;
   }
 
   /**
@@ -340,10 +390,8 @@ export class ClaudeCodeLoop {
       disallowedTools: [],
       hooks: undefined,
       mcpServers: { reins: this.mcpServer(this.opts.terminal) },
-      abortController: new AbortController(),
+      abortController: this.armAbort(),
     };
-    const onAbort = () => options.abortController?.abort();
-    this.control.signal.addEventListener("abort", onAbort, { once: true });
     let text: string | undefined;
     try {
       for await (const msg of query({ prompt: forcedTerminalMessage(this.opts.maxTurns, this.opts.terminal), options }) as AsyncIterable<SDKMessage>) {
@@ -355,7 +403,7 @@ export class ClaudeCodeLoop {
       if (!this.control.signal.aborted) this.bus.emitEvent({ type: "note", level: "warn", text: `The forced ${this.opts.terminal.join(" or ")} call failed (${(err as Error).message.slice(0, 200)}); the phase ends without a report.` });
     } finally {
       this.closeTurn();
-      this.control.signal.removeEventListener("abort", onAbort);
+      this.disarmAbort();
     }
     return text;
   }
@@ -371,11 +419,13 @@ export class ClaudeCodeLoop {
     this.cost += turnCost;
     this.bus.emitEvent({ type: "turn.finished", role, turn: this.turn, usage: o.usage, costUsd: turnCost, stopReason: o.stopReason, model: o.model });
     const prompt = o.usage.input + o.usage.cacheRead + o.usage.cacheWrite;
-    if (prompt > 0)
+    if (prompt > 0) {
+      this.lastPrompt = prompt;
       this.bus.emitEvent({
         type: "context.snapshot",
         snapshot: { role, promptTokens: prompt, limit: CONTEXT_LIMIT_TOKENS, composition: this.composition(prompt), turn: this.turn },
       });
+    }
   }
 
   /** Apportion the measured prompt over what this session has actually seen (system prompt, tool schemas, text, results, thinking). */
@@ -408,7 +458,7 @@ export class ClaudeCodeLoop {
         if (!this.open || this.open.id !== id) {
           this.closeTurn();
           this.turn++;
-          this.open = { id, usage: emptyUsage(), model: m?.model ?? (this.config.roles[role as "planner"] ?? this.config.roles.planner).model, stopReason: "" };
+          this.open = { id, usage: emptyUsage(), model: m?.model ?? roleSettings(this.config, role).model, stopReason: "" };
           this.bus.emitEvent({ type: "turn.started", role, turn: this.turn });
         }
         const u = m?.usage ?? {};
@@ -447,6 +497,8 @@ export class ClaudeCodeLoop {
           if (!p) continue;
           this.pending.delete(b.tool_use_id);
           const raw = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((x: any) => (x.type === "text" ? x.text : `[${x.type}]`)).join("\n") : "";
+          // The in-process Reins server reports its own results; everything else (built-ins, attached MCP servers) is seen only here.
+          if (!p.name.startsWith("mcp__reins__")) this.opts.onToolResult?.({ name: p.name, input: p.input, output: raw, ok: !b.is_error });
           const sniff = sniffInjection(raw);
           if (sniff) this.bus.emitEvent({ type: "note", level: "warn", text: `Tool output from ${p.name} contains instruction-shaped text (${sniff}). The SDK has already handed it to the model; it is flagged here so you can read that call with care.` });
           const text = truncate(raw).text;
@@ -477,15 +529,12 @@ export class ClaudeCodeLoop {
  */
 export async function classifyViaClaudeCode(config: RunConfig, command: string, ruleHint: string, signal: AbortSignal): Promise<{ verdict: "allow" | "ask" | "deny"; rationale: string }> {
   const prompt = `You are the action classifier inside an agent harness. An autonomous coding agent is working on this task:\n\n${config.task}\n\nIt wants to run this shell command inside the project workspace ${config.workspace}:\n\n${command.slice(0, 3000)}\n\nA rule flagged it: ${ruleHint}\n\nDecide whether a reasonable developer who gave that task would consent to this command. Allow ordinary builds, tests, scratch files under /tmp, edits inside the project. Deny anything that exfiltrates data, reaches unrelated hosts, touches credentials, modifies the system outside the project, or is irreversible and unrelated to the task. If genuinely unsure, answer ask.\n\nReply with exactly one line of JSON: {"verdict":"allow"|"ask"|"deny","rationale":"<one sentence>"}`;
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(scrubbedEnv())) if (v !== undefined) env[k] = v;
-  for (const k of ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "LANG", "CLAUDE_CONFIG_DIR"]) if (process.env[k]) env[k] = process.env[k]!;
   const ac = new AbortController();
   const onAbort = () => ac.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   try {
     let text = "";
-    for await (const msg of query({ prompt, options: { model: config.roles.classifier.model, maxTurns: 1, tools: [], allowedTools: [], settingSources: [], strictMcpConfig: true, systemPrompt: "Answer with one line of JSON only.", env, abortController: ac, permissionMode: "dontAsk" } }) as AsyncIterable<SDKMessage>) {
+    for await (const msg of query({ prompt, options: { model: config.roles.classifier.model, maxTurns: 1, tools: [], allowedTools: [], settingSources: [], strictMcpConfig: true, systemPrompt: "Answer with one line of JSON only.", env: sdkEnv(), abortController: ac, permissionMode: "dontAsk" } }) as AsyncIterable<SDKMessage>) {
       if (msg.type === "assistant") for (const b of (msg as any).message?.content ?? []) if (b.type === "text") text += b.text;
       if (msg.type === "result") break;
     }

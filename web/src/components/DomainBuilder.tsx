@@ -146,7 +146,7 @@ export function DomainBuilder() {
                     </span>
                     {i.claim}
                     <div className="faint text-[11px] mt-0.5">
-                      <button type="button" className="underline" onClick={() => setLessonFilter(i.lesson)} title="Open the lesson">
+                      <button type="button" className="underline" onClick={() => (openModal(null), setLessonFilter(i.lesson))} title="Open the lesson (closes the builder)">
                         {i.lessonTitle}
                       </button>
                       {i.domains.length > 0 && <span> · {i.domains.join(", ")}</span>}

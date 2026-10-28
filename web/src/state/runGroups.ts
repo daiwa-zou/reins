@@ -11,14 +11,15 @@ export interface RunGroup {
   runs: RunSummary[];
 }
 
-const LIVE = new Set<RunSummary["status"]>(["running", "paused", "queued"]);
+/** Live runs that are not waiting for you (those have their own group, first). */
+const RUNNING = new Set<RunSummary["status"]>(["running", "paused", "queued"]);
 const newestFirst = (a: RunSummary, b: RunSummary) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);
 
 /** Needs you, then Running, then Earlier, each newest first; empty groups are left out. */
 export function groupRuns(runs: RunSummary[]): RunGroup[] {
   const needs = runs.filter((r) => r.status === "waiting_approval").sort(newestFirst);
-  const live = runs.filter((r) => LIVE.has(r.status)).sort(newestFirst);
-  const earlier = runs.filter((r) => r.status !== "waiting_approval" && !LIVE.has(r.status)).sort(newestFirst);
+  const live = runs.filter((r) => RUNNING.has(r.status)).sort(newestFirst);
+  const earlier = runs.filter((r) => r.status !== "waiting_approval" && !RUNNING.has(r.status)).sort(newestFirst);
   return [
     { id: "needs" as const, label: "Needs you", runs: needs },
     { id: "live" as const, label: "Running", runs: live },

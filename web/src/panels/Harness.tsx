@@ -5,10 +5,10 @@ import { useStore } from "../state/store";
 import { Badge, Kbd } from "../components/ui";
 import { api } from "../lib/api";
 import type { SkillInfo } from "@shared/types";
-import { domainPresets, generatedPresets, presetChip } from "@shared/presets";
+import { domainPresets, presetChip } from "@shared/presets";
 import { DEFAULT_COMPOSITION, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE } from "@shared/components";
 import { ideas } from "@shared/implications";
-import { classifyPresets, effortSummary, startingPointFor, supervisionSummary } from "../state/startingPoint";
+import { effortSummary, presetOptions, startingPointFor, supervisionSummary } from "../state/startingPoint";
 import { tokens } from "../lib/format";
 
 /**
@@ -57,10 +57,9 @@ function StartingPoints() {
   const toastMsg = useStore((s) => s.toastMsg);
   const userDomains = useStore((s) => s.userDomains);
   const openDomainBuilder = useStore((s) => s.openDomainBuilder);
-  const list = storePresets.length ? storePresets : generatedPresets([]);
-  const { saved, domains: generated } = classifyPresets(list);
+  const { saved, options } = presetOptions(storePresets);
   const domains = domainPresets(lessons, userDomains);
-  const def = startingPointFor(defaultPreset, { saved: saved.map((p) => p.name), generated: generated.map((p) => ({ name: p.name, domain: p.domain })) });
+  const def = startingPointFor(defaultPreset, options);
   const isDefaultPreset = (name: string) => def.kind === "saved" && def.name === name;
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -88,7 +87,7 @@ function StartingPoints() {
             const s = effortSummary(id);
             const isDefault = id === DEFAULT_COMPOSITION.effort;
             return (
-              <button key={id} type="button" className="card pick p-3.5 text-left flex flex-col gap-1.5" aria-pressed={isDefault} data-start-effort={id} onClick={() => openModal("newRun", { __compose: { effort: id } } as any)} title={`Start a run at ${EFFORT_TABLE[id].label} effort`}>
+              <button key={id} type="button" className="card pick p-3.5 text-left flex flex-col gap-1.5" aria-pressed={isDefault} data-start-effort={id} onClick={() => openModal("newRun", { __compose: { effort: id } })} title={`Start a run at ${EFFORT_TABLE[id].label} effort`}>
                 <span className="font-semibold text-[14px] flex items-center gap-2">
                   {EFFORT_TABLE[id].label}
                   {isDefault && <Badge tone="accent">default</Badge>}
@@ -114,7 +113,7 @@ function StartingPoints() {
             const pauses = supervisionSummary(id);
             const isDefault = id === DEFAULT_COMPOSITION.supervision;
             return (
-              <button key={id} type="button" className="card pick p-3.5 text-left flex flex-col gap-1.5" aria-pressed={isDefault} data-start-supervision={id} onClick={() => openModal("newRun", { __compose: { supervision: id } } as any)} title={`Start a run with ${SUPERVISION_TABLE[id].label}`}>
+              <button key={id} type="button" className="card pick p-3.5 text-left flex flex-col gap-1.5" aria-pressed={isDefault} data-start-supervision={id} onClick={() => openModal("newRun", { __compose: { supervision: id } })} title={`Start a run with ${SUPERVISION_TABLE[id].label}`}>
                 <span className="font-semibold text-[14px] flex items-center gap-2">
                   {SUPERVISION_TABLE[id].label}
                   {isDefault && <Badge tone="accent">default</Badge>}
@@ -136,7 +135,7 @@ function StartingPoints() {
             const mine = userDomains.find((u) => u.id === d.id);
             return (
               <span key={d.id} className="inline-flex items-center">
-                <button type="button" className="chip" onClick={() => openModal("newRun", { __compose: { domains: [d.id!] } } as any)} title={`${d.description}\nStart a run with this domain`} data-start-domain={d.id}>
+                <button type="button" className="chip" onClick={() => openModal("newRun", { __compose: { domains: [d.id!] } })} title={`${d.description}\nStart a run with this domain`} data-start-domain={d.id}>
                   {mine ? d.name : presetChip(d.id!)}
                   {mine && <Badge tone="accent">yours</Badge>}
                 </button>
@@ -188,7 +187,7 @@ function StartingPoints() {
                     Make default
                   </button>
                 )}
-                <button className="btn btn-sm" onClick={() => openModal("newRun", { __saved: p.name } as any)} data-start-run>
+                <button className="btn btn-sm" onClick={() => openModal("newRun", { __saved: p.name })} data-start-run>
                   <Play size={12} aria-hidden /> Start a run
                 </button>
                 <button className="icon-btn" aria-label={`Delete the preset ${p.name}`} title="Delete this preset" onClick={() => act(() => api.deletePreset(p.name), `Deleted “${p.name}”.`)} data-delete-preset>

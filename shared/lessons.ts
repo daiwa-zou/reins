@@ -3,6 +3,7 @@
 // the lessons:check script and the agent tools share one parser.
 import type { ComponentId, Implication, ImplicationKind, Lesson, LessonProblem, LessonProvenance, Phase, Standing } from "./types.js";
 import { COMPONENTS, COMPONENT_IDS, EFFORT_LEVELS, FOUNDATIONS, GUIDANCE_MAX_CHARS, tierOf } from "./components.js";
+import { DOMAIN_ID as DOMAIN } from "./domains.js";
 
 export type ParseProblem = Pick<LessonProblem, "level" | "message">;
 
@@ -35,8 +36,7 @@ const list = (v: string | undefined) =>
 export const IMPLICATION_KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "gap", "effort"];
 export const PHASES: Phase[] = ["plan", "breakdown", "contract", "tests", "build", "evaluate", "publish", "wrapup"];
 export const STANDINGS: Standing[] = ["bundled", "reviewed", "unreviewed"];
-export const PROVENANCES: LessonProvenance[] = ["post", "article", "paper", "postmortem", "note"];
-const DOMAIN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+export const PROVENANCES: LessonProvenance[] = ["post", "article", "paper", "postmortem", "note", "repo", "mcp"];
 export const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export interface ParseOptions {
@@ -161,7 +161,7 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
   };
   const domains: string[] = [];
   for (const d of list(meta.domains)) {
-    if (/^[a-z0-9][a-z0-9-]{0,39}$/.test(d)) domains.push(d);
+    if (DOMAIN.test(d)) domains.push(d);
     else err(`invalid domain "${d}" in domains: (use lowercase letters, digits and -, e.g. web, cli)`);
   }
   const enables = effectIds("enables");
@@ -268,6 +268,7 @@ export function parseLesson(slug: string, raw: string, source: Lesson["source"] 
       ...(provenance && PROVENANCES.includes(provenance) ? { provenance } : {}),
       standing,
       ...(meta.hash && /^[a-f0-9]{64}$/.test(meta.hash) ? { hash: meta.hash } : {}),
+      ...(meta.focus?.trim() ? { focus: meta.focus.replace(/\s+/g, " ").trim() } : {}),
     },
     problems,
   };

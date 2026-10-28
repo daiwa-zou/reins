@@ -82,10 +82,20 @@ const CONTRACT_EVALUATOR = `${COMMON}
 Role: Evaluator (contract stage)
 Review the builder's proposed contract in .reins/contract.proposed.json against .reins/spec.md. You are the one who will have to verify these later, so insist on criteria that are concrete, independently checkable and cover failure paths. Remove or rewrite vague ones ("works correctly"), add missing ones, tighten verification steps. Then call review_contract with the final list.`;
 
-const LIBRARIAN = `You are the librarian inside Reins, an agent harness. You turn one source (a post, article, paper, postmortem or note) into a lesson for the harness's lesson library. You do not change any code.
+const PR_WRITER = `${COMMON}
+
+Role: Builder (pull request draft)
+The package is built and evaluated, and a person has read the draft pull request title and description and asked for changes. You rewrite the draft as asked.
+- Read the reviewer's note and the current draft in your first message. Look at the diff with git_diff and at .reins/contract.json and .reins/evaluation.md when the note asks for facts.
+- Keep every statement true to the diff and the recorded evidence; never claim a check that was not run. Shorten, reorder or clarify freely; keep the title to one line.
+- Do not change any code or file in this phase.
+- Then call propose_pr with the new title and description.`;
+
+const LIBRARIAN = `You are the librarian inside Reins, an agent harness. You turn one source (a post, article, paper, postmortem or note; or a git repository or an MCP server you explore with tools) into a lesson for the harness's lesson library. You do not change any code.
 
 How to distil
 - Read the whole source first. Learnings are dense bullets that keep the source's own numbers, names and examples; do not add facts the source does not contain.
+- When the source is a repository or an MCP server, the message says what to look for: explore for that (list or search, then read what matters) and keep the lesson to it. Quote only text you read through the tools; a quote you remember or infer is rejected.
 - Implications are what the source means for an agent harness. Each one targets exactly one thing: a component, a stage (plan, breakdown, contract, tests, build, evaluate, publish, wrapup), a skill or a foundation, or is a gap (an idea the harness does not implement). Split a compound idea into one implication per target.
 - Every implication cites evidence: a quote copied verbatim from the source, a phrase or a sentence, never paraphrased. If you cannot quote it, drop the implication.
 - A stage implication is a single sentence an agent in that stage should read; write it as an instruction.
@@ -97,10 +107,10 @@ export function librarianPrompt(): string {
   return LIBRARIAN;
 }
 
-export type PromptRole = "planner" | "breakdown_planner" | "builder" | "evaluator" | "test_writer" | "contract_builder" | "contract_evaluator";
+export type PromptRole = "planner" | "breakdown_planner" | "builder" | "evaluator" | "test_writer" | "contract_builder" | "contract_evaluator" | "pr_writer";
 
 export function systemPromptFor(role: PromptRole, config: RunConfig): string {
-  const base = { planner: PLANNER, breakdown_planner: BREAKDOWN_PLANNER, builder: BUILDER, evaluator: EVALUATOR, test_writer: TEST_WRITER, contract_builder: CONTRACT_BUILDER, contract_evaluator: CONTRACT_EVALUATOR }[role];
+  const base = { planner: PLANNER, breakdown_planner: BREAKDOWN_PLANNER, builder: BUILDER, evaluator: EVALUATOR, test_writer: TEST_WRITER, contract_builder: CONTRACT_BUILDER, contract_evaluator: CONTRACT_EVALUATOR, pr_writer: PR_WRITER }[role];
   const extras: string[] = [];
   if (config.components.thinkTool) extras.push("Use the think tool before irreversible steps and after surprising tool results: list the rules that apply, check you have what you need, verify the last result.");
   if (config.components.toolSearch) extras.push("Rarely used tools (git_*, lessons) are not loaded; find them with tool_search_tool_regex when needed.");

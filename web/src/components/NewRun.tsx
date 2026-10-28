@@ -2,31 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Switch, Badge } from "./ui";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
+import { startDemo } from "../lib/demo";
 import { defaultRunConfig, MODELS } from "@shared/components";
 import { alwaysTierOffs } from "@shared/config";
 import { applyPreset, checkRunConfig, diffFromDefaults, ENGINE_LABEL, presetFromConfig } from "@shared/config";
 import { money, tokens } from "../lib/format";
 import type { ComponentId, Composition, EffortLevel, EngineId, HarnessComponent, Preset, PresetBasis, RunConfig } from "@shared/types";
-import { adaptPreset, composeRun, compositionOf, generatedPresets, presetCompatibility } from "@shared/presets";
+import { adaptPreset, composeRun, compositionOf, presetCompatibility } from "@shared/presets";
 import { ComposePicker } from "./ComposePicker";
 import { compositionError } from "../state/runChip";
 import { Bookmark, CirclePlay, Play } from "lucide-react";
-import { classifyPresets, describeStart, startingPointFor, type StartingPoint } from "../state/startingPoint";
+import { describeStart, presetOptions, startingPointFor, type StartingPoint } from "../state/startingPoint";
 
 const GROUP_LABEL: Record<HarnessComponent["group"], string> = { roles: "Roles", memory: "Memory across sessions", context: "Context window", tools: "Tools", safety: "Safety" };
 
 const EFFORTS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
-
-/** Prefill extras New run understands besides a RunConfig (run again, Harness, Lessons). */
-export interface NewRunExtras {
-  /** Start from this composition, composed fresh (e.g. "Start a run with Web"). */
-  __compose?: Partial<Composition>;
-  /** Start from this saved preset. */
-  __saved?: string;
-  /** Open Customize on the components. */
-  __openHarness?: boolean;
-  __notice?: string;
-}
 
 /**
  * New run, in two depths. Always visible: the task, the folder, the engine,
@@ -35,8 +25,9 @@ export interface NewRunExtras {
  */
 export function NewRun() {
   const openModal = useStore((s) => s.openModal);
-  const prefill = useStore((s) => s.newRunPrefill) as (Partial<RunConfig> & NewRunExtras) | undefined;
+  const prefill = useStore((s) => s.newRunPrefill);
   const info = useStore((s) => s.info);
+  const preferredEngine = useStore((s) => s.availableEngine)();
   const components = useStore((s) => s.components);
   const selectRun = useStore((s) => s.selectRun);
   const toastMsg = useStore((s) => s.toastMsg);
@@ -51,12 +42,8 @@ export function NewRun() {
   const defaultPreset = useStore((s) => s.defaultPreset);
   const defaultComposition = useStore((s) => s.defaultComposition);
   const refreshPresets = useStore((s) => s.refreshPresets);
-  const presets: Preset[] = storePresets.length ? storePresets : generatedPresets([]);
   // Effort, supervision and domains are picked in ComposePicker; the Saved preset select lists only the user's own.
-  const classified = classifyPresets(presets);
-  const saved = classified.saved;
-  const spOpts = { saved: saved.map((p) => p.name), generated: classified.domains.map((p) => ({ name: p.name, domain: p.domain })) };
-  const preferredEngine: EngineId = info?.hasApiKey ? "anthropic" : info?.hasClaudeCode ? "claude-code" : "anthropic";
+  const { saved, options: spOpts } = presetOptions(storePresets);
   const fresh = (keep: Partial<RunConfig> = {}) =>
     defaultRunConfig({ task: keep.task ?? "", workspace: keep.workspace ?? info?.defaultWorkspace ?? "", engine: (keep.engine as RunConfig["engine"]) ?? preferredEngine, title: keep.title, ...(typeof keep.budgetUsd === "number" ? { budgetUsd: keep.budgetUsd } : {}) });
   const liveEngineOf = (c: Partial<RunConfig>): EngineId => (c.engine && c.engine !== "replay" ? c.engine : preferredEngine);
@@ -83,7 +70,7 @@ export function NewRun() {
     const sp = startOf(c);
     const keep = { task: c.task, workspace: c.workspace, title: c.title, engine: c.engine, budgetUsd: c.budgetUsd };
     if (sp.kind === "saved") return { ...applySaved(keep, saved.find((p) => p.name === sp.name)!, liveEngineOf(c)), engine: c.engine, budgetUsd: c.budgetUsd };
-    if (sp.kind === "compose" && !compositionError(sp, lessons)) return { ...composeInto({ ...keep, ablated: c.ablated }, sp, liveEngineOf(c)), engine: c.engine, budgetUsd: c.budgetUsd };
+    if (sp.kind === "compose" && !compositionError(sp, lessons, userDomains)) return { ...composeInto({ ...keep, ablated: c.ablated }, sp, liveEngineOf(c)), engine: c.engine, budgetUsd: c.budgetUsd };
     return fresh(keep);
   };
 
@@ -155,20 +142,23 @@ export function NewRun() {
     api.workspaces().then((w) => setRecent(w.recent)).catch(() => {});
   }, []);
   useEffect(() => {
-    if (!cfg.workspace) return setCheck(null);
+    // A changed path is unchecked until its own answer arrives; an older request that resolves late is ignored.
+    setCheck(null);
     setCheckError(false);
+    if (!cfg.workspace) return;
+    let live = true;
     const t = setTimeout(
       () =>
         api
           .checkWorkspace(cfg.workspace)
-          .then(setCheck)
-          .catch(() => {
-            setCheck(null);
-            setCheckError(true);
-          }),
+          .then((c) => live && setCheck(c))
+          .catch(() => live && setCheckError(true)),
       250,
     );
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
   }, [cfg.workspace]);
 
   const set = (patch: Partial<RunConfig>) => setCfg((c) => ({ ...c, ...patch }));
@@ -186,7 +176,7 @@ export function NewRun() {
   const engineNow = liveEngineOf(cfg);
   const start = startOf(cfg);
   const activeSaved = start.kind === "saved" ? saved.find((p) => p.name === start.name) : undefined;
-  const composed = start.kind === "compose" && !compositionError(start, lessons) ? composeRun(start, lessons, undefined, engineNow) : null;
+  const composed = start.kind === "compose" && !compositionError(start, lessons, userDomains) ? composeRun(start, lessons, undefined, engineNow, userDomains) : null;
   const basis: PresetBasis[] | undefined = composed?.basis ?? activeSaved?.basis;
   // One short note when the engine ignores switches the starting point turns on (they are switched off).
   const sourceConfig = composed?.config ?? activeSaved?.config;
@@ -246,12 +236,12 @@ export function NewRun() {
   const composeError = cfg.effort ? compositionError({ effort: cfg.effort, supervision: cfg.supervision, domains: cfg.domains }, lessons, userDomains) : null;
   const blocker = composeError ? `Start from: ${composeError}.` : cfg.task.trim().length <= 3 ? "Describe the task first." : !cfg.workspace ? "Pick a workspace folder." : check === null ? (checkError ? "Could not check the folder; is the server running?" : "Checking the folder…") : !check.exists ? "That folder does not exist." : !engineOk ? (cfg.engine === "anthropic" ? "The direct engine needs an API key (Settings), or pick Claude Code above." : "Claude Code is not installed; add an API key and pick the direct engine.") : !budgetOk ? (tokenBudget ? "Token budget must be at least 10,000." : "Budget must be at least $1.") : null;
   const canStart = blocker === null;
-  const startRun = async (engine: "live" | "replay") => {
+  const startRun = async () => {
     setBusy(true);
     try {
       const preset = activeSaved ? (changes.length ? `${activeSaved.name} (modified)` : activeSaved.name) : undefined;
-      const created = engine === "replay" ? await api.demo() : await api.createRun({ ...cfg, preset, presets: undefined, ...(cfg.ablated?.length ? {} : { ablated: undefined }), title: cfg.title || cfg.task.slice(0, 60) });
-      if (engine !== "replay") setNewRunDraft(null);
+      const created = await api.createRun({ ...cfg, preset, presets: undefined, ...(cfg.ablated?.length ? {} : { ablated: undefined }), title: cfg.title || cfg.task.slice(0, 60) });
+      setNewRunDraft(null);
       openModal(null);
       selectRun(created.id, { view: "activity" });
     } catch (e) {
@@ -259,6 +249,11 @@ export function NewRun() {
     } finally {
       setBusy(false);
     }
+  };
+  // The demo keeps the draft: the dialog closes, and an existing recording is reused (lib/demo.ts).
+  const watchDemo = () => {
+    openModal(null);
+    void startDemo();
   };
 
   const est = estimate(cfg);
@@ -670,10 +665,10 @@ export function NewRun() {
             )}
           </div>
           <div className="flex-1" />
-          <button className="btn" disabled={busy} onClick={() => startRun("replay")}>
+          <button className="btn" disabled={busy} onClick={watchDemo}>
             <CirclePlay size={14} aria-hidden /> Watch the demo instead
           </button>
-          <button className="btn btn-primary" disabled={busy || !canStart} onClick={() => startRun("live")} title={!canStart ? "Enter a task, an existing folder, and pick an available engine" : undefined} data-start>
+          <button className="btn btn-primary" disabled={busy || !canStart} onClick={() => void startRun()} title={!canStart ? "Enter a task, an existing folder, and pick an available engine" : undefined} data-start>
             <Play size={13} aria-hidden /> Start run
           </button>
         </div>

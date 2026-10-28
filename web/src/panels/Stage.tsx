@@ -176,8 +176,9 @@ function PhaseStepper({ model }: { model: RunModel }) {
   for (const p of model.phases) latestByPhase.set(p.phase, p);
   const rounds = model.phases.filter((p) => p.phase === "build").length;
   const merged = [...model.pullRequests].reverse().find((pr) => pr.merged);
+  // Static: pills wrap onto a second line in a narrow pane rather than scrolling sideways.
   return (
-    <div className="flex items-center gap-1 px-4 py-2 border-b line overflow-x-auto text-small" aria-label="Phases">
+    <div className="flex flex-wrap items-center gap-1 px-4 py-2 border-b line text-small" aria-label="Phases">
       {enabled.map((p, i) => {
         const stat = latestByPhase.get(p);
         const state = !stat ? "todo" : stat.finishedTs ? "done" : "active";
@@ -200,8 +201,7 @@ function PhaseStepper({ model }: { model: RunModel }) {
       })}
       {merged && (
         <>
-          <span className="flex-1" />
-          <a className="faint text-caption whitespace-nowrap underline-offset-2 hover:underline" href={merged.url} target="_blank" rel="noreferrer" title={merged.branch}>
+          <a className="ml-auto faint text-caption whitespace-nowrap underline-offset-2 hover:underline" href={merged.url} target="_blank" rel="noreferrer" title={merged.branch}>
             {merged.package ? `package ${merged.package.id}` : "last package"} merged as #{merged.number}
           </a>
         </>
@@ -230,9 +230,9 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
     case "approval":
       if (!item.resolved) return null; // the live ApprovalCard renders the pending one
       return (
-        <div className="card px-3 py-2 border-l-4 fade-in" style={{ borderLeftColor: item.resolved.decision === "approve" ? "var(--ok)" : "var(--bad)" }}>
+        <div className="card px-3 py-2 border-l-4 fade-in" style={{ borderLeftColor: item.resolved.decision === "approve" ? "var(--ok)" : item.resolved.decision === "revise" ? "var(--warn)" : "var(--bad)" }}>
           <div className="flex items-center gap-2 text-small">
-            <Badge tone={item.resolved.decision === "approve" ? "ok" : "bad"}>{item.resolved.decision + "d"}</Badge>
+            <Badge tone={item.resolved.decision === "approve" ? "ok" : item.resolved.decision === "revise" ? "warn" : "bad"}>{item.resolved.decision === "revise" ? "changes requested" : item.resolved.decision + "d"}</Badge>
             <span className="font-medium">{item.request.title}</span>
           </div>
           {item.resolved.note && <div className="muted text-small mt-1">Note: {item.resolved.note}</div>}
@@ -248,7 +248,7 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
           <div className="flex items-center gap-2 text-small mb-1.5">
             <RoleChip role="evaluator" />
             <Badge tone={item.verdict === "pass" ? "ok" : "bad"}>
-              round {item.round}: {item.verdict}
+              {item.package ? `${item.package.id} · ` : ""}round {item.round}: {item.verdict}
             </Badge>
             {item.origin && item.origin !== "reported" && (
               <Badge tone="warn" title={item.origin === "forced" ? "The evaluator ran out of turns and reported in a final forced call." : "The evaluator never reported; the harness wrote this report with every criterion unverified."}>
@@ -300,6 +300,18 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
           </div>
         </div>
       );
+    case "check":
+      return (
+        <div className="flex items-start gap-2 text-small px-1 fade-in" data-criterion-check={item.id}>
+          <span className={`font-bold shrink-0 ${item.pass ? "text-[var(--ok)]" : "text-[var(--bad)]"}`} aria-hidden>
+            {item.pass ? "✓" : "✕"}
+          </span>
+          <span className="min-w-0">
+            <span className="font-medium">{item.id}</span> <span className="muted">{item.pass ? "checked off by the" : "found failing by the"} {item.role}</span>
+            {item.evidence && <span className="muted"> · {item.evidence.length > 140 ? item.evidence.slice(0, 140) + "…" : item.evidence}</span>}
+          </span>
+        </div>
+      );
     case "commit":
       return (
         <div className="flex items-center gap-2 text-small muted px-1 fade-in">
@@ -343,8 +355,6 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
           {item.text}
         </div>
       );
-    case "summary":
-      return null;
   }
 }
 

@@ -1,4 +1,8 @@
 import type { ImplicationKind, Standing } from "@shared/types";
+import { IMPLICATION_KINDS } from "@shared/lessons";
+
+/** The kinds the approval card's select offers: the library's own list, so an effort implication keeps its kind. */
+export { IMPLICATION_KINDS };
 
 /** One implication of an intake draft, as the librarian proposed it (mirrors server/src/intake DraftImplication). */
 export interface DraftImplication {
@@ -33,8 +37,6 @@ export interface LessonDraftState {
   items: (DraftImplication & { dropped?: boolean })[];
   standing: Exclude<Standing, "bundled">;
 }
-
-export const IMPLICATION_KINDS: ImplicationKind[] = ["component", "stage", "skill", "foundation", "gap"];
 
 export function initLessonDraft(payload: DraftLessonPayload | null | undefined): LessonDraftState {
   return { items: (payload?.implications ?? []).map((i) => ({ ...i, domains: [...(i.domains ?? [])] })), standing: "unreviewed" };

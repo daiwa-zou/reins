@@ -1,16 +1,14 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import type { ComponentId, Composition, EngineId, Preset, PresetCompatibility, PresetConfig } from "../../shared/types.js";
+import type { ComponentId, Composition, EngineId, Preset, PresetCompatibility, PresetConfig, RunConfig } from "../../shared/types.js";
 import { compatibilityByEngine, composeRun, compositionLabel, domainPresets, followEngine, generatedPresets, inferComposition, isGeneratedPresetName, LEGACY_PROFILES, migrateLegacy, PresetCompositionError, PRESET_RECIPES } from "../../shared/presets.js";
 import { stageLessonsFor } from "../../shared/implications.js";
-import { alwaysTierOffs, applyPreset, RETIRED_PRESET_NAMES } from "../../shared/config.js";
+import { alwaysTierOffs, applyPreset, FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, RETIRED_PRESET_NAMES, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
 import { ALWAYS_IDS, DEFAULT_COMPOSITION, defaultRunConfig, EFFORT_LEVELS, EFFORT_TABLE, SUPERVISION_LEVELS, SUPERVISION_TABLE, tierOf } from "../../shared/components.js";
-import type { RunConfig } from "../../shared/types.js";
 import { listLessons } from "./lessons.js";
 import { listDomains } from "./domains.js";
 import { tagUserDomains } from "../../shared/domains.js";
-import { FORBIDDEN_PRESET_KEYS, isBuiltInPresetName, PresetValidationError, sanitizePresetName, validatePresetConfig } from "../../shared/config.js";
+import { reinsHome } from "./store/runStore.js";
 
 /**
  * User presets live in one file, $REINS_HOME/presets.json:
@@ -30,7 +28,7 @@ interface PresetFile {
 }
 
 export function presetsFile(): string {
-  return path.join(process.env.REINS_HOME ?? path.join(os.homedir(), ".reins"), "presets.json");
+  return path.join(reinsHome(), "presets.json");
 }
 
 function read(): PresetFile {
@@ -91,6 +89,30 @@ export function listPresets(): { presets: ListedPreset[]; default: string | null
   const user: Preset[] = f.presets.map((p) => ({ name: p.name, description: p.description, builtIn: false, config: p.config, ...(p.lessons ? { lessons: p.lessons } : {}) }));
   const presets = [...generatedPresets(listLessons(), listDomains()), ...user].map((p) => ({ ...p, isDefault: p.name === def, compatibility: compatibilityByEngine(p) }));
   return { presets, default: def, defaultComposition: defaultComposition(f), file: presetsFile() };
+}
+
+/** What deleting a lesson does to the user's presets that name it as a basis: a preset built only on it is deleted, the rest just stop naming it. */
+export interface PresetPrune {
+  name: string;
+  deleted: boolean;
+}
+
+/** Drop `slug` from every user preset's lessons list; a preset whose only lesson it was is deleted. `dry` reports without writing. */
+export function pruneLessonFromPresets(slug: string, dry = false): PresetPrune[] {
+  const f = read();
+  const out: PresetPrune[] = [];
+  const kept: StoredPreset[] = [];
+  for (const p of f.presets) {
+    if (!p.lessons?.includes(slug)) {
+      kept.push(p);
+      continue;
+    }
+    const rest = p.lessons.filter((s) => s !== slug);
+    out.push({ name: p.name, deleted: !rest.length });
+    if (rest.length) kept.push({ ...p, lessons: rest });
+  }
+  if (out.length && !dry) write({ default: f.default && kept.some((p) => p.name === f.default) ? f.default : null, presets: kept });
+  return out;
 }
 
 /** Create or replace a user preset. Throws PresetValidationError with a one-line message for a bad body. */

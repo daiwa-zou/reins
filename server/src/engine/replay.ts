@@ -11,8 +11,8 @@ export interface ReplayControl {
   signal: AbortSignal;
   waitIfPaused: () => Promise<void>;
   drainSteer: () => string[];
+  /** Ask the person; resolves once answered, with the run shown as running again. */
   ask: (request: Omit<ApprovalRequest, "approvalId">) => Promise<{ approved: boolean; note?: string }>;
-  resumed: () => void;
 }
 
 export function loadDemoEvents(): RunEvent[] {
@@ -54,7 +54,6 @@ export async function startReplay(bus: RunBus, config: RunConfig, control: Repla
       const { approvalId: _drop, ...rest } = ev.request;
       const r = await control.ask(rest);
       if (control.signal.aborted) return;
-      control.resumed();
       if (!r.approved) {
         bus.emitEvent({ type: "note", level: "info", text: "You rejected this step. In a live run the agent would be told why and adjust; the demo continues anyway." });
       }

@@ -5,7 +5,7 @@
 // retired care profiles (Full, Minimal, Careful) and "Claude Code" are only read, as names
 // in old defaults and runs, and mapped onto a composition by startingPointFor().
 import type { EngineId, HarnessEffort, Preset, Supervision } from "@shared/types";
-import { compositionLabel, parseComposition, PRESET_RECIPES, type PresetRecipe } from "@shared/presets";
+import { compositionLabel, generatedPresets, parseComposition, PRESET_RECIPES, type PresetRecipe } from "@shared/presets";
 import { EFFORT_TABLE, PAUSE_KEYS, SUPERVISION_TABLE, type PauseKey } from "@shared/components";
 
 type Listed = Pick<Preset, "name" | "builtIn"> & Partial<Pick<Preset, "id" | "layer" | "generated" | "domain">>;
@@ -26,6 +26,18 @@ export function classifyPresets<P extends Listed>(list: P[]): ClassifiedPresets<
     else if (!p.builtIn) saved.push(p);
   }
   return { domains, saved };
+}
+
+/** The options startingPointFor needs: saved preset names and generated preset names with their domains. */
+export type StartingPointOptions = NonNullable<Parameters<typeof startingPointFor>[1]>;
+
+/**
+ * The preset list as New run and Harness read it: the store's (or, before it loads, the
+ * recipes' generated presets), split into saved and domain presets, with startingPointFor's options.
+ */
+export function presetOptions<P extends Preset>(stored: P[]): ClassifiedPresets<P | Preset> & { options: StartingPointOptions } {
+  const { saved, domains } = classifyPresets<P | Preset>(stored.length ? stored : generatedPresets([]));
+  return { saved, domains, options: { saved: saved.map((p) => p.name), generated: domains.map((p) => ({ name: p.name, domain: p.domain })) } };
 }
 
 export type StartingPoint =

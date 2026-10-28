@@ -17,15 +17,12 @@ function Segmented<T extends string>({ name, label, ids, value, labelOf, meaning
         <span className="font-semibold w-[84px]" id={`${name}-label`}>
           {label}
         </span>
-        <div className="inline-flex rounded-lg border line overflow-hidden" role="radiogroup" aria-labelledby={`${name}-label`} data-control={name}>
-          {ids.map((id) => {
-            const on = value === id;
-            return (
-              <button key={id} type="button" role="radio" aria-checked={on} {...{ [`data-${name}`]: id }} className={`px-3 py-1 text-[12.5px] ${on ? "bg-[var(--accent)] text-white" : "hover:brightness-95"}`} title={meaningOf(id)} onClick={() => onPick(id)}>
-                {labelOf(id)}
-              </button>
-            );
-          })}
+        <div className="seg" role="radiogroup" aria-labelledby={`${name}-label`} data-control={name}>
+          {ids.map((id) => (
+            <button key={id} type="button" role="radio" aria-checked={value === id} {...{ [`data-${name}`]: id }} title={meaningOf(id)} onClick={() => onPick(id)}>
+              {labelOf(id)}
+            </button>
+          ))}
         </div>
       </div>
       <div className="faint text-[11.5px] leading-snug pl-[92px]" data-meaning={name}>

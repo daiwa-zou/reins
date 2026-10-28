@@ -5,14 +5,13 @@
 // UI and vitest share it.
 import type { ComponentId, Implication, Lesson, Phase, UserDomain } from "./types.js";
 import { COMPONENTS } from "./components.js";
+import { isObj, str } from "./util.js";
 
+/** A domain id: lowercase letters, digits and dashes, at most 40 characters. Shared by lessons, presets and config validation. */
 export const DOMAIN_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const DOMAIN_LABEL_MAX = 60;
 export const DOMAIN_DESCRIPTION_MAX = 300;
 export const DOMAIN_MAX_IMPLICATIONS = 200;
-
-const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** "My Stack! v2" -> "my-stack-v2". */
 export function slugifyDomainId(label: string): string {

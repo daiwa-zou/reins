@@ -2,7 +2,7 @@ import React from "react";
 import type { RunModel } from "../state/derive";
 import { ROLE_LABEL } from "../state/derive";
 import { ContextGauge, ContextHistory } from "../components/ContextGauge";
-import { Empty, Badge } from "../components/ui";
+import { Empty, Badge, Stat } from "../components/ui";
 import { useStore } from "../state/store";
 import { tokens } from "../lib/format";
 import type { RoleId } from "@shared/types";
@@ -72,16 +72,6 @@ export function ContextPanel({ model }: { model: RunModel }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "warn" }) {
-  return (
-    <div className="card p-3">
-      <div className="text-[10.5px] uppercase tracking-wider faint font-semibold">{label}</div>
-      <div className={`text-[17px] font-semibold mt-0.5 ${tone === "warn" ? "text-[var(--warn)]" : ""}`}>{value}</div>
-      {sub && <div className="muted text-[11.5px] mt-0.5">{sub}</div>}
     </div>
   );
 }
