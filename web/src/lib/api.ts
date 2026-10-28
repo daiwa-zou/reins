@@ -74,7 +74,8 @@ export const api = {
   lessonDerived: (slug: string) => fetch(`/api/lessons/${encodeURIComponent(slug)}/derived`).then((r) => j<LessonDerived>(r)),
   deleteLesson: (slug: string) => fetch(`/api/lessons/${encodeURIComponent(slug)}`, { method: "DELETE" }).then((r) => j<LessonDerived>(r)),
   setStanding: (slug: string, standing: "reviewed" | "unreviewed") => post(`/api/lessons/${encodeURIComponent(slug)}/standing`, { standing }).then((r) => j<Lesson>(r)),
-  startIntake: async (body: { url?: string; text?: string; repo?: string; ref?: string; mcp?: McpServerSpec; focus?: string }) => {
+  mcpServers: () => fetch("/api/mcp-servers").then((r) => j<{ name: string; from: "project" | "local" | "user"; transport: "http" | "stdio" }[]>(r)),
+  startIntake: async (body: { url?: string; text?: string; repo?: string; ref?: string; mcp?: Partial<McpServerSpec> & { name: string }; focus?: string }) => {
     const r = await post("/api/intake", body);
     if (r.status === 409) {
       const b = await r.json().catch(() => ({}));

@@ -146,7 +146,7 @@ describe("intake from a git repository", () => {
     expect(() => resolveSource({ repo: "https://example.com/a.git", ref: "bad ref", focus: "x" }, "")).toThrow(/branch or tag/);
     expect(() => resolveSource({ url: "https://a", text: "b" }, "")).toThrow(/one source/);
     expect(() => resolveSource({ mcp: { name: "Bad Name", command: "x" }, focus: "x" }, "")).toThrow(/mcp\.name/);
-    expect(() => resolveSource({ mcp: { name: "ok" }, focus: "x" }, "")).toThrow(/command to run or a url/);
+    expect(() => resolveSource({ mcp: { name: "ok" }, focus: "x" }, "")).toThrow(/no MCP server named "ok"/);
   });
 });
 
@@ -205,6 +205,23 @@ describe("intake from an MCP server", () => {
     expect(getLesson("notes-rollouts")).toMatchObject({ provenance: "mcp", focus: "what we learned about rollouts", url: "" });
     expect(lessonProblems().filter((p) => p.file === "notes-rollouts.md")).toEqual([]);
     expect(mgr.list().find((j) => j.id === id)).toMatchObject({ status: "adopted", source: { kind: "mcp", server: { name: "notes" } } });
+  });
+
+  it("a server named by its Claude Code configuration needs no command: the spec is resolved from ~/.claude.json", async () => {
+    const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "reins-claude-cfg-"));
+    const prevCfg = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = cfgDir;
+    fs.writeFileSync(path.join(cfgDir, ".claude.json"), JSON.stringify({ mcpServers: { notes: { command: "node", args: ["notes-server.js"], env: { NOTES: "/n" } } } }));
+    try {
+      const r = resolveSource({ mcp: { name: "notes" }, focus: "rollouts" }, "/tmp/job");
+      expect(r.source).toEqual({ kind: "mcp", server: { name: "notes", command: "node", args: ["notes-server.js"], env: { NOTES: "/n" } } });
+      expect(r.url).toBe("mcp://notes");
+      expect(() => resolveSource({ mcp: { name: "missing" }, focus: "x" }, "/tmp/job")).toThrow(/no MCP server named "missing"/);
+    } finally {
+      if (prevCfg === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = prevCfg;
+      fs.rmSync(cfgDir, { recursive: true, force: true });
+    }
   });
 
   it("fails the job, not the server, when the MCP server cannot be reached", async () => {

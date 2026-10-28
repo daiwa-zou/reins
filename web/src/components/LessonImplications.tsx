@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { Trash2 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Play, Trash2 } from "lucide-react";
 import type { Implication, ImplicationKind, IntakeJobSummary, Lesson, McpServerSpec, Standing } from "@shared/types";
 import { useStore } from "../state/store";
 import { api, IntakeRefusedError, type LessonDerived } from "../lib/api";
 import { Badge } from "./ui";
+import { describeSource, detectSource, needsFocus } from "@shared/intakeInput";
 import { dateTime } from "../lib/format";
 
 const KIND_LABEL: Record<ImplicationKind, string> = { component: "Components", stage: "Stages", skill: "Skills", foundation: "Foundations", gap: "Ideas (gaps)", effort: "Effort recommendations" };
@@ -201,48 +202,38 @@ export function DeleteLesson({ lesson, onDeleted }: { lesson: Lesson; onDeleted:
 /** Start a lesson intake job from a URL or pasted text; its events open on the Stage like a run. */
 /** `inline`: shown already open, e.g. inside the Lessons "Add a lesson" card. */
 type SourceKind = "url" | "text" | "repo" | "mcp";
-const SOURCE_KINDS: { kind: SourceKind; label: string }[] = [
-  { kind: "url", label: "Web page" },
-  { kind: "text", label: "Pasted text" },
-  { kind: "repo", label: "Git repository" },
-  { kind: "mcp", label: "MCP server" },
-];
-
-/** "node server.js --flag" → command + args; an http(s) address is an HTTP server instead. */
-export function parseMcpEndpoint(name: string, endpoint: string): McpServerSpec | null {
-  const e = endpoint.trim();
-  const n = name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!e || !n) return null;
-  if (/^https?:\/\//i.test(e)) return { name: n, url: e };
-  const [command, ...args] = e.match(/"[^"]*"|'[^']*'|\S+/g)!.map((t) => t.replace(/^(['"])(.*)\1$/, "$2"));
-  return { name: n, command, args };
-}
-
+/**
+ * Lesson intake as one box: paste a web address, a repository or folder, the
+ * name of an MCP server Claude Code has configured, or the text itself; the
+ * form says how it will read it. Explored sources (a repository, a server) ask
+ * what to look for; the rest take it as an optional hint.
+ */
 export function IntakeForm({ inline = false }: { inline?: boolean } = {}) {
   const selectRun = useStore((s) => s.selectRun);
   const refreshIntake = useStore((s) => s.refreshIntake);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
-  const [kind, setKind] = useState<SourceKind>("url");
-  const [url, setUrl] = useState("");
-  const [text, setText] = useState("");
-  const [repo, setRepo] = useState("");
-  const [ref, setRef] = useState("");
-  const [mcpName, setMcpName] = useState("");
-  const [mcpEndpoint, setMcpEndpoint] = useState("");
+  const [raw, setRaw] = useState("");
   const [focus, setFocus] = useState("");
+  const [servers, setServers] = useState<{ name: string; from: "project" | "local" | "user" }[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState<IntakeRefusedError["duplicate"]>(null);
-  const needsFocus = kind === "repo" || kind === "mcp";
-  const mcp = kind === "mcp" ? parseMcpEndpoint(mcpName, mcpEndpoint) : null;
-  const ready = (kind === "url" ? !!url.trim() : kind === "text" ? !!text.trim() : kind === "repo" ? !!repo.trim() : !!mcp) && (!needsFocus || !!focus.trim());
+  useEffect(() => {
+    api
+      .mcpServers()
+      .then(setServers)
+      .catch(() => setServers([]));
+  }, []);
+  const detected = detectSource(raw, servers.map((s) => s.name));
+  const focusRequired = needsFocus(detected);
+  const ready = !!detected && (!focusRequired || !!focus.trim());
   const start = async () => {
+    if (!detected) return;
     setBusy(true);
     setErr(null);
     setDup(null);
     try {
-      const body =
-        kind === "url" ? { url: url.trim() } : kind === "text" ? { text } : kind === "repo" ? { repo: repo.trim(), ...(ref.trim() ? { ref: ref.trim() } : {}) } : { mcp: mcp! };
+      const body = detected.kind === "url" ? { url: detected.url } : detected.kind === "text" ? { text: detected.text } : detected.kind === "repo" ? { repo: detected.repo, ...(detected.ref ? { ref: detected.ref } : {}) } : { mcp: { name: detected.name } };
       const r = await api.startIntake({ ...body, ...(focus.trim() ? { focus: focus.trim() } : {}) });
       await refreshIntake();
       selectRun(r.id);
@@ -256,45 +247,47 @@ export function IntakeForm({ inline = false }: { inline?: boolean } = {}) {
   return (
     <details className={`${inline ? "" : "card p-3"} text-[12.5px]`} data-intake-form open={inline || undefined}>
       <summary className={inline ? "sr-only" : "cursor-pointer font-semibold"}>Add a lesson from a source…</summary>
-      <p className="muted mt-1.5">
-        A librarian distils the source into a lesson with typed implications, each quoting what it read. A web page or pasted text is read whole; a git repository or an MCP server is explored for what you ask it to look for. You review
-        the draft before it lands in your library.
-      </p>
-      <div className="flex gap-1 mt-2 flex-wrap" role="tablist" aria-label="Source kind">
-        {SOURCE_KINDS.map((k) => (
-          <button key={k.kind} type="button" role="tab" aria-selected={kind === k.kind} className={`btn btn-sm ${kind === k.kind ? "btn-primary" : ""}`} onClick={() => setKind(k.kind)} data-intake-kind={k.kind}>
-            {k.label}
-          </button>
-        ))}
-      </div>
-      {kind === "url" && <input className="input w-full mt-2" placeholder="https://… (the page to read)" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Source URL" />}
-      {kind === "text" && <textarea className="input w-full h-24 mt-2" placeholder="Paste the text" value={text} onChange={(e) => setText(e.target.value)} aria-label="Source text" />}
-      {kind === "repo" && (
-        <div className="flex gap-2 mt-2 flex-wrap">
-          <input className="input flex-1 min-w-[16rem]" placeholder="https://github.com/org/repo.git, git@…, or a folder on this machine" value={repo} onChange={(e) => setRepo(e.target.value)} aria-label="Repository URL or folder" />
-          <input className="input w-36" placeholder="branch or tag" value={ref} onChange={(e) => setRef(e.target.value)} aria-label="Branch or tag" />
-        </div>
-      )}
-      {kind === "mcp" && (
-        <div className="flex gap-2 mt-2 flex-wrap">
-          <input className="input w-36" placeholder="name (e.g. wiki)" value={mcpName} onChange={(e) => setMcpName(e.target.value)} aria-label="MCP server name" />
-          <input className="input flex-1 min-w-[16rem]" placeholder="command to run it (node server.js …) or its http(s) URL" value={mcpEndpoint} onChange={(e) => setMcpEndpoint(e.target.value)} aria-label="MCP server command or URL" />
-        </div>
-      )}
+      <p className="muted mt-1.5">A librarian distils the source into a lesson with typed implications, each quoting what it read. You review the draft before it lands in your library.</p>
       <textarea
-        className="input w-full h-16 mt-2"
-        placeholder={needsFocus ? "What to look for (required): e.g. how errors from the API are retried and reported to the user" : "What to look for (optional): narrows the lesson to one theme"}
+        className="input w-full mt-2"
+        rows={raw.includes("\n") || raw.length > 120 ? 5 : 2}
+        placeholder="Paste a web address, a repository or folder, the name of an MCP server, or the text itself"
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        aria-label="Source"
+        data-intake-source
+      />
+      <div className="flex flex-wrap items-center gap-1.5 mt-1.5 min-h-[20px]" data-intake-detected={detected?.kind ?? ""}>
+        {detected ? (
+          <span className="faint text-caption">Read as: {describeSource(detected)}</span>
+        ) : (
+          servers.length > 0 && (
+            <>
+              <span className="faint text-caption">MCP servers Claude Code knows:</span>
+              {servers.map((s) => (
+                <button key={s.name} type="button" className="chip chip-sm" onClick={() => setRaw(s.name)} title={`${s.from === "user" ? "Configured for you" : s.from === "project" ? "Configured in this project's .mcp.json" : "Configured for this project"}; its tools are attached to the librarian`} data-mcp-server={s.name}>
+                  {s.name}
+                </button>
+              ))}
+            </>
+          )
+        )}
+      </div>
+      <input
+        className="input w-full mt-2"
+        placeholder={focusRequired ? "What to look for (needed to explore it): e.g. how errors from the API are retried and reported" : "What to look for (optional): narrows the lesson to one theme"}
         value={focus}
         onChange={(e) => setFocus(e.target.value)}
         aria-label="What to look for"
+        aria-required={focusRequired}
         data-intake-focus
       />
       <div className="flex items-center gap-2 mt-2 flex-wrap">
-        <button className="btn btn-primary" disabled={busy || !ready} onClick={start}>
-          {busy ? "Starting…" : "Start intake"}
+        <button className="btn btn-primary" disabled={busy || !ready} onClick={start} title={!detected ? "Paste a source first" : focusRequired && !focus.trim() ? "Say what to look for" : undefined} data-intake-start>
+          <Play size={13} aria-hidden /> {busy ? "Starting…" : "Start intake"}
         </button>
         {err && (
-          <span className="text-red-600 text-[12px]" role="alert" data-intake-error>
+          <span className="text-[var(--bad)] text-[12px]" role="alert" data-intake-error>
             {err}
           </span>
         )}

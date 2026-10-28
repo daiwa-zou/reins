@@ -25,6 +25,7 @@ import { allTrialSets } from "./engine/trials.js";
 import { sandboxAvailable } from "./tools/sandbox.js";
 import { listAudits } from "./audit.js";
 import { probeDirectEngine } from "./engine/loop.js";
+import { listConfiguredMcpServers } from "./intake/mcpConfig.js";
 import { DEFAULT_MODEL, defaultRunConfig } from "../../shared/components.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -109,6 +110,8 @@ app.post("/api/lessons/:slug/standing", async (c) => {
   }
 });
 app.get("/api/intake", (c) => c.json(intake.list()));
+// The MCP servers Claude Code has configured (user scope, this project): intake names one instead of retyping its command.
+app.get("/api/mcp-servers", (c) => c.json(listConfiguredMcpServers(info().defaultWorkspace).map((s) => ({ name: s.name, from: s.from, transport: s.spec.url ? "http" : "stdio" }))));
 app.post("/api/intake", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   try {

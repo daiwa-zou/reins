@@ -32,7 +32,8 @@ import { loadSkills } from "../skills.js";
 import { librarianPrompt } from "../roles/prompts.js";
 import { budgetOf } from "../../../shared/budget.js";
 import { emptyUsage } from "../engine/pricing.js";
-import { connectMcpSource, mcpSpecProblem, type McpSource } from "./mcpSource.js";
+import { connectMcpSource, type McpSource } from "./mcpSource.js";
+import { resolveMcpInput } from "./mcpConfig.js";
 
 export const INTAKE_PREFIX = "intake-";
 export const isIntakeId = (id: string) => typeof id === "string" && id.startsWith(INTAKE_PREFIX);
@@ -576,7 +577,8 @@ export interface IntakeStartInput {
   /** A git URL (http(s), ssh, git@ or file://) to clone, or a local directory to read in place. */
   repo?: string;
   ref?: string;
-  mcp?: McpServerSpec;
+  /** A configured MCP server by name (resolved from Claude Code's config), or a full spec with command or url. */
+  mcp?: Partial<McpServerSpec> & { name: string };
   /** What to look for; required with repo or mcp. */
   focus?: string;
   title?: string;
@@ -608,10 +610,7 @@ export function resolveSource(input: IntakeStartInput, dir: string): { source: I
   }
   if (input.mcp) {
     if (!focus) throw new Error("say what to look for on the MCP server (focus)");
-    const problem = mcpSpecProblem(input.mcp);
-    if (problem) throw new Error(problem);
-    const m = input.mcp;
-    const server: McpServerSpec = { name: m.name, ...(m.command ? { command: m.command, args: m.args ?? [] } : {}), ...(m.env ? { env: m.env } : {}), ...(m.url ? { url: m.url } : {}), ...(m.headers ? { headers: m.headers } : {}) };
+    const server = resolveMcpInput(input.mcp, process.env.REINS_WORKSPACE ?? process.cwd());
     return { source: { kind: "mcp", server }, url: `mcp://${server.name}`, workspace: dir };
   }
   const text = typeof input.text === "string" && input.text.trim() ? input.text.slice(0, MAX_SOURCE_CHARS) : undefined;
