@@ -325,14 +325,16 @@ function FeedRow({ item, model, showThinking, showRole }: { item: FeedItem; mode
       return (
         <div className="flex items-center gap-2 text-small px-1 fade-in">
           <GitPullRequest size={14} className="shrink-0" style={{ color: item.what === "merged" ? "var(--ok)" : "var(--accent)" }} aria-hidden />
-          <Badge tone={item.what === "merged" ? "ok" : item.what === "feedback" ? "warn" : "neutral"}>{item.what === "merged" ? "merged" : item.what === "feedback" ? `review round ${item.round}` : "pull request"}</Badge>
+          <Badge tone={item.what === "merged" ? "ok" : item.what === "feedback" ? "warn" : "neutral"}>{item.what === "merged" ? "merged" : item.what === "feedback" ? `review round ${item.round}` : item.what === "skipped" ? "feedback skipped" : "pull request"}</Badge>
           <a className="underline underline-offset-2" href={item.url} target="_blank" rel="noreferrer">
             #{item.number}
           </a>
-          {item.what === "feedback" ? (
+          {item.what === "feedback" || item.what === "skipped" ? (
             <span className="muted truncate">
               {item.comments} comment{item.comments === 1 ? "" : "s"}
-              {item.checks?.length ? `, failing: ${item.checks.join(", ")}` : ""} — {item.summary}
+              {item.checks?.length ? `, failing: ${item.checks.join(", ")}` : ""}
+              {item.addressed ? ` (${item.addressed.kept} of ${item.addressed.of} addressed)` : ""}
+              {item.summary ? ` — ${item.summary}` : ""}
             </span>
           ) : (
             <span className="mono muted truncate">

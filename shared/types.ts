@@ -97,6 +97,10 @@ export interface RunPauses {
   beforePublish?: boolean;
   /** Before the harness merges a package's pull request. Absent on runs that predate publishing. */
   beforeMerge?: boolean;
+  /** When review feedback or failing checks arrive: show them and let the person pick what to address. Absent on runs that predate review cards. */
+  beforeReviewRound?: boolean;
+  /** Before a review round's changes are pushed and its reply posted on the pull request. Absent on runs that predate review cards. */
+  beforeReviewReply?: boolean;
 }
 
 /** How the publish stage opens and merges a package's pull request. */
@@ -386,10 +390,61 @@ export interface GuardrailDecision {
   rationale: string;
 }
 
-export type ApprovalKind = "contract" | "action" | "phase" | "lesson" | "publish";
+export type ApprovalKind = "contract" | "action" | "phase" | "lesson" | "publish" | "review" | "reply";
 
-/** "revise" is only meaningful for a publish approval: the builder redrafts the pull request from the note and the card comes back. */
+/**
+ * "revise" means: on a publish card, the builder redrafts the pull request from the note and the card comes back;
+ * on a review card, skip this feedback and keep waiting on the pull request; on a reply card, the note goes back
+ * to the round as one more piece of feedback and the round runs again.
+ */
 export type ApprovalDecision = "approve" | "reject" | "revise";
+
+/** One piece of review feedback shown on a review card (shared/publish feedback, without the builder rendering). */
+export interface ReviewFeedbackItem {
+  kind: "comment" | "review" | "inline";
+  author: string;
+  body: string;
+  at: string;
+  state?: string;
+  path?: string;
+  line?: number;
+  url?: string;
+}
+
+/** A failing check shown on a review card. */
+export interface ReviewCheckItem {
+  name: string;
+  bucket: string;
+  description?: string;
+  link?: string;
+}
+
+/** What a review card shows: the feedback and failing checks that arrived, numbered so the answer can keep some. */
+export interface ReviewRequestPayload {
+  number: number;
+  url: string;
+  /** The round this would be (1-based) and how many are allowed. */
+  round: number;
+  maxRounds: number;
+  items: ReviewFeedbackItem[];
+  checks: ReviewCheckItem[];
+  package?: PackageRef;
+}
+
+/** What a reply card shows: the reply drafted for the reviewers and what the round changed, before anything is pushed. */
+export interface ReplyRequestPayload {
+  number: number;
+  url: string;
+  round: number;
+  reply: string;
+  /** Files changed by the round, from git. */
+  files: string[];
+  /** Commits the round made, newest first ("abc1234 subject"). */
+  commits: string[];
+  /** How many times the person has sent the reply back so far. */
+  revision: number;
+  package?: PackageRef;
+}
 
 /** The pull request a publish approval shows: editable before the branch is pushed. */
 export interface PublishDraft {
@@ -402,7 +457,7 @@ export interface ApprovalRequest {
   kind: ApprovalKind;
   title: string;
   detail: string;
-  /** For actions: the tool call. For contracts: the criteria. For phases: the phase. For publish: the draft (PublishDraft plus branch, base, package, revision). */
+  /** For actions: the tool call. For contracts: the criteria. For phases: the phase. For publish: the draft (PublishDraft plus branch, base, package, revision). For review: ReviewRequestPayload. For reply: ReplyRequestPayload. */
   payload: unknown;
 }
 
@@ -474,7 +529,8 @@ export type RunEvent = Base &
     | { type: "tests.agreed"; plan: TestPlan; red: { exitCode: number | null; excerpt: string } }
     | { type: "pr.opened"; number: number; url: string; branch: string; base: string; package?: PackageRef }
     | { type: "pr.merged"; number: number; url: string; branch: string; base: string; sha: string }
-    | { type: "pr.feedback"; number: number; url: string; round: number; comments: number; checks: string[]; summary: string }
+    | { type: "pr.feedback"; number: number; url: string; round: number; comments: number; checks: string[]; summary: string; /** Items the person chose to address, of those that arrived; absent when every item was addressed. */ addressed?: { kept: number; of: number } }
+    | { type: "pr.skipped"; number: number; url: string; comments: number; checks: string[]; note?: string }
     | {
         type: "evaluation.result";
         round: number;

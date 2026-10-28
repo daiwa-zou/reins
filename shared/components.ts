@@ -444,10 +444,10 @@ export const EFFORT_TABLE: Record<HarnessEffort, EffortRow> = {
   max: row("Max", "Everything, with the think tool, three fix rounds and the evaluator re-running every criterion.", "111111", 3, 120, 40, 4_000_000, true),
 };
 
-export type PauseKey = "afterPlan" | "afterContract" | "beforeCommit" | "afterEvaluation" | "beforePublish" | "beforeMerge";
-export const PAUSE_KEYS: PauseKey[] = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforePublish", "beforeMerge"];
+export type PauseKey = "afterPlan" | "afterContract" | "beforeCommit" | "afterEvaluation" | "beforePublish" | "beforeReviewRound" | "beforeReviewReply" | "beforeMerge";
+export const PAUSE_KEYS: PauseKey[] = ["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforePublish", "beforeReviewRound", "beforeReviewReply", "beforeMerge"];
 /** The gate each pause waits at: a pause turns on only when its gate exists at the chosen effort. */
-export const PAUSE_GATE: Record<PauseKey, ComponentId> = { afterPlan: "planner", afterContract: "contracts", beforeCommit: "gitCommits", afterEvaluation: "evaluator", beforePublish: "publish", beforeMerge: "publish" };
+export const PAUSE_GATE: Record<PauseKey, ComponentId> = { afterPlan: "planner", afterContract: "contracts", beforeCommit: "gitCommits", afterEvaluation: "evaluator", beforePublish: "publish", beforeReviewRound: "publish", beforeReviewReply: "publish", beforeMerge: "publish" };
 
 export interface SupervisionRow {
   label: string;
@@ -460,10 +460,10 @@ export interface SupervisionRow {
 }
 
 export const SUPERVISION_TABLE: Record<Supervision, SupervisionRow> = {
-  unattended: { label: "Unattended", chip: "Unattended", meaning: "Never pauses; the guardrail runs in auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeMerge: false }, mode: "auto", actionClassifier: true },
-  "ask-to-publish": { label: "Ask before publishing", chip: "Ask to publish", meaning: "Runs unattended until a package is ready to go out, then asks once before pushing its branch and opening the pull request; auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeMerge: false }, mode: "auto", actionClassifier: true },
-  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract, each evaluation, to review each pull request draft and before each merge; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: true, beforeMerge: true }, mode: "auto", actionClassifier: true },
-  "ask-every-write": { label: "Ask before every write", chip: "Ask every write", meaning: "Every pause is on and the guardrail asks before anything that is not read-only.", pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeMerge: true }, mode: "ask", actionClassifier: false },
+  unattended: { label: "Unattended", chip: "Unattended", meaning: "Never pauses; the guardrail runs in auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeReviewRound: false, beforeReviewReply: false, beforeMerge: false }, mode: "auto", actionClassifier: true },
+  "ask-to-publish": { label: "Ask before publishing", chip: "Ask to publish", meaning: "Runs unattended until something would go out: asks before pushing a package's branch and opening its pull request, when review feedback arrives (you pick what to address), and before the reply and its changes are pushed; auto mode with the action classifier.", pauses: { afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: false }, mode: "auto", actionClassifier: true },
+  "check-in": { label: "Check in at gates", chip: "Check in", meaning: "Pauses after the plan, the contract, each evaluation, to review each pull request draft, when review feedback arrives, before each reply is pushed and before each merge; auto mode otherwise.", pauses: { afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: true, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: true }, mode: "auto", actionClassifier: true },
+  "ask-every-write": { label: "Ask before every write", chip: "Ask every write", meaning: "Every pause is on and the guardrail asks before anything that is not read-only.", pauses: { afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: true }, mode: "ask", actionClassifier: false },
 };
 
 // ---- Publishing ------------------------------------------------------------
@@ -501,7 +501,7 @@ export function defaultRunConfig(partial: Partial<RunConfig> & { task: string; w
       ...(partial.roles ?? {}),
     },
     components,
-    pauses: partial.pauses ?? { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeMerge: true },
+    pauses: partial.pauses ?? { afterPlan: false, afterContract: true, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: true },
     context: partial.context ?? { compactAtTokens: 150_000, clearToolResultsAfterTurns: 8, resetAtTokens: 400_000 },
     guardrail: partial.guardrail ?? { mode: "auto", allowNetwork: false, askPatterns: [], denyPatterns: [] },
     budgetUsd: partial.budgetUsd ?? EFFORT_TABLE[DEFAULT_COMPOSITION.effort].budgetUsd,

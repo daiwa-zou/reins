@@ -543,6 +543,8 @@ export function NewRun() {
                         ["beforeCommit", "before each commit"],
                         ["afterEvaluation", "after each evaluation"],
                         ["beforePublish", "before publishing"],
+                        ["beforeReviewRound", "when review feedback arrives"],
+                        ["beforeReviewReply", "before each reply to reviewers"],
                         ["beforeMerge", "before each merge"],
                       ] as const
                     ).map(([k, label]) => (

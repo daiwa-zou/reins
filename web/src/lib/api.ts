@@ -69,7 +69,7 @@ export const api = {
   createRun: (body: Partial<RunConfig> & { task: string; workspace: string }) => post("/api/runs", body).then((r) => j<RunConfig>(r)),
   demo: () => post("/api/runs/demo").then((r) => j<RunConfig>(r)),
   deleteRun: (id: string) => fetch(`/api/runs/${id}`, { method: "DELETE" }).then((r) => j<{ ok: true }>(r)),
-  approve: (id: string, approvalId: string, decision: ApprovalDecision, note?: string, extra: { criteria?: ContractCriterion[]; lesson?: unknown; publish?: PublishDraft } = {}) =>
+  approve: (id: string, approvalId: string, decision: ApprovalDecision, note?: string, extra: { criteria?: ContractCriterion[]; lesson?: unknown; publish?: PublishDraft; keep?: number[]; reply?: string } = {}) =>
     post(`/api/runs/${id}/approve`, { approvalId, decision, note, ...extra }).then((r) => j<{ ok: true }>(r)),
   lessonDerived: (slug: string) => fetch(`/api/lessons/${encodeURIComponent(slug)}/derived`).then((r) => j<LessonDerived>(r)),
   deleteLesson: (slug: string) => fetch(`/api/lessons/${encodeURIComponent(slug)}`, { method: "DELETE" }).then((r) => j<LessonDerived>(r)),

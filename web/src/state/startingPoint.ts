@@ -102,7 +102,7 @@ export function effortSummary(effort: HarnessEffort): EffortSummary {
   return { stages, extras, fixRounds: row.maxFixRounds, turns: row.maxTurnsPerPhase, budgetUsd: row.budgetUsd, budgetTokens: row.budgetTokens };
 }
 
-const PAUSE_WORDS: Record<PauseKey, string> = { afterPlan: "after the plan", afterContract: "to approve each contract", beforeCommit: "before each commit", afterEvaluation: "after each evaluation", beforePublish: "before publishing each package", beforeMerge: "before each merge" };
+const PAUSE_WORDS: Record<PauseKey, string> = { afterPlan: "after the plan", afterContract: "to approve each contract", beforeCommit: "before each commit", afterEvaluation: "after each evaluation", beforePublish: "before publishing each package", beforeReviewRound: "when review feedback arrives", beforeReviewReply: "before each reply to reviewers", beforeMerge: "before each merge" };
 
 /** The pauses a Supervision level turns on, in pipeline order. */
 export function supervisionSummary(supervision: Supervision): string[] {

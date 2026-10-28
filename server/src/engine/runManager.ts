@@ -25,6 +25,10 @@ interface ApprovalAnswer {
   criteria?: ContractCriterion[];
   /** Publish cards: the title and body as edited. */
   draft?: PublishDraft;
+  /** Review cards: the feedback items (then checks) to address, by index. */
+  keep?: number[];
+  /** Reply cards: the reply as edited. */
+  reply?: string;
 }
 
 interface PendingApproval {
@@ -227,6 +231,27 @@ export class RunManager extends EventEmitter {
         });
         return { decision: a.decision, note: a.note, draft: a.draft };
       },
+      requestReviewApproval: async (payload) => {
+        const what = payload.package ? `${payload.package.id}: ${payload.package.title}` : "this package";
+        const n = payload.items.length + payload.checks.length;
+        const a = await this.ask(run, {
+          kind: "review",
+          title: `Review feedback on the pull request for ${what}`,
+          detail: `${n} item${n === 1 ? "" : "s"} arrived on pull request #${payload.number} (review round ${payload.round} of at most ${payload.maxRounds}). Keep the ones to address and approve: the round plans, contracts, tests, builds and evaluates the changes, and you see the reply before it is pushed. Skip leaves them unanswered and keeps waiting on the pull request. Stop ends the run with the pull request open.`,
+          payload,
+        });
+        return { decision: a.decision, keep: a.keep, note: a.note };
+      },
+      requestReplyApproval: async (payload) => {
+        const what = payload.package ? `${payload.package.id}: ${payload.package.title}` : "this package";
+        const a = await this.ask(run, {
+          kind: "reply",
+          title: `Approve the reply for review round ${payload.round} on ${what}`,
+          detail: `Review round ${payload.round} is built and evaluated; nothing has been pushed. Edit the reply and approve to push the round's commits and post it on pull request #${payload.number}. Or write what should change and request changes: the note goes back as feedback and the round runs again. Reject keeps the commits local and ends the run.`,
+          payload,
+        });
+        return { decision: a.decision, reply: a.reply, note: a.note };
+      },
     };
   }
 
@@ -282,14 +307,14 @@ export class RunManager extends EventEmitter {
   }
 
   /** Answer a pending card. `revise` only means something on a publish card; elsewhere it counts as a rejection. */
-  approve(runId: string, approvalId: string, decision: ApprovalDecision, note?: string, extra: { criteria?: ContractCriterion[]; draft?: PublishDraft } = {}) {
+  approve(runId: string, approvalId: string, decision: ApprovalDecision, note?: string, extra: { criteria?: ContractCriterion[]; draft?: PublishDraft; keep?: number[]; reply?: string } = {}) {
     const run = this.active.get(runId);
     const p = run?.pending.get(approvalId);
     if (!run || !p) throw new Error("That approval is no longer pending: it was already decided, the run finished, or the server restarted. Reload to see the current state.");
-    if (decision === "revise" && p.request.kind !== "publish") throw new Error("Only a pull request draft can be sent back for changes.");
+    if (decision === "revise" && !["publish", "review", "reply"].includes(p.request.kind)) throw new Error("Only a pull request draft, review feedback or a review reply can be sent back.");
     run.pending.delete(approvalId);
     run.bus.emitEvent({ type: "approval.resolved", approvalId, decision, note });
-    p.resolve({ decision, approved: decision === "approve", note, criteria: extra.criteria, draft: extra.draft });
+    p.resolve({ decision, approved: decision === "approve", note, criteria: extra.criteria, draft: extra.draft, keep: extra.keep, reply: extra.reply });
   }
 
   steer(runId: string, text: string) {

@@ -31,14 +31,16 @@ describe("tiers and the Effort / Supervision tables", () => {
     expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].chip)).toEqual(["Unattended", "Ask to publish", "Check in", "Ask every write"]);
     expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].mode)).toEqual(["auto", "auto", "auto", "ask"]);
     expect(SUPERVISION_LEVELS.map((s) => SUPERVISION_TABLE[s].actionClassifier)).toEqual([true, true, true, false]);
-    expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeMerge: false });
-    // Ask before publishing: unattended until a package is ready to go out, then one prompt.
-    expect(SUPERVISION_TABLE["ask-to-publish"].pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeMerge: false });
-    // Check in at gates reviews each pull request draft before it is opened, and asks again before the merge.
-    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: true, beforeMerge: true });
-    expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeMerge: true });
-    expect(PAUSE_KEYS).toEqual(["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforePublish", "beforeMerge"]);
+    expect(SUPERVISION_TABLE.unattended.pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: false, beforeReviewRound: false, beforeReviewReply: false, beforeMerge: false });
+    // Ask before publishing: unattended until something would go out — the pull request, a review round, its reply.
+    expect(SUPERVISION_TABLE["ask-to-publish"].pauses).toEqual({ afterPlan: false, afterContract: false, beforeCommit: false, afterEvaluation: false, beforePublish: true, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: false });
+    // Check in at gates reviews each pull request draft before it is opened, each piece of review feedback, each reply, and asks again before the merge.
+    expect(SUPERVISION_TABLE["check-in"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: false, afterEvaluation: true, beforePublish: true, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: true });
+    expect(SUPERVISION_TABLE["ask-every-write"].pauses).toEqual({ afterPlan: true, afterContract: true, beforeCommit: true, afterEvaluation: true, beforePublish: true, beforeReviewRound: true, beforeReviewReply: true, beforeMerge: true });
+    expect(PAUSE_KEYS).toEqual(["afterPlan", "afterContract", "beforeCommit", "afterEvaluation", "beforePublish", "beforeReviewRound", "beforeReviewReply", "beforeMerge"]);
     expect(PAUSE_GATE.beforePublish).toBe("publish");
+    expect(PAUSE_GATE.beforeReviewRound).toBe("publish");
+    expect(PAUSE_GATE.beforeReviewReply).toBe("publish");
     expect(PAUSE_GATE.beforeMerge).toBe("publish");
   });
   it("defaultRunConfig takes its budgets from EFFORT_TABLE (medium)", () => {

@@ -182,6 +182,9 @@ describe("publish policy", () => {
     expect(checkRunConfig(cfg).map((w) => w.setting)).toContain("pauses.beforeMerge");
     cfg.pauses.beforePublish = true;
     expect(checkRunConfig(cfg).map((w) => w.setting)).toContain("pauses.beforePublish");
+    cfg.pauses.beforeReviewRound = true;
+    cfg.pauses.beforeReviewReply = true;
+    expect(checkRunConfig(cfg).map((w) => w.setting)).toEqual(expect.arrayContaining(["pauses.beforeReviewRound", "pauses.beforeReviewReply"]));
     const { config, dropped } = validatePresetConfig({ publish: { mergeWhen: "checks", mergeMethod: "rebase", pollSeconds: 5, maxWaitMinutes: 10, maxReviewRounds: 1, remote: "upstream", base: "develop", bogus: 1 } });
     expect(config.publish).toEqual({ mergeWhen: "checks", mergeMethod: "rebase", pollSeconds: 5, maxWaitMinutes: 10, maxReviewRounds: 1, remote: "upstream", base: "develop" });
     expect(dropped).toEqual(["publish.bogus"]);

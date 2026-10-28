@@ -58,7 +58,7 @@ export function control(overrides: Partial<OrchestratorControl> = {}): Orchestra
     drainSteer: () => [],
     remainingBudget: () => 100,
   };
-  return { ...base, requestPhaseApproval: async () => ({ approved: true }), requestContractApproval: async (c) => ({ approved: true, criteria: c }), requestPublishApproval: async (draft) => ({ decision: "approve", draft }), ...overrides };
+  return { ...base, requestPhaseApproval: async () => ({ approved: true }), requestContractApproval: async (c) => ({ approved: true, criteria: c }), requestPublishApproval: async (draft) => ({ decision: "approve", draft }), requestReviewApproval: async () => ({ decision: "approve" }), requestReplyApproval: async (p) => ({ decision: "approve", reply: p.reply }), ...overrides };
 }
 
 /** A git repo with a README and a package.json whose test script passes. */

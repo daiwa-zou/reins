@@ -30,6 +30,10 @@ export interface ApprovalDraft {
   note: string;
   lesson?: LessonDraftState;
   publish?: PublishDraft;
+  /** Review cards: indexes of the feedback items (then checks) to address; absent = all. */
+  keep?: number[];
+  /** Reply cards: the reply as edited. */
+  reply?: string;
 }
 
 interface State {

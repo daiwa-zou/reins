@@ -299,8 +299,10 @@ app.post("/api/runs/:id/approve", async (c) => {
     if (decision !== "approve" && decision !== "reject" && decision !== "revise") throw new Error('decision must be "approve", "reject" or "revise"');
     const note = typeof body.note === "string" ? body.note.slice(0, 4000) : undefined;
     const draft = body.publish && typeof body.publish === "object" ? { title: String(body.publish.title ?? ""), body: String(body.publish.body ?? "") } : undefined;
+    const keep = Array.isArray(body.keep) ? body.keep.filter((n: unknown) => Number.isInteger(n) && (n as number) >= 0).slice(0, 500) : undefined;
+    const reply = typeof body.reply === "string" ? body.reply.slice(0, 20000) : undefined;
     if (isIntakeId(id)) intake.approve(id, body.approvalId, decision, note, body.lesson);
-    else manager.approve(id, body.approvalId, decision, note, { criteria: body.criteria, draft });
+    else manager.approve(id, body.approvalId, decision, note, { criteria: body.criteria, draft, keep, reply });
     return c.json({ ok: true });
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);

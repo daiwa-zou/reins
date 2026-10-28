@@ -169,5 +169,13 @@ describe("derive (fold of the event log)", () => {
     const withRound = derive([evs[0], { runId: "r", seq: 1, ts: "2026-01-01T00:05:00.000Z", type: "pr.feedback", number: 7, url: "https://example.test/pr/7", round: 1, comments: 2, checks: ["ci"], summary: "Fixed." } as unknown as RunEvent, evs[1]]);
     expect(withRound.pullRequests[0].rounds).toEqual([{ round: 1, comments: 2, checks: ["ci"], summary: "Fixed.", ts: "2026-01-01T00:05:00.000Z" }]);
     expect((withRound.feed[1] as any)).toMatchObject({ kind: "pr", what: "feedback", round: 1, comments: 2, checks: ["ci"] });
+    // Feedback the person skipped is a row of its own; a round the person trimmed says how much of the feedback it addressed.
+    const withSkip = derive([
+      evs[0],
+      { runId: "r", seq: 1, ts: "2026-01-01T00:03:00.000Z", type: "pr.skipped", number: 7, url: "https://example.test/pr/7", comments: 1, checks: ["lint"], note: "flaky" },
+      { runId: "r", seq: 2, ts: "2026-01-01T00:05:00.000Z", type: "pr.feedback", number: 7, url: "https://example.test/pr/7", round: 1, comments: 2, checks: [], summary: "Fixed.", addressed: { kept: 2, of: 3 } },
+    ]);
+    expect((withSkip.feed[1] as any)).toMatchObject({ kind: "pr", what: "skipped", comments: 1, checks: ["lint"], summary: "flaky" });
+    expect(withSkip.pullRequests[0].rounds).toEqual([{ round: 1, comments: 2, checks: [], summary: "Fixed.", ts: "2026-01-01T00:05:00.000Z", addressed: { kept: 2, of: 3 } }]);
   });
 });

@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
-import type { ApprovalDecision, ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, PublishDraft, RunConfig, TestPlan, Usage, WorkPackage } from "../../../shared/types.js";
+import type { ApprovalDecision, ContractCriterion, CriterionResult, EvaluationOrigin, FeatureItem, PackageRef, Phase, PublishDraft, ReplyRequestPayload, ReviewRequestPayload, RunConfig, TestPlan, Usage, WorkPackage } from "../../../shared/types.js";
 import { RunBus } from "./bus.js";
 import { AgentLoop, type LoopControl, type LoopOptions, type LoopResult } from "./loop.js";
 import { ClaudeCodeLoop } from "./claudeCodeLoop.js";
@@ -12,9 +12,9 @@ import { addUsage, emptyUsage } from "./pricing.js";
 import { firstMessage, renderContract, systemPromptFor, type PromptRole } from "../roles/prompts.js";
 import { packageLabel, packageRef, renderBreakdown, renderPackage, singlePackage, validateBreakdown, PACKAGE_MAX_LINES } from "../../../shared/packages.js";
 import { renderTestPlanDoc, renderTestsForBuilder, testsCriterion, TESTS_CRITERION_ID, validateTestPlan } from "../../../shared/testPlan.js";
-import { branchNameFor, collectFeedback, prState, Publisher, renderFeedbackForBuilder, renderPrBody, sleep } from "./publish.js";
+import { branchNameFor, collectFeedback, prState, Publisher, renderFeedbackForBuilder, renderPrBody, sleep, type CheckRow, type FeedbackItem } from "./publish.js";
 import { DEFAULT_PUBLISH } from "../../../shared/components.js";
-import { changedFiles, ensureReinsIgnored, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
+import { changedFiles, ensureReinsIgnored, git, headSha, isGitRepo, readWorkspaceFile, reinsDir, writeWorkspaceFile } from "../workspace.js";
 import { runShell } from "../tools/registry.js";
 import { budgetLine, budgetOf, countedTokens } from "../../../shared/budget.js";
 import { EFFORT_TABLE } from "../../../shared/components.js";
@@ -35,6 +35,10 @@ export interface OrchestratorControl extends LoopControl {
   requestContractApproval: (criteria: ContractCriterion[]) => Promise<{ approved: boolean; note?: string; criteria?: ContractCriterion[] }>;
   /** Show the pull request draft before the branch is pushed. `revision` counts the builder's redrafts so far. Absent: the draft is approved as it is. */
   requestPublishApproval?: (draft: PublishDraft, detail: { branch: string; base: string; package?: PackageRef; revision: number }) => Promise<PublishAnswer>;
+  /** Review feedback arrived: the person keeps the items to address (`keep`: indexes into items, then checks), skips them all (revise) or stops (reject). Absent: everything is addressed. */
+  requestReviewApproval?: (payload: ReviewRequestPayload) => Promise<{ decision: ApprovalDecision; keep?: number[]; note?: string }>;
+  /** A review round is done: the person approves the reply (as edited), sends the note back as more feedback (revise) or rejects (nothing is pushed). Absent: the reply goes out as drafted. */
+  requestReplyApproval?: (payload: ReplyRequestPayload) => Promise<{ decision: ApprovalDecision; reply?: string; note?: string }>;
 }
 
 const READ_TOOLS = ["read_file", "list_files", "search", "think", "git_status", "git_diff", "list_lessons", "read_lesson"]; // http_fetch belongs to the intake librarian only
@@ -360,9 +364,15 @@ export class Orchestrator {
     return this.finish(true, lastEval ? lastEval.summary : "Build finished.");
   }
 
-  /** One work package: contract, then build/evaluate rounds. Returns the last evaluation on success. */
-  private async runPackage(pkgBrief: Record<string, string>, pkg: WorkPackage): Promise<{ ok: true; ev: Evaluation | null } | { ok: false; summary: string }> {
+  /**
+   * One work package: contract, then build/evaluate rounds. Returns the last
+   * evaluation and the builder's last summary on success. A review round runs
+   * the same stages on the feedback (`review`), with instructions to match.
+   */
+  private async runPackage(pkgBrief: Record<string, string>, pkg: WorkPackage, opts: { review?: boolean } = {}): Promise<{ ok: true; ev: Evaluation | null; summary: string } | { ok: false; summary: string }> {
     const ws = this.config.workspace;
+    const review = !!opts.review;
+    const withPlan = review && "Review plan" in pkgBrief;
     // ---- Contract ----
     if (this.config.components.contracts) {
       const stop = await this.phase("contract", 0, async () => {
@@ -376,7 +386,15 @@ export class Orchestrator {
             this.bus.emitEvent({ type: "contract.proposed", by: "builder", criteria: proposed, rationale });
             return "Proposed.";
           },
-        }).run(firstMessage("contract", this.config, { ...this.projectContext(), ...pkgBrief, Instructions: `Read the spec and feature list, inspect the codebase, then call propose_contract${this.pkg ? " for this work package only" : ""}.` }));
+        }).run(
+          firstMessage("contract", this.config, {
+            ...this.projectContext(),
+            ...pkgBrief,
+            Instructions: review
+              ? `Read the review feedback${withPlan ? " and the review plan" : ""}, inspect the code on this branch (git_diff), then call propose_contract with criteria that show each item of feedback is addressed, or deliberately declined with the reason in the rationale, and that the package's original tests still pass. Do not restate the package's original criteria.`
+              : `Read the spec and feature list, inspect the codebase, then call propose_contract${this.pkg ? " for this work package only" : ""}.`,
+          }),
+        );
         if (this.checkStop(r1)) return { result: r1, summary: "Stopped.", value: true };
         let usage = r1.usage;
         let cost = r1.costUsd;
@@ -436,7 +454,7 @@ export class Orchestrator {
             ...this.projectContext(),
             ...pkgBrief,
             Contract: renderContract(this.contract),
-            Instructions: "Learn how this project tests, write the tests that prove every hard criterion (they must fail before any code is written), run them to see the failure, then call propose_tests.",
+            Instructions: `${review ? "This round addresses review feedback on an open pull request. " : ""}Learn how this project tests, write the tests that prove every hard criterion (they must fail before any code is written), run them to see the failure, then call propose_tests.`,
           }),
         );
         if (this.checkStop(r)) return { result: r, summary: "Stopped.", value: true };
@@ -456,20 +474,26 @@ export class Orchestrator {
 
     // ---- Build / Evaluate rounds ----
     let lastEval: Evaluation | null = null;
+    let lastSummary = "";
     for (let round = 1; round <= this.config.maxFixRounds + 1; round++) {
       await this.runInitScript();
       const stop = await this.phase("build", round, async () => {
         const ctx = this.projectContext();
-        const extra: Record<string, string> = { ...(this.builderHistory ? { "Budget and time": ctx["Budget and time"] } : { ...ctx, ...pkgBrief }), Contract: renderContract(this.contract) };
+        // A continued builder conversation already holds the project context; a review round's feedback is new to it, so the brief comes along.
+        const extra: Record<string, string> = { ...(this.builderHistory && !review ? { "Budget and time": ctx["Budget and time"] } : { ...ctx, ...pkgBrief }), Contract: renderContract(this.contract) };
         if (this.testPlan && !lastEval) extra["Tests to make pass"] = renderTestsForBuilder(this.testPlan);
         if (lastEval) extra["Evaluation of the previous round"] = renderEvaluationForBuilder(lastEval);
-        else extra.Instructions = `Follow the session preamble, then implement the features${this.pkg ? ` of this package (${pkg.features.join(", ")}). Build only the features of this package; the others belong to later packages` : ""}. Call finish only when every hard criterion's verification step has been run and passed.`;
+        else
+          extra.Instructions = review
+            ? `Address the review feedback as ${withPlan ? "the contract and the review plan describe" : "the contract describes"}: change the code, or record in your summary why an item was declined. Do not weaken or delete tests to make a check pass. Run the contract's verification steps and the package's test command, then call finish with a summary written for the reviewers: it is posted on the pull request.`
+            : `Follow the session preamble, then implement the features${this.pkg ? ` of this package (${pkg.features.join(", ")}). Build only the features of this package; the others belong to later packages` : ""}. Call finish only when every hard criterion's verification step has been run and passed.`;
         if (this.config.components.selfVerification) extra["Self-verification"] = "As you complete the work, run each criterion's verify step yourself and record what you observed with check_criterion (one call per criterion, as soon as it is verified), then include the results in your summary before finish.";
         const loop = this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}, this.shouldResetBuilder() ? undefined : this.builderHistory);
         const r = await loop.run(firstMessage(lastEval ? `build (fix round ${round - 1})` : "build", this.config, extra));
         // On Claude Code the conversation lives in the SDK session; a placeholder marks it as continued.
         this.builderHistory = this.config.engine === "claude-code" ? (r.messages.length ? r.messages : [{ role: "user", content: "(claude-code session)" }]) : r.messages;
         this.builderPrompt = r.promptTokens;
+        lastSummary = String(r.terminalInput?.summary ?? r.finalText.slice(0, 1000)).trim();
         return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
       });
       if (stop) return { ok: false, summary: "Stopped while building." };
@@ -533,125 +557,257 @@ export class Orchestrator {
         return { ok: false, summary: `Evaluation still failing after ${this.config.maxFixRounds} fix rounds: ${why}${lastEval.summary}` };
       }
     }
-    return { ok: true, ev: lastEval };
+    return { ok: true, ev: lastEval, summary: lastSummary };
   }
 
 
-  /** Push the package branch, open its pull request, wait until it can be merged, merge it and pull the base. */
+  /**
+   * Push the package branch, open its pull request, and carry it to a merge.
+   * Review feedback and failing checks start a review round: the person decides
+   * what to address (beforeReviewRound), the round runs the package stages again
+   * on the feedback as a package of its own, the person approves the reply
+   * (beforeReviewReply), and the round is pushed with the reply posted. Each
+   * publish phase is one stretch of waiting on the pull request: round 0 opens
+   * it, round N follows review round N.
+   */
   private async publishPackage(pkg: WorkPackage, ev: Evaluation | null): Promise<{ ok: true } | { ok: false; summary: string }> {
     const ws = this.config.workspace;
     const pub = this.publishing!;
     const branch = this.branch!;
     const policy = this.publishPolicy;
     const signal = this.control.signal;
-    type Outcome = { ok: true } | { ok: false; summary: string };
-    return this.phase<Outcome>("publish", 0, async () => {
-      // Review rounds spend model turns inside this phase; their usage is summed here.
+    const pkgRef = this.pkg;
+    // The package's own contract and tests: a review round replaces them while it runs and they come back after.
+    const original = { contract: this.contract, testPlan: this.testPlan };
+    type Wait = { kind: "merged"; sha: string } | { kind: "stacked" } | { kind: "feedback"; items: FeedbackItem[]; checks: CheckRow[] } | { kind: "fail"; summary: string };
+    const st = { pr: null as { number: number; url: string } | null, since: new Date().toISOString(), rounds: 0, ignoredChecks: [] as string[], deadline: Date.now() + policy.maxWaitMinutes * 60_000 };
+    const where = () => `Pull request #${st.pr!.number} (${st.pr!.url})`;
+    const noTurns = () => ({ usage: emptyUsage(), costUsd: 0 }) as unknown as LoopResult;
+    const fail = (summary: string): Wait => ({ kind: "fail", summary });
+
+    /** Look at the pull request until it is merged, closed, or has feedback to act on. */
+    const wait = async (): Promise<Wait> => {
+      for (;;) {
+        if (signal.aborted) return fail(`Stopped while waiting on ${where()}.`);
+        let state;
+        let feedback: FeedbackItem[];
+        try {
+          const view = await this.publisher.view(ws, st.pr!.number, signal);
+          state = prState(view, policy.mergeWhen);
+          feedback = state.kind === "merged" || state.kind === "closed" ? [] : collectFeedback(view, await this.publisher.inlineComments(ws, st.pr!.number, signal), st.since);
+        } catch (err) {
+          return fail(`Could not read ${where()}: ${(err as Error).message}`);
+        }
+        if (state.kind === "closed") return fail(`${where()} was closed without being merged.`);
+        if (state.kind !== "merged") {
+          // Checks the person chose to skip do not ask again; new feedback or a newly failing check does.
+          const failing = state.kind === "failing" ? state.checks.filter((c) => !st.ignoredChecks.includes(c)) : [];
+          if (failing.length || feedback.length) {
+            if (st.rounds >= policy.maxReviewRounds) {
+              const what = [failing.length ? `failing checks (${failing.join(", ")})` : "", feedback.length ? `${feedback.length} unaddressed comment${feedback.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+              return fail(`${where()} still has ${what} after ${st.rounds} review round${st.rounds === 1 ? "" : "s"}. It stays open.`);
+            }
+            const checks = failing.length ? (await this.publisher.checks(ws, st.pr!.number, signal)).filter((c) => (c.bucket === "fail" || c.bucket === "cancel") && failing.includes(c.name)) : [];
+            st.since = new Date().toISOString();
+            return { kind: "feedback", items: feedback, checks: checks.length ? checks : failing.map((name) => ({ name, bucket: "fail" })) };
+          }
+          if (state.kind === "ready") {
+            if (this.config.pauses.beforeMerge) {
+              const a = await this.control.requestPhaseApproval(`Merge pull request #${st.pr!.number}?`, `${pkg.title} is approved with green checks. Merge it (${policy.mergeMethod}) into ${pub.base}?`, { number: st.pr!.number, url: st.pr!.url, branch: branch.name, base: pub.base, method: policy.mergeMethod });
+              if (!a.approved) return fail(`Merge of ${where().charAt(0).toLowerCase() + where().slice(1)} rejected${a.note ? `: ${a.note}` : ""}. It stays open.`);
+            }
+            try {
+              await this.publisher.merge(ws, st.pr!.number, policy.mergeMethod, signal);
+            } catch (err) {
+              return fail(`Could not merge ${where()}: ${(err as Error).message}`);
+            }
+          } else {
+            if (Date.now() >= st.deadline) return fail(`${where()} was not merged after ${policy.maxWaitMinutes} minutes (${state.kind === "failing" ? `failing checks you skipped: ${state.checks.join(", ")}` : state.why}). It stays open; merge it and start the next package with a new run.`);
+            await this.sleep(policy.pollSeconds * 1000, signal);
+            continue;
+          }
+        }
+        let sha: string;
+        try {
+          sha = await this.publisher.afterMerge(ws, pub.remote, pub.base, branch.name, signal);
+        } catch (err) {
+          return fail(`${where()} is merged, but the base could not be pulled: ${(err as Error).message}`);
+        }
+        this.bus.emitEvent({ type: "pr.merged", number: st.pr!.number, url: st.pr!.url, branch: branch.name, base: pub.base, sha });
+        this.branch = null;
+        return { kind: "merged", sha };
+      }
+    };
+    const describe = (w: Wait): string =>
+      w.kind === "fail"
+        ? w.summary
+        : w.kind === "stacked"
+          ? `${where()} opened; not waiting for a merge, the next package stacks on ${branch.name}.`
+          : w.kind === "merged"
+            ? `${where()} merged (${policy.mergeMethod}) into ${pub.base} at ${w.sha.slice(0, 7)}${st.rounds ? ` after ${st.rounds} review round${st.rounds === 1 ? "" : "s"}` : ""}.`
+            : `${where()}: ${[w.items.length ? `${w.items.length} new comment${w.items.length === 1 ? "" : "s"}` : "", w.checks.length ? `failing checks (${w.checks.map((c) => c.name).join(", ")})` : ""].filter(Boolean).join(" and ")} to decide on.`;
+
+    // ---- Publish round 0: the draft, the push, the pull request, the first wait ----
+    let w = await this.phase<Wait>("publish", 0, async () => {
       let usage = emptyUsage();
       let cost = 0;
       const result = () => ({ usage, costUsd: cost }) as unknown as LoopResult;
-      const fail = (summary: string) => ({ result: result(), summary, value: { ok: false, summary } as Outcome });
-      const since0 = new Date().toISOString();
-      let since = since0;
-      let rounds = 0;
-      let pr: { number: number; url: string };
-      // The draft the person reviews: the package title and a body a reviewer can judge by intent.
+      const done = (v: Wait) => ({ result: result(), summary: describe(v), value: v });
       let draft: PublishDraft = { title: pkg.title, body: renderPrBody({ pkg, features: this.features, contract: this.contract, evaluation: ev, testsDoc: readWorkspaceFile(ws, ".reins/tests.md") ?? "", baseSha: branch.baseSha, base: pub.base, runId: this.config.id || "run" }) };
       if (this.config.pauses.beforePublish) {
         const reviewed = await this.reviewDraft(draft, pkg, branch.name, pub.base, (r) => {
           usage = addUsage(usage, r.usage);
           cost += r.costUsd;
         });
-        if (!reviewed.ok) return fail(reviewed.summary);
+        if (!reviewed.ok) return done(fail(reviewed.summary));
         draft = reviewed.draft;
       }
       try {
         await this.publisher.push(ws, pub.remote, branch.name, signal);
-        pr = await this.publisher.open(ws, { base: pub.base, head: branch.name, title: draft.title, body: draft.body }, signal);
+        st.pr = await this.publisher.open(ws, { base: pub.base, head: branch.name, title: draft.title, body: draft.body }, signal);
       } catch (err) {
-        return fail(`Could not open the pull request: ${(err as Error).message}`);
+        return done(fail(`Could not open the pull request: ${(err as Error).message}`));
       }
-      const where = `Pull request #${pr.number} (${pr.url})`;
-      this.bus.emitEvent({ type: "pr.opened", number: pr.number, url: pr.url, branch: branch.name, base: pub.base, ...this.pkgField });
+      this.bus.emitEvent({ type: "pr.opened", number: st.pr.number, url: st.pr.url, branch: branch.name, base: pub.base, ...this.pkgField });
       if (policy.mergeWhen === "never") {
         // The next package stacks on this branch; a person merges the pull requests in order.
         pub.base = branch.name;
-        return { result: result(), summary: `${where} opened; not waiting for a merge, the next package stacks on ${branch.name}.`, value: { ok: true } as Outcome };
+        return done({ kind: "stacked" });
       }
-      const deadline = Date.now() + policy.maxWaitMinutes * 60_000;
-      for (;;) {
-        if (signal.aborted) return fail(`Stopped while waiting on ${where}.`);
-        let st;
-        let feedback;
-        try {
-          const view = await this.publisher.view(ws, pr.number, signal);
-          st = prState(view, policy.mergeWhen);
-          feedback = st.kind === "merged" || st.kind === "closed" ? [] : collectFeedback(view, await this.publisher.inlineComments(ws, pr.number, signal), since);
-        } catch (err) {
-          return fail(`Could not read ${where}: ${(err as Error).message}`);
-        }
-        if (st.kind === "merged") break;
-        if (st.kind === "closed") return fail(`${where} was closed without being merged.`);
-        if (st.kind === "failing" || feedback.length) {
-          // Review comments and failing checks are work for the builder, up to maxReviewRounds per pull request.
-          const failing = st.kind === "failing" ? st.checks : [];
-          if (rounds >= policy.maxReviewRounds) {
-            const what = [failing.length ? `failing checks (${failing.join(", ")})` : "", feedback.length ? `${feedback.length} unaddressed comment${feedback.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
-            return fail(`${where} still has ${what} after ${rounds} review round${rounds === 1 ? "" : "s"}. It stays open.`);
-          }
-          rounds++;
-          const checks = failing.length ? (await this.publisher.checks(ws, pr.number, signal)).filter((c) => c.bucket === "fail" || c.bucket === "cancel") : [];
-          const rows = checks.length ? checks : failing.map((name) => ({ name, bucket: "fail" }));
-          since = new Date().toISOString();
-          const ctx = this.projectContext();
-          const extra: Record<string, string> = {
-            ...ctx,
-            ...this.packageBrief(pkg),
-            Contract: renderContract(this.contract),
-            ...(this.testPlan ? { "Tests to keep passing": `Run: ${this.testPlan.command}` } : {}),
-            "Review feedback": renderFeedbackForBuilder(feedback, rows, pr.url),
-          };
-          const r = await this.loop("builder", "builder", [...READ_TOOLS, ...WRITE_TOOLS], ["finish"], {}).run(firstMessage(`publish (review round ${rounds})`, this.config, extra));
-          usage = addUsage(usage, r.usage);
-          cost += r.costUsd;
-          if (this.checkStop(r)) return fail(`Stopped during review round ${rounds} on ${where}.`);
-          const summary = String(r.terminalInput?.summary ?? r.finalText.slice(0, 1000)).trim() || `Review round ${rounds} finished without a summary.`;
-          if (this.config.components.gitCommits) await this.commit(this.commitSubject(`review round ${rounds}`, pkg));
-          try {
-            await this.publisher.push(ws, pub.remote, branch.name, signal);
-            await this.publisher.comment(ws, pr.number, `Reins review round ${rounds}: ${summary}`, signal);
-          } catch (err) {
-            return fail(`Could not push review round ${rounds} to ${where}: ${(err as Error).message}`);
-          }
-          this.bus.emitEvent({ type: "pr.feedback", number: pr.number, url: pr.url, round: rounds, comments: feedback.length, checks: failing, summary });
-          await this.emitChangedFiles();
-          continue;
-        }
-        if (st.kind === "ready") {
-          if (this.config.pauses.beforeMerge) {
-            const a = await this.control.requestPhaseApproval(`Merge pull request #${pr.number}?`, `${pkg.title} is approved with green checks. Merge it (${policy.mergeMethod}) into ${pub.base}?`, { number: pr.number, url: pr.url, branch: branch.name, base: pub.base, method: policy.mergeMethod });
-            if (!a.approved) return fail(`Merge of ${where.charAt(0).toLowerCase() + where.slice(1)} rejected${a.note ? `: ${a.note}` : ""}. It stays open.`);
-          }
-          try {
-            await this.publisher.merge(ws, pr.number, policy.mergeMethod, signal);
-          } catch (err) {
-            return fail(`Could not merge ${where}: ${(err as Error).message}`);
-          }
-          break;
-        }
-        if (Date.now() >= deadline) return fail(`${where} was not merged after ${policy.maxWaitMinutes} minutes (${st.why}). It stays open; merge it and start the next package with a new run.`);
-        await this.sleep(policy.pollSeconds * 1000, signal);
-      }
-      let sha: string;
-      try {
-        sha = await this.publisher.afterMerge(ws, pub.remote, pub.base, branch.name, signal);
-      } catch (err) {
-        return fail(`${where} is merged, but the base could not be pulled: ${(err as Error).message}`);
-      }
-      this.bus.emitEvent({ type: "pr.merged", number: pr.number, url: pr.url, branch: branch.name, base: pub.base, sha });
-      this.branch = null;
-      return { result: result(), summary: `${where} merged (${policy.mergeMethod}) into ${pub.base} at ${sha.slice(0, 7)}${rounds ? ` after ${rounds} review round${rounds === 1 ? "" : "s"}` : ""}.`, value: { ok: true } as Outcome };
+      return done(await wait());
     });
+
+    // ---- Review rounds: decide, run the stages on the feedback, approve the reply, push and wait again ----
+    while (w.kind === "feedback") {
+      const decision = await this.decideReview(w.items, w.checks, st.pr!, st.rounds + 1, policy.maxReviewRounds, pkgRef);
+      if (decision.kind === "stop") return { ok: false, summary: decision.summary };
+      if (decision.kind === "skip") {
+        st.ignoredChecks.push(...w.checks.map((c) => c.name).filter((n) => !st.ignoredChecks.includes(n)));
+        w = await this.phase<Wait>("publish", st.rounds, async () => {
+          const v = await wait();
+          return { result: noTurns(), summary: describe(v), value: v };
+        });
+        continue;
+      }
+      st.rounds++;
+      const n = st.rounds;
+      let items = decision.items;
+      const checks = decision.checks;
+      let round = await this.reviewRound(pkg, pkgRef, items, checks, st.pr!, n, 0, original);
+      if (!round.ok) return round;
+      let reply = round.reply;
+      // The reply card: approve (as edited), send the note back as feedback and run the round again, or reject.
+      if (this.config.pauses.beforeReviewReply && this.control.requestReplyApproval) {
+        for (let revision = 0; ; revision++) {
+          const a = await this.control.requestReplyApproval({ number: st.pr!.number, url: st.pr!.url, round: n, reply, files: round.files, commits: round.commits, revision, ...(pkgRef ? { package: pkgRef } : {}) });
+          const edited = typeof a.reply === "string" && a.reply.trim() ? a.reply.trim() : reply;
+          if (a.decision === "reject") return { ok: false, summary: `Review round ${n} on ${where().charAt(0).toLowerCase() + where().slice(1)} was not pushed${a.note ? `: ${a.note}` : ""}. Its commits stay local on ${branch.name}; the pull request stays open.` };
+          if (a.decision === "approve") {
+            reply = edited;
+            break;
+          }
+          if (revision >= MAX_PR_REVISIONS) {
+            this.bus.emitEvent({ type: "note", level: "warn", text: `Review round ${n} has been redone ${revision} times, the most for one round; edit the reply on the card and approve, or reject.` });
+            reply = edited;
+            continue;
+          }
+          items = [...items, { kind: "comment", author: "you", body: (a.note ?? "").trim() || "(no note was given; look at the feedback again and do better)", at: new Date().toISOString() }];
+          round = await this.reviewRound(pkg, pkgRef, items, checks, st.pr!, n, revision + 1, original);
+          if (!round.ok) return round;
+          reply = round.reply;
+        }
+      }
+      const addressed = decision.addressed;
+      w = await this.phase<Wait>("publish", n, async () => {
+        try {
+          await this.publisher.push(ws, pub.remote, branch.name, signal);
+          await this.publisher.comment(ws, st.pr!.number, `Reins review round ${n}: ${reply}`, signal);
+        } catch (err) {
+          return { result: noTurns(), summary: `Could not push review round ${n}.`, value: fail(`Could not push review round ${n} to ${where()}: ${(err as Error).message}`) };
+        }
+        this.bus.emitEvent({ type: "pr.feedback", number: st.pr!.number, url: st.pr!.url, round: n, comments: items.filter((i) => i.author !== "you").length, checks: checks.map((c) => c.name), summary: reply, ...(addressed ? { addressed } : {}) });
+        await this.emitChangedFiles();
+        const v = await wait();
+        return { result: noTurns(), summary: describe(v), value: v };
+      });
+    }
+    if (w.kind === "fail") return { ok: false, summary: w.summary };
+    return { ok: true };
+  }
+
+  /** What the person wants done with the feedback that arrived (the review card), or everything when the pause is off. */
+  private async decideReview(items: FeedbackItem[], checks: CheckRow[], pr: { number: number; url: string }, round: number, maxRounds: number, pkgRef: PackageRef | undefined): Promise<{ kind: "address"; items: FeedbackItem[]; checks: CheckRow[]; addressed?: { kept: number; of: number } } | { kind: "skip" } | { kind: "stop"; summary: string }> {
+    if (!this.config.pauses.beforeReviewRound || !this.control.requestReviewApproval) return { kind: "address", items, checks };
+    const a = await this.control.requestReviewApproval({ number: pr.number, url: pr.url, round, maxRounds, items, checks: checks.map((c) => ({ name: c.name, bucket: c.bucket, ...(c.description ? { description: c.description } : {}), ...(c.link ? { link: c.link } : {}) })), ...(pkgRef ? { package: pkgRef } : {}) });
+    const where = `Pull request #${pr.number} (${pr.url})`;
+    if (a.decision === "reject") return { kind: "stop", summary: `${where} has review feedback you chose not to address${a.note ? `: ${a.note}` : ""}. It stays open.` };
+    const total = items.length + checks.length;
+    const keep = a.decision === "approve" ? (Array.isArray(a.keep) ? a.keep.filter((i) => Number.isInteger(i) && i >= 0 && i < total) : [...Array(total).keys()]) : [];
+    if (!keep.length) {
+      this.bus.emitEvent({ type: "pr.skipped", number: pr.number, url: pr.url, comments: items.length, checks: checks.map((c) => c.name), ...(a.note ? { note: a.note } : {}) });
+      return { kind: "skip" };
+    }
+    const kept = { items: items.filter((_, i) => keep.includes(i)), checks: checks.filter((_, j) => keep.includes(items.length + j)) };
+    return { kind: "address", ...kept, ...(keep.length < total ? { addressed: { kept: keep.length, of: total } } : {}) };
+  }
+
+  /**
+   * One review round as a package of its own (R1, or P2.r1 with a breakdown):
+   * plan (with the planner), then contract, tests, build and evaluate on the
+   * feedback. Returns the reply drafted for the reviewers and what changed.
+   */
+  private async reviewRound(pkg: WorkPackage, pkgRef: PackageRef | undefined, items: FeedbackItem[], checks: CheckRow[], pr: { number: number; url: string }, n: number, revision: number, original: { contract: ContractCriterion[]; testPlan: TestPlan | null }): Promise<{ ok: true; reply: string; files: string[]; commits: string[] } | { ok: false; summary: string }> {
+    const ws = this.config.workspace;
+    const title = `Review round ${n} of ${pkgRef ? pkgRef.title : this.config.title}${revision ? ` (revision ${revision})` : ""}`;
+    const ref: PackageRef = pkgRef ? { id: `${pkgRef.id}.r${n}`, title, index: pkgRef.index, total: pkgRef.total } : { id: `R${n}`, title, index: 1, total: 1 };
+    const rpkg: WorkPackage = { ...pkg, id: ref.id, title, rationale: `Address the review feedback on pull request #${pr.number}.` };
+    const startSha = await headSha(ws);
+    this.pkg = ref;
+    const brief: Record<string, string> = {
+      "Work package": `${packageLabel(ref)}\n${renderPackage(rpkg, this.features)}`,
+      "Review feedback": renderFeedbackForBuilder(items, checks, pr.url),
+      "Original contract": renderContract(original.contract),
+      ...(original.testPlan ? { "Tests to keep passing": `Run: ${original.testPlan.command}` } : {}),
+    };
+    const restore = () => {
+      this.pkg = pkgRef;
+      this.contract = original.contract;
+      this.testPlan = original.testPlan;
+    };
+    const failed = (summary: string) => (restore(), { ok: false as const, summary: `Review round ${n}: ${summary}` });
+    if (this.config.components.planner) {
+      const stop = await this.phase("plan", 0, async () => {
+        const r = await this.loop("planner", "planner", [...READ_TOOLS, "write_file"], ["finish"], {}).run(
+          firstMessage("plan (review round)", this.config, {
+            ...this.projectContext(),
+            ...brief,
+            Instructions: "Read the review feedback, inspect the code on this branch (git_diff against the base), and decide for each item what will change or why it should not. Write .reins/review-plan.md with that, one entry per item, then call finish. Leave .reins/spec.md and the feature list as they are: this round addresses the feedback, not new features.",
+          }),
+        );
+        return { result: r, summary: r.terminalInput?.summary ?? r.finalText.slice(0, 300), value: this.checkStop(r) };
+      });
+      if (stop) return failed("Stopped while planning the round.");
+      const plan = readWorkspaceFile(ws, ".reins/review-plan.md");
+      if (plan) brief["Review plan"] = plan;
+      else this.bus.emitEvent({ type: "note", level: "warn", text: `The planner did not write .reins/review-plan.md for review round ${n}; the round goes ahead from the feedback alone.` });
+      if (this.config.pauses.afterPlan) {
+        const a = await this.control.requestPhaseApproval(`Review the plan for review round ${n}`, `The planner decided what to change for each item of feedback on pull request #${pr.number}. Continue to the round's contract?`, { spec: plan ?? "(no review plan written)", package: ref });
+        if (!a.approved) return failed(`Plan rejected${a.note ? `: ${a.note}` : "."}`);
+      }
+    }
+    const out = await this.runPackage(brief, rpkg, { review: true });
+    if (!out.ok) return failed(out.summary);
+    const reply = `${out.summary || `Review round ${n} finished without a summary.`}${out.ev ? `\n\nVerified: ${out.ev.summary}` : ""}`;
+    let files: string[] = [];
+    let commits: string[] = [];
+    try {
+      files = (await changedFiles(ws, startSha)).map((f) => f.path);
+      commits = startSha ? (await git(ws, ["log", "--format=%h %s", `${startSha}..HEAD`])).trim().split("\n").filter(Boolean) : [];
+    } catch {
+      /* not a git repo */
+    }
+    restore();
+    return { ok: true, reply, files, commits };
   }
 
   /**
