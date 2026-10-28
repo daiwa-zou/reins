@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ExternalLink, Layers, Plus } from "lucide-react";
+import { ExternalLink, Layers, Play, Plus, X } from "lucide-react";
 import { presetChip, presetDomains } from "@shared/presets";
 import { useStore } from "../state/store";
 import { Badge, Empty } from "../components/ui";
@@ -29,6 +29,10 @@ export function LessonsPanel() {
   const [problems, setProblems] = useState<{ problems: LessonProblem[]; userDir: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  // Sidebar filters as chips: All / Yours, and the component and tag pickers only when asked for.
+  const [mine, setMine] = useState(false);
+  const [showComponent, setShowComponent] = useState(!!component);
+  const [showTags, setShowTags] = useState(!!tag);
   const [deleted, setDeleted] = useState<LessonDerived | null>(null);
   const refreshDomains = useStore((s) => s.refreshDomains);
   const refreshIntake = useStore((s) => s.refreshIntake);
@@ -66,8 +70,10 @@ export function LessonsPanel() {
   }, [open]);
 
   const tags = useMemo(() => [...new Set(lessons.flatMap((l) => l.tags))].sort(), [lessons]);
+  const userCount = lessons.filter((l) => l.source === "user").length;
   const shown = lessons.filter(
     (l) =>
+      (!mine || l.source === "user") &&
       (!tag || l.tags.includes(tag)) &&
       (!component || l.components.includes(component as any) || l.foundations.includes(component)) &&
       (!q || `${l.title} ${l.takeaway} ${l.learnings.join(" ")}`.toLowerCase().includes(q.toLowerCase())),
@@ -97,6 +103,44 @@ export function LessonsPanel() {
           </button>
         </div>
         <input className="input" type="search" placeholder="Search lessons" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search lessons" />
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filters">
+          <button type="button" className="chip chip-sm" aria-pressed={!mine} onClick={() => setMine(false)} data-filter="all">
+            All · {lessons.length}
+          </button>
+          <button type="button" className="chip chip-sm" aria-pressed={mine} onClick={() => setMine(true)} disabled={!userCount} title={userCount ? "Only your own lessons" : "No lessons of your own yet"} data-filter="mine">
+            Yours · {userCount}
+          </button>
+          <button type="button" className="chip chip-sm" aria-pressed={showComponent || !!component} onClick={() => (showComponent && navigate({ section: "lessons", component: null, lesson: null }), setShowComponent(!showComponent))} data-filter="component">
+            By component
+          </button>
+          <button type="button" className="chip chip-sm" aria-pressed={showTags || !!tag} onClick={() => (showTags && setTag(null), setShowTags(!showTags))} data-filter="tag">
+            By tag
+          </button>
+        </div>
+        {addOpen && (
+          <section className="card p-3 flex flex-col gap-2 text-small" aria-label="Add a lesson from a source" style={{ borderColor: "var(--accent)" }} data-add-lesson>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold flex-1">Add a lesson from a source</span>
+              <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} aria-label="Close" title="Close" onClick={() => setAddOpen(false)}>
+                <X size={13} aria-hidden />
+              </button>
+            </div>
+            <IntakeNotice />
+            <IntakeForm inline />
+            <IntakeJobs />
+            <p className="faint text-caption leading-relaxed">
+              Or drop a markdown file in <code className="mono">{problems?.userDir ?? "$REINS_HOME/lessons"}</code> (start from{" "}
+              <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
+                the template
+              </a>
+              ); it appears here without a restart.{" "}
+              <button type="button" className="underline" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
+                Reload
+              </button>
+            </p>
+          </section>
+        )}
+        {showComponent && (
         <label className="flex flex-col gap-1 text-small">
           <span className="section-label">Informs component</span>
           <select className="input" value={component ?? ""} onChange={(e) => navigate({ section: "lessons", component: e.target.value || null, lesson: null })} aria-label="Filter by component">
@@ -117,9 +161,9 @@ export function LessonsPanel() {
             </optgroup>
           </select>
         </label>
-        <details className="text-small" open={!!tag}>
-          <summary className="cursor-pointer faint">Tags{tag ? `: ${tag}` : ` · ${tags.length}`}</summary>
-          <div className="flex flex-wrap gap-1 mt-1">
+        )}
+        {showTags && (
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Tags">
             <button className={`badge ${tag === null ? "badge-accent" : "badge-neutral"}`} onClick={() => setTag(null)}>
               all tags
             </button>
@@ -129,7 +173,7 @@ export function LessonsPanel() {
               </button>
             ))}
           </div>
-        </details>
+        )}
         <div className="faint text-[11px]">
           {shown.length} of {lessons.length} lessons
         </div>
@@ -167,35 +211,13 @@ export function LessonsPanel() {
                   </button>
                 </div>
               )}
-              <IntakeJobs />
-              <details className="card p-4 text-small leading-relaxed" data-add-lesson open={addOpen} onToggle={(e) => setAddOpen((e.target as HTMLDetailsElement).open)}>
-                <summary className="cursor-pointer font-semibold">Add a lesson</summary>
-                {addOpen && (
-                <>
-                <div className="flex items-center gap-2 mt-2">
-                  <p className="muted flex-1">
-                    Drop a markdown file in <code className="mono">{problems?.userDir ?? "$REINS_HOME/lessons"}</code>. It appears here without a restart, and a file with the same name as a bundled lesson replaces it. Start from{" "}
-                    <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
-                      docs/lesson-template.md
-                    </a>{" "}
-                    and run <code className="mono">npm run lessons:check</code> to lint it. Or let an agent draft one from a web page, pasted text, a git repository or an MCP server, with a note on what to look for:
-                  </p>
-                  <button className="btn btn-sm self-start" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
-                    Reload
-                  </button>
-                </div>
-                <div className="mt-2">
-                  <IntakeForm inline />
-                </div>
-                {audits.length > 0 && (
-                  <p className="muted mt-2" title="From docs/audit, written by an independent audit pass that re-read each post and looked for the matching code">
-                    Independent audit of {audits.length} lessons: <span className="text-[var(--ok)] font-semibold">{totals.implemented}</span> implemented · <span className="text-[var(--warn)] font-semibold">{totals.partial}</span> partial ·{" "}
-                    <span className="text-[var(--bad)] font-semibold">{totals.gap}</span> gaps
-                  </p>
-                )}
-                </>
-                )}
-              </details>
+              {!addOpen && <IntakeJobs />}
+              {audits.length > 0 && (
+                <p className="muted text-small" title="From docs/audit, written by an independent audit pass that re-read each post and looked for the matching code">
+                  Independent audit of {audits.length} lessons: <span className="text-[var(--ok)] font-semibold">{totals.implemented}</span> implemented · <span className="text-[var(--warn)] font-semibold">{totals.partial}</span> partial ·{" "}
+                  <span className="text-[var(--bad)] font-semibold">{totals.gap}</span> gaps
+                </p>
+              )}
               {userProblems.length > 0 && (
                 <div className="card p-4 text-small" style={{ borderColor: "var(--warn)" }} role="status">
                   <div className="font-semibold text-[var(--warn)]">
@@ -277,45 +299,49 @@ export function LessonsPanel() {
                       </p>
                     )}
                     {(informs.length > 0 || founds.length > 0 || usedDomains.length > 0) && (
-                      <div className="mt-4 rounded-lg border line p-3 flex flex-col gap-2 text-[12px]" data-used-by>
-                        <h3 className="text-[13px] font-semibold">Used by</h3>
-                        {(informs.length > 0 || founds.length > 0) && (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="faint">Components:</span>
-                            {informs.map((c) => (
-                              <button key={c.id} className="badge badge-accent hover:brightness-95" onClick={() => navigate({ section: "lessons", component: c.id, lesson: null })} title={`Show every lesson behind ${c.label}`}>
-                                {c.label} →
-                              </button>
-                            ))}
-                            {founds.map((f) => (
-                              <button key={f.id} className="badge badge-neutral hover:brightness-95" onClick={() => navigate({ section: "lessons", component: f.id, lesson: null })} title={`Show every lesson behind ${f.label}`}>
-                                {f.label} →
-                              </button>
-                            ))}
-                          </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-1.5 text-small" data-used-by>
+                        <span className="section-label mr-1">Used by</span>
+                        {informs.map((c) => (
+                          <button key={c.id} type="button" className="chip chip-sm" onClick={() => navigate({ section: "lessons", component: c.id, lesson: null })} title={`Show every lesson behind ${c.label}`}>
+                            {c.label}
+                          </button>
+                        ))}
+                        {founds.map((f) => (
+                          <button key={f.id} type="button" className="chip chip-sm" onClick={() => navigate({ section: "lessons", component: f.id, lesson: null })} title={`Show every lesson behind ${f.label}`}>
+                            {f.label}
+                          </button>
+                        ))}
+                        {usedDomains.map((d) => (
+                          <button key={d} type="button" className="chip chip-sm" onClick={() => startWithDomain(d)} data-start-domain={d} title={`Open New run with the ${presetChip(d)} domain on`}>
+                            <Play size={11} aria-hidden /> {presetChip(d)}
+                          </button>
+                        ))}
+                        {(fx || l.guidance) && (
+                          <span className="faint text-caption">
+                            · {fx ? `adds ${fx}` : ""}
+                            {fx && l.guidance ? "; " : ""}
+                            {l.guidance ? `guidance: ${l.guidance}` : ""}
+                          </span>
                         )}
-                        {usedDomains.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="faint">Domains:</span>
-                            {usedDomains.map((d) => (
-                              <button key={d} className="btn btn-sm" onClick={() => startWithDomain(d)} data-start-domain={d} title={`Open New run with the ${presetChip(d)} domain on`}>
-                                Start a run with {presetChip(d)}
-                              </button>
-                            ))}
-                            {fx && <span className="muted">this lesson adds {fx}</span>}
-                          </div>
-                        )}
-                        {l.guidance && <div className="muted">Guidance: {l.guidance}</div>}
                       </div>
                     )}
-                    <h3 className="text-[13px] font-semibold mt-5 mb-2">Learnings</h3>
-                    <ul className="flex flex-col gap-1.5 text-[12.5px] leading-relaxed list-disc pl-5">
-                      {l.learnings.map((x, i) => (
-                        <li key={i}>{x}</li>
-                      ))}
-                    </ul>
-                    <h3 className="text-[13px] font-semibold mt-5 mb-2">Harness implications</h3>
-                    <ImplicationsByKind lesson={l} />
+                    <section className="mt-4 rounded-lg border line p-3" aria-labelledby={`impl-${l.slug}`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 id={`impl-${l.slug}`} className="section-label m-0 flex-1">
+                          Implications · {(l.items ?? []).filter((i) => !i.implicit).length}
+                        </h3>
+                        {l.standing !== "unreviewed" && <span className="faint text-caption">pick any for a domain with Build a domain</span>}
+                      </div>
+                      <ImplicationsByKind lesson={l} />
+                    </section>
+                    <details className="mt-3 rounded-lg border line p-3">
+                      <summary className="cursor-pointer text-[12.5px] font-semibold">Learnings · {l.learnings.length}</summary>
+                      <ul className="flex flex-col gap-1.5 text-[12.5px] leading-relaxed list-disc pl-5 mt-2">
+                        {l.learnings.map((x, i) => (
+                          <li key={i}>{x}</li>
+                        ))}
+                      </ul>
+                    </details>
                     {audit && (
                       <details className="mt-4 rounded-lg border line p-3">
                         <summary className="cursor-pointer text-[12.5px]">
