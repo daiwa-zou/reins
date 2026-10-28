@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Layers, Play, Plus, X } from "lucide-react";
 import { presetChip, presetDomains } from "@shared/presets";
 import { useStore } from "../state/store";
-import { Badge, Empty } from "../components/ui";
+import { Badge, Empty, Modal } from "../components/ui";
 import { api, type LessonAudit, type LessonDerived } from "../lib/api";
 import { FOUNDATIONS } from "@shared/components";
 import { DeleteLesson, derivedLines, ImplicationsByKind, IntakeForm, IntakeJobs, IntakeNotice, StandingControl } from "../components/LessonImplications";
@@ -118,27 +118,23 @@ export function LessonsPanel() {
           </button>
         </div>
         {addOpen && (
-          <section className="card p-3 flex flex-col gap-2 text-small" aria-label="Add a lesson from a source" style={{ borderColor: "var(--accent)" }} data-add-lesson>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold flex-1">Add a lesson from a source</span>
-              <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} aria-label="Close" title="Close" onClick={() => setAddOpen(false)}>
-                <X size={13} aria-hidden />
-              </button>
+          <Modal title="Add a lesson from a source" onClose={() => setAddOpen(false)} width={640}>
+            <div className="flex flex-col gap-2 text-small" data-add-lesson>
+              <IntakeNotice />
+              <IntakeForm inline onStarted={() => setAddOpen(false)} />
+              <IntakeJobs />
+              <p className="faint text-caption leading-relaxed">
+                Or drop a markdown file in <code className="mono">{problems?.userDir ?? "$REINS_HOME/lessons"}</code> (start from{" "}
+                <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
+                  the template
+                </a>
+                ); it appears here without a restart.{" "}
+                <button type="button" className="underline" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
+                  Reload
+                </button>
+              </p>
             </div>
-            <IntakeNotice />
-            <IntakeForm inline />
-            <IntakeJobs />
-            <p className="faint text-caption leading-relaxed">
-              Or drop a markdown file in <code className="mono">{problems?.userDir ?? "$REINS_HOME/lessons"}</code> (start from{" "}
-              <a className="underline" href="/api/docs/lesson-template.md" target="_blank" rel="noreferrer">
-                the template
-              </a>
-              ); it appears here without a restart.{" "}
-              <button type="button" className="underline" onClick={() => void reload()} title="Re-read the library (the server also notices changed files on its own)">
-                Reload
-              </button>
-            </p>
-          </section>
+          </Modal>
         )}
         {showComponent && (
         <label className="flex flex-col gap-1 text-small">
@@ -211,7 +207,7 @@ export function LessonsPanel() {
                   </button>
                 </div>
               )}
-              {!addOpen && <IntakeJobs />}
+              <IntakeJobs />
               {audits.length > 0 && (
                 <p className="muted text-small" title="From docs/audit, written by an independent audit pass that re-read each post and looked for the matching code">
                   Independent audit of {audits.length} lessons: <span className="text-[var(--ok)] font-semibold">{totals.implemented}</span> implemented · <span className="text-[var(--warn)] font-semibold">{totals.partial}</span> partial ·{" "}

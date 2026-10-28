@@ -208,7 +208,7 @@ type SourceKind = "url" | "text" | "repo" | "mcp";
  * form says how it will read it. Explored sources (a repository, a server) ask
  * what to look for; the rest take it as an optional hint.
  */
-export function IntakeForm({ inline = false }: { inline?: boolean } = {}) {
+export function IntakeForm({ inline = false, onStarted }: { inline?: boolean; onStarted?: () => void } = {}) {
   const selectRun = useStore((s) => s.selectRun);
   const refreshIntake = useStore((s) => s.refreshIntake);
   const setLessonFilter = useStore((s) => s.setLessonFilter);
@@ -236,6 +236,7 @@ export function IntakeForm({ inline = false }: { inline?: boolean } = {}) {
       const body = detected.kind === "url" ? { url: detected.url } : detected.kind === "text" ? { text: detected.text } : detected.kind === "repo" ? { repo: detected.repo, ...(detected.ref ? { ref: detected.ref } : {}) } : { mcp: { name: detected.name } };
       const r = await api.startIntake({ ...body, ...(focus.trim() ? { focus: focus.trim() } : {}) });
       await refreshIntake();
+      onStarted?.();
       selectRun(r.id);
     } catch (e) {
       setErr((e as Error).message);
