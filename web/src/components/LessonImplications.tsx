@@ -255,7 +255,7 @@ export function IntakeForm({ inline = false }: { inline?: boolean } = {}) {
   };
   return (
     <details className={`${inline ? "" : "card p-3"} text-[12.5px]`} data-intake-form open={inline || undefined}>
-      <summary className="cursor-pointer font-semibold">Add a lesson from a source…</summary>
+      <summary className={inline ? "sr-only" : "cursor-pointer font-semibold"}>Add a lesson from a source…</summary>
       <p className="muted mt-1.5">
         A librarian distils the source into a lesson with typed implications, each quoting what it read. A web page or pasted text is read whole; a git repository or an MCP server is explored for what you ask it to look for. You review
         the draft before it lands in your library.
